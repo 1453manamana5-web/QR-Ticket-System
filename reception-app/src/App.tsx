@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
 import {countTickets,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
+import {downloadEventData} from "./eventDownloader";
 
 type Mode="entry"|"exit";
 type Screen="auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
@@ -152,7 +153,14 @@ export default function App(){
         event.ticketCount=tickets.length;
         await prepareLocalEventData(event,tickets);
       }else{
-        throw new Error("EVENT_DATA_NOT_READY");
+        const downloaded=await downloadEventData(authPayload,event.terminalId);
+        event.dataVersion=downloaded.localEvent.event.dataVersion;
+        event.eventStatus=downloaded.localEvent.event.eventStatus;
+        event.settings=downloaded.localEvent.settings;
+        event.authenticatedAt=downloaded.localEvent.authenticatedAt;
+        event.ticketCount=downloaded.localEvent.ticketCount;
+        await prepareLocalEventData(event,downloaded.tickets);
+        event.dataReady=true;
       }
       setLocalEvent(event);
       setScreen("ready");
