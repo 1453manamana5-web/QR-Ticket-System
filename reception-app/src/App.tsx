@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction} from "./localDb";
+import {countTickets,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 
 type Mode="entry"|"exit";
 type Screen="auth"|"confirm"|"preparing"|"ready"|"reception";
@@ -67,18 +67,33 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
-    void loadLocalEvent().then(saved=>{
-      if(!saved)return;
-      setLocalEvent(saved);
-      setAuthPayload({
-        type:"qr-ticket-event-auth",
-        eventId:saved.event.eventId,
-        eventName:saved.event.eventName,
-        dataVersion:saved.event.dataVersion,
-        authToken:"local"
-      });
-      setScreen(saved.dataReady?"ready":"preparing");
-    }).catch(()=>setError("ローカルデータを確認できませんでした。"));
+    void (async()=>{
+      try{
+        const saved=await loadLocalEvent();
+        if(!saved)return;
+
+        if(saved.dataReady){
+          const ticketCount=await countTickets(saved.event.eventId);
+          if(ticketCount!==saved.ticketCount){
+            await clearLocalEvent();
+            setError("端末に保存されたイベントデータが不完全です。もう一度イベントを準備してください。");
+            return;
+          }
+        }
+
+        setLocalEvent(saved);
+        setAuthPayload({
+          type:"qr-ticket-event-auth",
+          eventId:saved.event.eventId,
+          eventName:saved.event.eventName,
+          dataVersion:saved.event.dataVersion,
+          authToken:"local"
+        });
+        setScreen(saved.dataReady?"ready":"preparing");
+      }catch{
+        setError("ローカルデータを確認できませんでした。");
+      }
+    })();
   },[]);
 
   const handleAuthScan=useCallback((text:string)=>{
