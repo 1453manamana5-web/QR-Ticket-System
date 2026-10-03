@@ -1,6 +1,23 @@
 {
-  "name":"@qr-ticket-system/management-app","private":true,"version":"0.1.0","type":"module",
-  "scripts":{"dev":"vite","build":"tsc -b && vite build","typecheck":"tsc --noEmit"},
-  "dependencies":{"@qr-ticket-system/shared":"0.1.0","react":"^19.2.7","react-dom":"^19.2.7"},
-  "devDependencies":{"@types/react":"^19.2.2","@types/react-dom":"^19.2.2","@vitejs/plugin-react":"^5.0.4","typescript":"^5.9.3","vite":"^7.1.9"}
+  "name": "@qr-ticket-system/management-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@qr-ticket-system/shared": "0.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9"
+  }
 }
