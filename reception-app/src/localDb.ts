@@ -93,6 +93,7 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       const eventStore = transaction.objectStore(STORES.event);
       const ticketStore = transaction.objectStore(STORES.tickets);
 
+      eventStore.clear();
       ticketStore.clear();
       eventStore.put(event);
 
