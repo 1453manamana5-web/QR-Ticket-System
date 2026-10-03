@@ -1,0 +1,3 @@
+import type {Event} from "@qr-ticket-system/shared";
+const event:Event={eventId:"DEMO-2027",eventName:"○○文化祭 2027",eventStatus:"preparing",dataVersion:1};
+export default function App(){return <main><header><div><small>QR TICKET SYSTEM</small><h1>管理アプリ</h1></div><b>準備中</b></header><section><small>現在のイベント</small><h2>{event.eventName}</h2><p>イベントID: {event.eventId}</p></section><nav>{["ホーム","イベント管理","チケット管理","端末管理","スタッフ管理","分析","設定"].map(x=><button key={x}>{x}<span>›</span></button>)}</nav></main>}
