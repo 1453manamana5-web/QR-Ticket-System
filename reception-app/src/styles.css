@@ -2591,3 +2591,66 @@
 .entry-reception-page .secondary{display:inline-flex;justify-content:center;align-items:center;min-height:52px;padding:10px 24px;background:rgba(255,255,255,.82);color:#344054;border:1px solid rgba(255,255,255,.95)}
 .entry-reception-page .entry-result-panel{gap:8px}
 .entry-reception-page .entry-result-panel .primary,.entry-reception-page .entry-result-panel .secondary{margin-top:12px}
+
+/* Reception mode selector: both entry and exit are always visible in the upper-left area. */
+.entry-reception-mode-switch{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:14px;
+  flex-wrap:wrap;
+}
+.entry-reception-mode-switch button{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:56px;
+  padding:8px 18px;
+  border:1px solid rgba(255,255,255,.9);
+  border-radius:18px;
+  background:rgba(255,255,255,.72);
+  color:#344054;
+  box-shadow:0 8px 18px rgba(43,62,94,.08);
+  cursor:pointer;
+  font:inherit;
+  text-align:left;
+}
+.entry-reception-mode-switch button.is-active{
+  border-color:rgba(20,120,237,.35);
+  background:linear-gradient(135deg,#3597f5,#1478ed 54%,#0862cf);
+  color:#fff;
+  box-shadow:0 12px 24px rgba(20,120,237,.2);
+}
+.entry-reception-mode-switch button .entry-icon{
+  width:34px;
+  height:34px;
+  flex-shrink:0;
+}
+.entry-reception-mode-switch button span:last-child{
+  display:flex;
+  flex-direction:column;
+  line-height:1;
+}
+.entry-reception-mode-switch button small{
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.14em;
+  opacity:.72;
+}
+.entry-reception-mode-switch button strong{
+  margin-top:4px;
+  font-size:18px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.entry-reception-page .entry-reception-mode-switch + *{
+  margin-top:0;
+}
+@media (max-width:760px){
+  .entry-reception-mode-switch button{
+    min-height:48px;
+    padding:7px 13px;
+  }
+  .entry-reception-mode-switch button strong{font-size:15px}
+  .entry-reception-mode-switch button .entry-icon{width:28px;height:28px}
+}
