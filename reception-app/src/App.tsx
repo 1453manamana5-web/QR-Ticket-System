@@ -1,10 +1,10 @@
 import {useCallback, useEffect, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {getTicket,loadLocalEvent,replaceTickets,saveLocalEvent,saveReceptionTransaction} from "./localDb";
+import {getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction} from "./localDb";
 
 type Mode="entry"|"exit";
-type Screen="auth"|"confirm"|"preparing"|"reception";
+type Screen="auth"|"confirm"|"preparing"|"ready"|"reception";
 type Result={kind:"success"|"error";title:string;detail:string};
 
 const DEMO_EVENT:EventAuthPayload={
@@ -77,7 +77,7 @@ export default function App(){
         dataVersion:saved.event.dataVersion,
         authToken:"local"
       });
-      setScreen(saved.dataReady?"reception":"preparing");
+      setScreen(saved.dataReady?"ready":"preparing");
     }).catch(()=>setError("ローカルデータを確認できませんでした。"));
   },[]);
 
@@ -104,14 +104,10 @@ export default function App(){
         dataReady:false,
         ticketCount:0
       };
-      await replaceTickets(tickets);
-      event.dataReady=true;
-      event.ticketCount=tickets.length;
-      await saveLocalEvent(event);
-      setLocalEvent(event);
-      setScreen("reception");
+      await prepareLocalEventData(event,tickets);
+      setLocalEvent({...event,dataReady:true,ticketCount:tickets.length});
+      setScreen("ready");
       setResult(null);
-      setScannerKey(value=>value+1);
     }catch{
       setError("開発用イベントデータを端末に保存できませんでした。");
     }finally{setBusy(false);}
@@ -133,15 +129,15 @@ export default function App(){
     try{
       if(isDemo){
         const tickets=createDemoTickets(authPayload.eventId);
-        await replaceTickets(tickets);
+        await prepareLocalEventData(event,tickets);
         event.dataReady=true;
         event.ticketCount=tickets.length;
+      }else{
+        throw new Error("EVENT_DATA_NOT_READY");
       }
-      await saveLocalEvent(event);
       setLocalEvent(event);
-      setScreen(event.dataReady?"reception":"preparing");
+      setScreen("ready");
       setResult(null);
-      if(event.dataReady)setScannerKey(value=>value+1);
     }catch{
       setError("イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
@@ -232,15 +228,41 @@ export default function App(){
     <button className="secondary" disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
   </div></main>;
 
-  if(screen==="preparing")return <main className="auth-shell"><div className="auth-card">
-    <div className="spinner"/>
-    <small className="eyebrow">EVENT DATA</small>
-    <h1>{localEvent?.event.eventName??authPayload?.eventName}</h1>
-    <p>イベント認証情報を保存しました。管理アプリからチケットデータを取得すると受付を開始できます。</p>
-    <div className="status-row"><span>イベント認証</span><b>✓ 保存済み</b></div>
-    <div className="status-row"><span>チケットデータ</span><b>準備待ち</b></div>
-    {error&&<div className="error">{error}</div>}
-  </div></main>;
+  if(screen==="preparing")return <div className="entry-reception-page waiting">
+    <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
+    <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
+    <header className="entry-reception-header">
+      <div className="entry-header-main">
+        <h1>交通研究部QRコード管理システム</h1>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent?.event.eventName??authPayload?.eventName??"イベント未設定"}</strong></div></div>
+      </div>
+    </header>
+    <main className="entry-reception-main"><section className="entry-result-panel entry-processing-result">
+      <div className="entry-processing-spinner" aria-hidden="true"/>
+      <span className="entry-result-eyebrow">EVENT DATA</span><h2>イベントデータ準備中</h2>
+      <p className="entry-result-primary">管理アプリからチケットデータを取得すると受付を開始できます</p>
+      {error&&<p className="entry-result-secondary">{error}</p>}
+    </section></main>
+    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" onClick={()=>setScreen("auth")}><span className="entry-footer-button-icon">⌂</span><span>ホームへ戻る</span></button></footer>
+  </div>;
+
+  if(screen==="ready"&&localEvent?.dataReady)return <div className="entry-reception-page waiting">
+    <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
+    <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
+    <header className="entry-reception-header">
+      <div className="entry-header-main">
+        <h1>交通研究部QRコード管理システム</h1>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
+      </div>
+    </header>
+    <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
+      <div className="entry-result-icon">✓</div><span className="entry-result-eyebrow">RECEPTION READY</span>
+      <h2>受付準備完了</h2><p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
+      <p className="entry-result-secondary">この端末で受付を開始できます</p>
+      <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+    </section></main>
+    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" onClick={()=>setScreen("auth")}><span className="entry-footer-button-icon">⌂</span><span>ホームへ戻る</span></button></footer>
+  </div>;
 
   const entry=mode==="entry";
   const eventName=localEvent?.event.eventName??"イベント";
