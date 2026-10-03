@@ -348,6 +348,7 @@ export default function App(){
       </button>
     </footer>
   </div>;
+}
 
 function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:LocalEventData["settings"]):ReceptionType|null{
   if(mode==="entry"){
