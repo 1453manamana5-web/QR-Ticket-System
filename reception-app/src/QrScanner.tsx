@@ -1,9 +1,9 @@
 import {useEffect,useRef} from "react";
 import {Html5Qrcode} from "html5-qrcode";
 
-type Props={readerId:string;onResult:(text:string)=>void;onError?:(message:string)=>void};
+type Props={readerId:string;onResult:(text:string)=>void;onError?:(message:string)=>void;className?:string};
 
-export default function QrScanner({readerId,onResult,onError}:Props){
+export default function QrScanner({readerId,onResult,onError,className}:Props){
   const onResultRef=useRef(onResult);
   const onErrorRef=useRef(onError);
 
@@ -42,5 +42,5 @@ export default function QrScanner({readerId,onResult,onError}:Props){
     };
   },[readerId]);
 
-  return <div id={readerId} className="qr-reader" aria-label="QRコード読み取りエリア"/>;
+  return <div id={readerId} className={className??"qr-reader"} aria-label="QRコード読み取りエリア"/>;
 }
