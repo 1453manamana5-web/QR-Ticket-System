@@ -249,81 +249,110 @@ export default function App(){
 
   const entry=mode==="entry";
   const eventName=localEvent?.event.eventName??"イベント";
-  const modeLabel=entry?"入口受付":"出口受付";
+  const receptionClass=result?.kind==="success"?"ticket-success":result?.kind==="error"?"error":"waiting";
 
-  return <main className="reception-shell">
-    <header className="topbar">
-      <div className="brand-block">
+  const backHome=()=>{
+    setResult(null);
+    setScreen("auth");
+  };
+
+  return <div className={`entry-reception-page ${entry?receptionClass:receptionClass}`}>
+    <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
+    <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
+
+    <header className="entry-reception-header">
+      <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="event-meta">
-          <span className={"online-dot "+(online?"is-online":"is-offline")}/>
-          <span className="online-label">{online?"オンライン":"オフライン"}</span>
-          <span className="meta-divider"/>
-          <span className="meta-label">EVENT</span>
-          <strong>{eventName}</strong>
+        <div className="entry-header-meta">
+          <span className="connection-status">
+            <span className={`online-dot ${online?"is-online":"is-offline"}`}/> {online?"オンライン":"オフライン"}
+          </span>
+          <span className="entry-header-meta-divider" aria-hidden="true"/>
+          <div className="entry-current-event">
+            <span className="entry-current-event-label">EVENT</span>
+            <strong>{eventName}</strong>
+          </div>
         </div>
       </div>
 
-      <button className={"mode-switch mode-"+mode} onClick={switchMode} aria-label={modeLabel+"に切り替え"}>
-        <EntryIcon exit={!entry}/>
-        <span>
+      <button type="button" className="entry-reception-mode" onClick={switchMode} aria-label={entry?"出口受付に切り替え":"入口受付に切り替え"}>
+        <span className="entry-reception-mode-icon">
+          <EntryIcon exit={!entry}/>
+        </span>
+        <span className="entry-reception-mode-copy">
           <small>{entry?"ENTRY":"EXIT"}</small>
-          <b>{modeLabel}</b>
+          <strong>{entry?"入口受付":"出口受付"}</strong>
         </span>
       </button>
     </header>
 
-    <section className="scanner-card">
-      <div className="scanner-card-header">
-        <div className="scanner-title">
-          <div className="scanner-icon"><QrIcon size={30}/></div>
-          <div>
-            <small>QR SCANNER</small>
-            <h2>QRコード読み取り</h2>
+    <main className="entry-reception-main">
+      {!result && (
+        <section className="entry-waiting-panel">
+          <div className="entry-scanner-card">
+            <div className="entry-scanner-card-header">
+              <div className="entry-scanner-heading">
+                <span className="entry-scanner-heading-icon"><QrIcon size={30}/></span>
+                <span className="entry-scanner-heading-copy">
+                  <small>QR SCANNER</small>
+                  <strong>QRコード読み取り</strong>
+                </span>
+              </div>
+              <div className="entry-scanner-ready">
+                <span className="entry-scanner-ready-dot" aria-hidden="true"/>
+                読み取り待機中
+              </div>
+            </div>
+            <div className="entry-scanner-wrapper">
+              <div className="camera-qr-scanner">
+                <QrScanner
+                  key={scannerKey}
+                  readerId="ticket-reader"
+                  onResult={handleTicketScan}
+                  onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="scan-status"><span/>読み取り待機中</div>
-      </div>
 
-      <div className="scanner-frame">
-        <QrScanner
-          key={scannerKey}
-          readerId="ticket-reader"
-          onResult={handleTicketScan}
-          onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}
-        />
-        <div className="scan-guide" aria-hidden="true">
-          <i className="corner top-left"/>
-          <i className="corner top-right"/>
-          <i className="corner bottom-left"/>
-          <i className="corner bottom-right"/>
-          <div className="scan-line"/>
-        </div>
-      </div>
+          <div className="entry-scan-instruction">
+            <span className="entry-scan-instruction-number">1</span>
+            <span className="entry-scan-instruction-copy">
+              <strong>QRコードをカメラに向けてください</strong>
+              <small>読み取り枠に入ると自動で受付します</small>
+            </span>
+          </div>
+        </section>
+      )}
 
-      <div className="instruction">
-        <div className="step-number">1</div>
-        <div>
-          <strong>QRコードをカメラに向けてください</strong>
-          <span>読み取り枠に入ると自動で受付します</span>
-        </div>
-      </div>
+      {result && (
+        <section className={`entry-result-panel ${result.kind==="success"?"entry-ticket-result":"entry-error-result"}`}>
+          <div className="entry-result-icon">{result.kind==="success"?"✓":"×"}</div>
+          <span className="entry-result-eyebrow">{result.kind==="success"?"ENTRY ACCEPTED":"RECEPTION ERROR"}</span>
+          <h2>{result.kind==="success"?"受付完了":"受付失敗"}</h2>
+          <p className="entry-result-primary">{result.title}</p>
+          <p className="entry-result-number">{result.detail}</p>
+          {result.kind==="success" && <p className="entry-result-secondary">{entry?"入場を確認しました":"退場を確認しました"}</p>}
+          {result.kind==="error" && <p className="entry-result-secondary">もう一度読み取ってください</p>}
+        </section>
+      )}
+    </main>
 
-      {result&&<div className={"result-card "+result.kind}><strong>{result.title}</strong><span>{result.detail}</span></div>}
-    </section>
-
-    <footer className="bottom-actions">
-      <button className="home-button" onClick={backHome}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
-        ホームへ戻る
+    <footer className="entry-reception-footer">
+      <button type="button" className="entry-home-button" onClick={backHome}>
+        <span className="entry-footer-button-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        </span>
+        <span>ホームへ戻る</span>
       </button>
-      <button className="management-button" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.4 7 10 4.1-1.6 7-5.3 7-10V6z"/><path d="M9 11.5a3 3 0 1 1 6 0M8 17c.8-1.7 2.1-2.5 4-2.5s3.2.8 4 2.5"/></svg>
-        管理モード
+      <button type="button" className="entry-admin-button">
+        <span className="entry-footer-button-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.4 7 10 4.1-1.6 7-5.3 7-10V6z"/><path d="M9 11.5a3 3 0 1 1 6 0M8 17c.8-1.7 2.1-2.5 4-2.5s3.2.8 4 2.5"/></svg>
+        </span>
+        <span>管理モード</span>
       </button>
     </footer>
-  </main>;
-}
+  </div>;
 
 function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:LocalEventData["settings"]):ReceptionType|null{
   if(mode==="entry"){
