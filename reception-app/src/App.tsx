@@ -335,12 +335,43 @@ export default function App(){
         <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
       </div>
     </header>
-    <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
-      <div className="entry-result-icon">✓</div><span className="entry-result-eyebrow">RECEPTION READY</span>
-      <h2>受付準備完了</h2><p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
-      <p className="entry-result-secondary">この端末で受付を開始できます</p>
-      <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
-    </section></main>
+    <main className="entry-reception-main">
+      <section className="entry-waiting-panel">
+        <div className="entry-scanner-card">
+          <div className="entry-scanner-card-header">
+            <div className="entry-scanner-heading">
+              <span className="entry-scanner-heading-icon"><QrIcon size={30}/></span>
+              <span className="entry-scanner-heading-copy">
+                <small>RECEPTION READY</small>
+                <strong>受付を開始</strong>
+              </span>
+            </div>
+            <div className="entry-scanner-ready">
+              <span className="entry-scanner-ready-dot" aria-hidden="true"/>
+              準備完了
+            </div>
+          </div>
+          <div className="entry-scanner-wrapper">
+            <div className="camera-qr-scanner reception-start-panel">
+              <div className="reception-start-content">
+                <div className="entry-result-icon">✓</div>
+                <h2>受付準備完了</h2>
+                <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
+                <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
+                <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="entry-scan-instruction">
+          <span className="entry-scan-instruction-number">1</span>
+          <span className="entry-scan-instruction-copy">
+            <strong>「受付を開始する」を押して受付を開始してください</strong>
+            <small>開始後、自動的にQRコード読み取り画面へ切り替わります</small>
+          </span>
+        </div>
+      </section>
+    </main>
   </div>;
 
   const entry=mode==="entry";
