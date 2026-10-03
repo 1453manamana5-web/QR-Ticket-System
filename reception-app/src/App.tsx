@@ -104,8 +104,10 @@ export default function App(){
         dataReady:false,
         ticketCount:0
       };
+      event.dataReady=true;
+      event.ticketCount=tickets.length;
       await prepareLocalEventData(event,tickets);
-      setLocalEvent({...event,dataReady:true,ticketCount:tickets.length});
+      setLocalEvent(event);
       setScreen("ready");
       setResult(null);
     }catch{
@@ -129,9 +131,9 @@ export default function App(){
     try{
       if(isDemo){
         const tickets=createDemoTickets(authPayload.eventId);
-        await prepareLocalEventData(event,tickets);
         event.dataReady=true;
         event.ticketCount=tickets.length;
+        await prepareLocalEventData(event,tickets);
       }else{
         throw new Error("EVENT_DATA_NOT_READY");
       }
