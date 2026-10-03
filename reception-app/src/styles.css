@@ -998,7 +998,1583 @@
       17px,
       2vw,
       24px
-/* New reception scanner bridge */
+    );
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.84
+    );
+
+  box-shadow:
+    0 10px 26px
+    rgba(
+      48,
+      65,
+      94,
+      0.08
+    );
+}
+
+.entry-scan-instruction-number {
+  display: grid;
+
+  width:
+    clamp(
+      38px,
+      3.8vw,
+      49px
+    );
+
+  height:
+    clamp(
+      38px,
+      3.8vw,
+      49px
+    );
+
+  flex-shrink: 0;
+
+  place-items: center;
+
+  border-radius: 50%;
+
+  background:
+    linear-gradient(
+      145deg,
+      #3093f4,
+      #1478ed
+    );
+
+  color: #ffffff;
+
+  font-size:
+    clamp(
+      18px,
+      1.8vw,
+      25px
+    );
+
+  font-weight: 850;
+
+  box-shadow:
+    0 7px 15px
+    rgba(
+      20,
+      120,
+      237,
+      0.24
+    );
+}
+
+.entry-scan-instruction-copy {
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+}
+
+.entry-scan-instruction-copy strong {
+  color: #182034;
+
+  font-size:
+    clamp(
+      18px,
+      2vw,
+      29px
+    );
+
+  font-weight: 800;
+
+  line-height: 1.15;
+
+  letter-spacing: -0.025em;
+}
+
+.entry-scan-instruction-copy small {
+  margin-top: 3px;
+
+  color: #707b8f;
+
+  font-size:
+    clamp(
+      13px,
+      1.3vw,
+      18px
+    );
+
+  font-weight: 600;
+}
+
+/*
+  結果画面
+*/
+.entry-result-panel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+
+  width:
+    min(
+      100%,
+      850px
+    );
+
+  min-height: 0;
+
+  align-self: center;
+
+  padding:
+    clamp(
+      25px,
+      4vh,
+      48px
+    )
+    clamp(
+      28px,
+      4vw,
+      55px
+    );
+
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.55
+    );
+
+  border-radius:
+    clamp(
+      28px,
+      3.5vw,
+      46px
+    );
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.82
+    );
+
+  box-shadow:
+    0 24px 60px
+    rgba(
+      36,
+      49,
+      70,
+      0.18
+    );
+
+  text-align: center;
+
+  backdrop-filter:
+    blur(20px);
+
+  -webkit-backdrop-filter:
+    blur(20px);
+}
+
+.entry-result-icon {
+  display: grid;
+
+  width:
+    clamp(
+      92px,
+      10vw,
+      145px
+    );
+
+  height:
+    clamp(
+      92px,
+      10vw,
+      145px
+    );
+
+  place-items: center;
+
+  border-radius: 50%;
+
+  color: #ffffff;
+
+  font-size:
+    clamp(
+      58px,
+      6.5vw,
+      93px
+    );
+
+  font-weight: 800;
+
+  line-height: 1;
+
+  box-shadow:
+    0 18px 38px
+    rgba(
+      27,
+      45,
+      62,
+      0.2
+    );
+}
+
+.entry-ticket-result
+  .entry-result-icon {
+  background:
+    linear-gradient(
+      145deg,
+      #35ca62,
+      #149e43
+    );
+}
+
+.entry-member-result
+  .entry-result-icon {
+  background:
+    linear-gradient(
+      145deg,
+      #ac84f8,
+      #7c50db
+    );
+}
+
+.entry-error-result
+  .entry-result-icon {
+  background:
+    linear-gradient(
+      145deg,
+      #f25555,
+      #cf2929
+    );
+}
+
+.entry-result-eyebrow {
+  margin-top:
+    clamp(
+      15px,
+      2vh,
+      22px
+    );
+
+  color: #707b8f;
+
+  font-size:
+    clamp(
+      11px,
+      1.1vw,
+      15px
+    );
+
+  font-weight: 850;
+
+  letter-spacing: 0.17em;
+}
+
+.entry-result-panel h2 {
+  margin:
+    clamp(
+      7px,
+      1vh,
+      12px
+    )
+    0
+    0;
+
+  color: #111827;
+
+  font-size:
+    clamp(
+      46px,
+      6vw,
+      82px
+    );
+
+  font-weight: 850;
+
+  line-height: 1.02;
+
+  letter-spacing: -0.055em;
+}
+
+.entry-member-result h2 {
+  font-size:
+    clamp(
+      39px,
+      5.2vw,
+      72px
+    );
+}
+
+.entry-result-primary {
+  margin:
+    clamp(
+      13px,
+      2vh,
+      21px
+    )
+    0
+    0;
+
+  color: #139044;
+
+  font-size:
+    clamp(
+      37px,
+      5vw,
+      70px
+    );
+
+  font-weight: 850;
+
+  line-height: 1.06;
+
+  letter-spacing: -0.04em;
+}
+
+.entry-member-result
+  .entry-result-primary {
+  color: #7545cf;
+}
+
+.entry-error-result
+  .entry-result-primary {
+  color: #c92929;
+
+  font-size:
+    clamp(
+      26px,
+      3.6vw,
+      50px
+    );
+}
+
+.entry-processing-result
+  .entry-result-primary {
+  color:
+    var(
+      --entry-blue
+    );
+
+  font-size:
+    clamp(
+      28px,
+      3.7vw,
+      51px
+    );
+}
+
+.entry-member-action {
+  font-size:
+    clamp(
+      42px,
+      5.8vw,
+      78px
+    );
+}
+
+.entry-result-number {
+  margin:
+    clamp(
+      13px,
+      1.8vh,
+      20px
+    )
+    0
+    0;
+
+  padding:
+    7px
+    14px;
+
+  border-radius: 999px;
+
+  background:
+    rgba(
+      17,
+      24,
+      39,
+      0.06
+    );
+
+  color: #5f6a7d;
+
+  font-size:
+    clamp(
+      15px,
+      1.6vw,
+      22px
+    );
+
+  font-weight: 750;
+}
+
+.entry-result-secondary {
+  margin:
+    clamp(
+      9px,
+      1.2vh,
+      14px
+    )
+    0
+    0;
+
+  color: #687386;
+
+  font-size:
+    clamp(
+      16px,
+      1.8vw,
+      25px
+    );
+
+  font-weight: 650;
+}
+
+/*
+  処理中
+*/
+.entry-processing-spinner {
+  width:
+    clamp(
+      84px,
+      9vw,
+      125px
+    );
+
+  height:
+    clamp(
+      84px,
+      9vw,
+      125px
+    );
+
+  border:
+    clamp(
+      8px,
+      0.9vw,
+      12px
+    )
+    solid
+    rgba(
+      20,
+      120,
+      237,
+      0.14
+    );
+
+  border-top-color:
+    var(
+      --entry-blue
+    );
+
+  border-radius: 50%;
+
+  animation:
+    entry-spinner-rotation
+    0.85s
+    linear
+    infinite;
+}
+
+@keyframes entry-spinner-rotation {
+  to {
+    transform:
+      rotate(
+        360deg
+      );
+  }
+}
+
+/*
+  フッター
+*/
+.entry-reception-footer {
+  position: relative;
+  z-index: 2;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  flex-shrink: 0;
+
+  gap:
+    clamp(
+      14px,
+      2vw,
+      22px
+    );
+
+  margin-top:
+    clamp(
+      11px,
+      1.7vh,
+      18px
+    );
+}
+
+.entry-reception-footer button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+
+  min-width:
+    clamp(
+      190px,
+      22vw,
+      285px
+    );
+
+  min-height:
+    clamp(
+      52px,
+      7vh,
+      66px
+    );
+
+  gap:
+    clamp(
+      8px,
+      1vw,
+      12px
+    );
+
+  padding:
+    8px
+    clamp(
+      18px,
+      2.3vw,
+      28px
+    );
+
+  border: none;
+
+  border-radius:
+    clamp(
+      16px,
+      1.8vw,
+      22px
+    );
+
+  font-size:
+    clamp(
+      17px,
+      1.9vw,
+      26px
+    );
+
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+
+.entry-reception-footer
+  button:active:not(:disabled) {
+  transform:
+    scale(
+      0.98
+    );
+}
+
+.entry-reception-footer
+  button:disabled {
+  cursor: not-allowed;
+
+  opacity: 0.55;
+}
+
+.entry-footer-button-icon {
+  display: grid;
+
+  width:
+    clamp(
+      27px,
+      2.8vw,
+      37px
+    );
+
+  height:
+    clamp(
+      27px,
+      2.8vw,
+      37px
+    );
+
+  flex-shrink: 0;
+
+  place-items: center;
+}
+
+.entry-footer-button-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.entry-home-button {
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.9
+    ) !important;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.8
+    );
+
+  box-shadow:
+    0 10px 25px
+    rgba(
+      43,
+      58,
+      84,
+      0.1
+    );
+
+  color: #344054;
+}
+
+.entry-admin-button {
+  background:
+    linear-gradient(
+      135deg,
+      #a667f2,
+      #8146e3
+    );
+
+  box-shadow:
+    0 12px 27px
+    rgba(
+      119,
+      66,
+      202,
+      0.27
+    );
+
+  color: #ffffff;
+}
+
+.ticket-success
+  .entry-home-button,
+.member-success
+  .entry-home-button,
+.error
+  .entry-home-button {
+  border-color:
+    rgba(
+      255,
+      255,
+      255,
+      0.45
+    ) !important;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.76
+    );
+}
+
+/*
+  フォーカス
+*/
+.entry-reception-footer
+  button:focus-visible {
+  outline:
+    5px solid
+    rgba(
+      17,
+      24,
+      39,
+      0.23
+    );
+
+  outline-offset: 4px;
+}
+
+/*
+  iPad横画面
+*/
+@media (
+  orientation: landscape
+) and (
+  max-height: 850px
+) {
+  .entry-reception-page {
+    min-height: 100dvh;
+
+    padding:
+      18px
+      clamp(
+        22px,
+        3.5vw,
+        38px
+      )
+      max(
+        16px,
+        env(
+          safe-area-inset-bottom
+        )
+      );
+  }
+
+  .entry-reception-header h1 {
+    font-size:
+      clamp(
+        29px,
+        3.25vw,
+        40px
+      );
+  }
+
+  .entry-header-meta {
+    margin-top: 8px;
+  }
+
+  .entry-reception-mode {
+    width:
+      clamp(
+        195px,
+        23vw,
+        250px
+      );
+
+    min-height: 66px;
+
+    padding:
+      9px
+      16px;
+
+    border-radius: 20px;
+  }
+
+  .entry-reception-mode-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .entry-reception-mode-copy strong {
+    font-size:
+      clamp(
+        21px,
+        2.4vw,
+        28px
+      );
+  }
+
+  .entry-reception-main {
+    margin-top: 13px;
+  }
+
+  .entry-waiting-panel {
+    gap: 10px;
+  }
+
+  .entry-scanner-card {
+    border-radius: 23px;
+  }
+
+  .entry-scanner-card-header {
+    min-height: 57px;
+
+    padding:
+      7px
+      18px;
+  }
+
+  .entry-scanner-heading-icon {
+    width: 39px;
+    height: 39px;
+
+    border-radius: 12px;
+  }
+
+  .entry-scanner-heading-copy strong {
+    font-size:
+      clamp(
+        17px,
+        1.9vw,
+        22px
+      );
+  }
+
+  .entry-scanner-ready {
+    padding:
+      6px
+      11px;
+
+    font-size:
+      clamp(
+        12px,
+        1.25vw,
+        15px
+      );
+  }
+
+  .entry-scanner-wrapper {
+    padding: 9px;
+  }
+
+  .entry-scan-instruction {
+    padding:
+      8px
+      16px;
+
+    border-radius: 17px;
+  }
+
+  .entry-scan-instruction-number {
+    width: 37px;
+    height: 37px;
+  }
+
+  .entry-scan-instruction-copy strong {
+    font-size:
+      clamp(
+        17px,
+        2vw,
+        23px
+      );
+  }
+
+  .entry-reception-footer {
+    margin-top: 10px;
+  }
+
+  .entry-reception-footer button {
+    min-width:
+      clamp(
+        180px,
+        22vw,
+        235px
+      );
+
+    min-height: 49px;
+
+    padding:
+      6px
+      17px;
+
+    border-radius: 16px;
+
+    font-size:
+      clamp(
+        16px,
+        1.9vw,
+        22px
+      );
+  }
+
+  .entry-footer-button-icon {
+    width: 27px;
+    height: 27px;
+  }
+
+  .entry-result-panel {
+    width:
+      min(
+        100%,
+        760px
+      );
+
+    padding:
+      22px
+      34px;
+
+    border-radius: 30px;
+  }
+
+  .entry-result-icon {
+    width:
+      clamp(
+        78px,
+        9vw,
+        105px
+      );
+
+    height:
+      clamp(
+        78px,
+        9vw,
+        105px
+      );
+
+    font-size:
+      clamp(
+        50px,
+        6vw,
+        70px
+      );
+  }
+
+  .entry-result-panel h2 {
+    font-size:
+      clamp(
+        40px,
+        5.5vw,
+        65px
+      );
+  }
+
+  .entry-result-primary {
+    font-size:
+      clamp(
+        32px,
+        4.5vw,
+        55px
+      );
+  }
+}
+
+/*
+  縦画面
+*/
+@media (
+  orientation: portrait
+) {
+  .entry-reception-page {
+    height: auto;
+    min-height: 100dvh;
+
+    overflow: auto;
+  }
+
+  .entry-reception-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .entry-reception-header h1 {
+    white-space: normal;
+  }
+
+  .entry-reception-mode {
+    width: 100%;
+  }
+
+  .entry-header-meta {
+    flex-wrap: wrap;
+  }
+
+  .entry-reception-main {
+    min-height: 650px;
+  }
+
+  .entry-scanner-wrapper
+    .camera-qr-scanner {
+    width:
+      min(
+        100%,
+        720px
+      );
+
+    height: auto;
+
+    aspect-ratio: 4 / 3;
+  }
+
+  .entry-reception-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .entry-reception-footer button {
+    width: 100%;
+  }
+}
+
+/*
+  狭い画面
+*/
+@media (
+  max-width: 680px
+) {
+  .entry-current-event {
+    width: 100%;
+  }
+
+  .entry-header-meta-divider {
+    display: none;
+  }
+
+  .entry-scanner-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .entry-scanner-ready {
+    align-self: flex-start;
+  }
+
+  .entry-scan-instruction-copy strong {
+    line-height: 1.25;
+  }
+}
+
+/*
+  動きを減らす設定
+*/
+@media (
+  prefers-reduced-motion:
+    reduce
+) {
+  .entry-reception-page,
+  .entry-reception-footer button {
+    transition: none;
+  }
+
+  .entry-processing-spinner {
+    animation-duration:
+      1.8s;
+  }
+}
+
+/*
+  音声有効化・受付開始画面
+  EntryPage.cssの一番下に追加
+*/
+.entry-sound-start-panel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+
+  width:
+    min(
+      100%,
+      820px
+    );
+
+  max-height: 100%;
+  min-height: 0;
+
+  align-self: center;
+
+  overflow: auto;
+
+  padding:
+    clamp(
+      26px,
+      4.2vh,
+      50px
+    )
+    clamp(
+      28px,
+      4.5vw,
+      58px
+    );
+
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.92
+    );
+
+  border-radius:
+    clamp(
+      28px,
+      3.6vw,
+      46px
+    );
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.88
+    );
+
+  box-shadow:
+    0 24px 60px
+    rgba(
+      43,
+      62,
+      94,
+      0.16
+    );
+
+  text-align: center;
+
+  backdrop-filter:
+    blur(20px);
+
+  -webkit-backdrop-filter:
+    blur(20px);
+}
+
+.entry-sound-start-icon {
+  display: grid;
+
+  width:
+    clamp(
+      78px,
+      8vw,
+      118px
+    );
+
+  height:
+    clamp(
+      78px,
+      8vw,
+      118px
+    );
+
+  flex-shrink: 0;
+
+  place-items: center;
+
+  border-radius: 50%;
+
+  background:
+    linear-gradient(
+      145deg,
+      #3597f5,
+      #1478ed 55%,
+      #0862cf
+    );
+
+  color: #ffffff;
+
+  box-shadow:
+    0 18px 36px
+    rgba(
+      20,
+      120,
+      237,
+      0.3
+    );
+}
+
+.entry-sound-start-icon svg {
+  width: 56%;
+  height: 56%;
+}
+
+.entry-sound-start-eyebrow {
+  margin-top:
+    clamp(
+      14px,
+      2vh,
+      22px
+    );
+
+  color: #667085;
+
+  font-size:
+    clamp(
+      11px,
+      1.1vw,
+      15px
+    );
+
+  font-weight: 850;
+
+  letter-spacing: 0.18em;
+}
+
+.entry-sound-start-panel h2 {
+  margin:
+    clamp(
+      7px,
+      1vh,
+      12px
+    )
+    0
+    0;
+
+  color: #111827;
+
+  font-size:
+    clamp(
+      36px,
+      4.7vw,
+      64px
+    );
+
+  font-weight: 850;
+
+  line-height: 1.08;
+
+  letter-spacing: -0.05em;
+}
+
+.entry-sound-start-description {
+  margin:
+    clamp(
+      13px,
+      2vh,
+      21px
+    )
+    0
+    0;
+
+  color: #586579;
+
+  font-size:
+    clamp(
+      16px,
+      1.8vw,
+      24px
+    );
+
+  font-weight: 650;
+
+  line-height: 1.55;
+}
+
+.entry-sound-start-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+
+  width:
+    min(
+      100%,
+      560px
+    );
+
+  min-height:
+    clamp(
+      64px,
+      8vh,
+      84px
+    );
+
+  gap:
+    clamp(
+      10px,
+      1.5vw,
+      16px
+    );
+
+  margin-top:
+    clamp(
+      20px,
+      3vh,
+      32px
+    );
+
+  padding:
+    12px
+    clamp(
+      20px,
+      3vw,
+      38px
+    );
+
+  border: 0;
+
+  border-radius:
+    clamp(
+      18px,
+      2.2vw,
+      27px
+    );
+
+  background:
+    linear-gradient(
+      135deg,
+      #3597f5 0%,
+      #1478ed 54%,
+      #0862cf 100%
+    );
+
+  color: #ffffff;
+
+  font: inherit;
+
+  font-size:
+    clamp(
+      18px,
+      2.1vw,
+      28px
+    );
+
+  font-weight: 820;
+
+  line-height: 1.2;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 16px 30px
+    rgba(
+      20,
+      120,
+      237,
+      0.28
+    ),
+    inset 0 1px 0
+    rgba(
+      255,
+      255,
+      255,
+      0.28
+    );
+
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+
+.entry-sound-start-button:hover:not(:disabled) {
+  transform:
+    translateY(-2px);
+
+  box-shadow:
+    0 20px 36px
+    rgba(
+      20,
+      120,
+      237,
+      0.34
+    ),
+    inset 0 1px 0
+    rgba(
+      255,
+      255,
+      255,
+      0.3
+    );
+}
+
+.entry-sound-start-button:active:not(:disabled) {
+  transform:
+    translateY(1px)
+    scale(0.99);
+}
+
+.entry-sound-start-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.entry-sound-start-button:focus-visible {
+  outline:
+    5px solid
+    rgba(
+      20,
+      120,
+      237,
+      0.24
+    );
+
+  outline-offset: 5px;
+}
+
+.entry-sound-start-button-icon {
+  display: grid;
+
+  width:
+    clamp(
+      28px,
+      3vw,
+      40px
+    );
+
+  height:
+    clamp(
+      28px,
+      3vw,
+      40px
+    );
+
+  flex-shrink: 0;
+
+  place-items: center;
+}
+
+.entry-sound-start-button-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.entry-sound-start-note {
+  margin:
+    clamp(
+      12px,
+      1.8vh,
+      18px
+    )
+    0
+    0;
+
+  color: #7b879a;
+
+  font-size:
+    clamp(
+      13px,
+      1.3vw,
+      18px
+    );
+
+  font-weight: 650;
+}
+
+.entry-sound-start-error {
+  width: 100%;
+
+  margin:
+    clamp(
+      12px,
+      1.8vh,
+      18px
+    )
+    0
+    0;
+
+  padding:
+    11px
+    16px;
+
+  border:
+    1px solid
+    rgba(
+      215,
+      47,
+      47,
+      0.18
+    );
+
+  border-radius: 15px;
+
+  background:
+    rgba(
+      232,
+      62,
+      62,
+      0.08
+    );
+
+  color: #c92d2d;
+
+  font-size:
+    clamp(
+      13px,
+      1.35vw,
+      18px
+    );
+
+  font-weight: 750;
+
+  line-height: 1.45;
+}
+
+@media (
+  orientation: landscape
+) and (
+  max-height: 850px
+) {
+  .entry-sound-start-panel {
+    width:
+      min(
+        100%,
+        760px
+      );
+
+    padding:
+      20px
+      32px;
+
+    border-radius: 30px;
+  }
+
+  .entry-sound-start-icon {
+    width: 68px;
+    height: 68px;
+  }
+
+  .entry-sound-start-eyebrow {
+    margin-top: 10px;
+  }
+
+  .entry-sound-start-panel h2 {
+    margin-top: 5px;
+
+    font-size:
+      clamp(
+        32px,
+        4.2vw,
+        49px
+      );
+  }
+
+  .entry-sound-start-description {
+    margin-top: 9px;
+
+    font-size:
+      clamp(
+        15px,
+        1.65vw,
+        20px
+      );
+  }
+
+  .entry-sound-start-button {
+    min-height: 58px;
+
+    margin-top: 16px;
+
+    border-radius: 19px;
+
+    font-size:
+      clamp(
+        17px,
+        1.9vw,
+        23px
+      );
+  }
+
+  .entry-sound-start-note {
+    margin-top: 10px;
+  }
+}
+
+@media (
+  orientation: portrait
+) {
+  .entry-sound-start-panel {
+    width: 100%;
+
+    margin:
+      clamp(
+        12px,
+        3vh,
+        30px
+      )
+      0;
+  }
+
+  .entry-sound-start-description {
+    max-width: 34em;
+  }
+}
+/* New app bridge: keep the legacy reception visual design while using the new scanner. */
 .entry-scanner-wrapper .camera-qr-scanner{width:min(100%,1080px);height:100%;max-height:100%;overflow:hidden;border:3px solid rgba(255,255,255,.9);border-radius:clamp(18px,2.2vw,28px);background:#0a101c;box-shadow:0 12px 30px rgba(23,38,62,.22)}
 .entry-scanner-wrapper .camera-qr-scanner .qr-reader{width:100%!important;height:100%!important}
 .entry-scanner-wrapper .camera-qr-scanner .qr-reader>div{width:100%!important;height:100%!important}
@@ -1007,3 +2583,11 @@
 .entry-reception-page .connection-status{display:flex;align-items:center;gap:8px;white-space:nowrap}
 .entry-reception-page .online-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#20ad5a;box-shadow:0 0 0 4px rgba(32,173,90,.1)}
 .entry-reception-page .online-dot.is-offline{background:#e5a322;box-shadow:0 0 0 4px rgba(229,163,34,.1)}
+.entry-auth-error{padding:12px 18px;border-radius:16px;background:rgba(232,62,62,.08);border:1px solid rgba(215,47,47,.18);color:#c92d2d;font-size:16px;font-weight:750}
+.entry-auth-dev-button,.entry-reception-page .primary,.entry-reception-page .secondary{font:inherit;font-weight:800;border:0;border-radius:18px;cursor:pointer}
+.entry-auth-dev-button{justify-self:center;min-height:58px;padding:10px 24px;background:linear-gradient(135deg,#3597f5,#1478ed 54%,#0862cf);color:#fff;box-shadow:0 14px 28px rgba(20,120,237,.24)}
+.entry-auth-dev-button:disabled,.entry-reception-page button:disabled{cursor:wait;opacity:.6}
+.entry-reception-page .primary{display:inline-flex;justify-content:center;align-items:center;min-height:58px;padding:10px 28px;background:linear-gradient(135deg,#3597f5,#1478ed 54%,#0862cf);color:#fff;box-shadow:0 14px 28px rgba(20,120,237,.24)}
+.entry-reception-page .secondary{display:inline-flex;justify-content:center;align-items:center;min-height:52px;padding:10px 24px;background:rgba(255,255,255,.82);color:#344054;border:1px solid rgba(255,255,255,.95)}
+.entry-reception-page .entry-result-panel{gap:8px}
+.entry-reception-page .entry-result-panel .primary,.entry-reception-page .entry-result-panel .secondary{margin-top:12px}
