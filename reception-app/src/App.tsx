@@ -53,6 +53,29 @@ export default function App(){
     setError("");setAuthPayload(payload);setScreen("confirm");
   },[]);
 
+  const startDemoEvent=async()=>{
+    if(busy)return;
+    setAuthPayload(DEMO_EVENT);
+    setError("");
+    setBusy(true);
+    try{
+      const tickets=createDemoTickets(DEMO_EVENT.eventId);
+      const event:LocalEventData={
+        event:{eventId:DEMO_EVENT.eventId,eventName:DEMO_EVENT.eventName,eventStatus:"ready",dataVersion:DEMO_EVENT.dataVersion},
+        settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},
+        terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:0
+      };
+      await replaceTickets(tickets);
+      event.dataReady=true;
+      event.ticketCount=tickets.length;
+      await saveLocalEvent(event);
+      setLocalEvent(event);
+      setScreen("reception");
+    }catch{
+      setError("開発用イベントデータを端末に保存できませんでした。");
+    }finally{setBusy(false);}
+  };
+
   const authenticateEvent=async()=>{
     if(!authPayload||busy)return;
     setBusy(true);setError("");
@@ -118,7 +141,7 @@ export default function App(){
     <p>管理アプリに表示されたイベント認証QRを読み取ってください。</p>
     <div className="auth-reader"><QrScanner readerId="event-auth-reader" onResult={handleAuthScan} onError={setError}/></div>
     {error&&<div className="error">{error}</div>}
-    <button className="secondary" onClick={()=>handleAuthScan(JSON.stringify(DEMO_EVENT))}>開発用イベントで試す</button>
+    <button className="secondary" onClick={()=>void startDemoEvent()}>開発用イベントで試す</button>
   </div></main>;
 
   if(screen==="confirm"&&authPayload)return <main className="auth-shell"><div className="auth-card confirm-card">
