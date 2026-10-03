@@ -28,6 +28,13 @@ export interface ReceptionRecord {
   terminalId: string;
 }
 
+export interface SyncQueueItem {
+  recordId: string;
+  status: "pending" | "syncing" | "synced" | "failed";
+  retryCount: number;
+  lastAttemptAt?: string;
+}
+
 export interface Event {
   eventId: string;
   eventName: string;
