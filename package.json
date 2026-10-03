@@ -1,0 +1,14 @@
+{
+  "name": "qr-ticket-system",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "management-app",
+    "reception-app",
+    "shared"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces",
+    "build": "npm run build --workspaces"
+  }
+}
