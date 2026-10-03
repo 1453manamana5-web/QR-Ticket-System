@@ -2749,3 +2749,35 @@
 @media (prefers-reduced-motion:reduce){
   .entry-reception-mode-switch{transition-duration:1ms}
 }
+
+
+.reception-start-panel{
+  display:flex!important;
+  align-items:center;
+  justify-content:center;
+  min-height:100%;
+  padding:clamp(24px,4vw,52px);
+}
+.reception-start-content{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  width:min(100%,720px);
+  text-align:center;
+}
+.reception-start-content .entry-result-icon{
+  margin-bottom:12px;
+}
+.reception-start-content h2{
+  margin:0 0 12px;
+}
+.reception-start-content .entry-result-primary{
+  margin:0;
+}
+.reception-start-content .entry-result-secondary{
+  margin:8px 0 18px;
+}
+.reception-start-content .primary{
+  min-width:220px;
+}
