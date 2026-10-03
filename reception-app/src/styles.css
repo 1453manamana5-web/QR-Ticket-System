@@ -2657,6 +2657,7 @@
 
 
 /* Reception mode selector: one swipeable card in the upper-right corner. */
+.entry-reception-header .entry-header-main{position:relative}
 .entry-reception-mode-switch{
   position:absolute;
   top:0;
