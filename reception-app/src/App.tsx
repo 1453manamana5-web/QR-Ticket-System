@@ -1,0 +1,3 @@
+import {useState} from "react";
+type Mode="entry"|"exit";
+export default function App(){const[mode,setMode]=useState<Mode>("entry");const[started,setStarted]=useState(false);const entry=mode==="entry";return <main><button className="mode" onClick={()=>setMode(entry?"exit":"entry")}><b>{entry?"入口受付":"出口受付"}</b><small>切り替え</small></button><section><div className="camera"><div className="frame"/><p>{started?"QRコードを枠内に合わせてください":"受付開始後にカメラを起動します"}</p></div><div className="panel"><h1>{entry?"入場受付":"出口受付"}</h1><p>{started?"受付中です":"受付を開始してください"}</p><button onClick={()=>setStarted(x=>!x)}>{started?"受付を一時停止する":"受付を開始する"}</button></div></section></main>}
