@@ -6,7 +6,7 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const STORES = {
   event: "event",
@@ -29,6 +29,11 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(STORES.tickets)) {
         const store = database.createObjectStore(STORES.tickets, {keyPath: "ticketId"});
         store.createIndex("eventId", "eventId", {unique: false});
+      } else {
+        const store = request.transaction!.objectStore(STORES.tickets);
+        if (!store.indexNames.contains("eventId")) {
+          store.createIndex("eventId", "eventId", {unique: false});
+        }
       }
 
       if (!database.objectStoreNames.contains(STORES.receptionRecords)) {
@@ -107,15 +112,21 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       transaction.onabort = () =>
         reject(transaction.error ?? new Error("イベントデータの保存が中断されました"));
     });
-
-    const savedEvent = await loadLocalEvent();
-    const savedTicketCount = await countTickets(event.event.eventId);
-
-    if (!savedEvent || savedEvent.event.eventId !== event.event.eventId || savedTicketCount !== tickets.length) {
-      throw new Error("ローカルイベントデータの検証に失敗しました");
-    }
   } finally {
     database.close();
+  }
+
+  const savedEvent = await loadLocalEvent();
+  const savedTicketCount = await countTickets(event.event.eventId);
+
+  if (
+    !savedEvent ||
+    savedEvent.event.eventId !== event.event.eventId ||
+    !savedEvent.dataReady ||
+    savedTicketCount !== tickets.length
+  ) {
+    await clearLocalEvent();
+    throw new Error("ローカルイベントデータの検証に失敗しました");
   }
 }
 
