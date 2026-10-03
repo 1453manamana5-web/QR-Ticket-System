@@ -4,7 +4,7 @@ import QrScanner from "./QrScanner";
 import {countTickets,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 
 type Mode="entry"|"exit";
-type Screen="auth"|"confirm"|"preparing"|"ready"|"reception";
+type Screen="auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
 type Result={kind:"success"|"error";title:string;detail:string};
 
 const DEMO_EVENT:EventAuthPayload={
@@ -274,8 +274,42 @@ export default function App(){
       <section className="entry-waiting-panel">
         <div className="entry-scanner-card">
           <div className="entry-scanner-card-header">
+            <div className="entry-scanner-heading"><span className="entry-scanner-heading-icon"><QrIcon size={30}/></span><span className="entry-scanner-heading-copy"><small>EVENT AUTHENTICATION</small><strong>イベント認証</strong></span></div>
+            <div className="entry-scanner-ready"><span className="entry-scanner-ready-dot"/>待機中</div>
+          </div>
+          <div className="entry-scanner-wrapper">
+            <div className="camera-qr-scanner reception-start-panel">
+              <div className="reception-start-content">
+                <div className="entry-result-icon">✓</div>
+                <h2>イベント認証の準備完了</h2>
+                <p className="entry-result-primary">管理アプリのイベント認証QRを読み取ってください</p>
+                <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
+                <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベント認証を開始する</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {error&&<div className="entry-auth-error">{error}</div>}
+        <button type="button" className="entry-auth-dev-button" disabled={busy} onClick={()=>void startDemoEvent()}>{busy?"開発用イベントを準備中…":"開発用イベントで試す"}</button>
+      </section>
+    </main>
+  </div>;
+
+  if(screen==="authScan")return <div className="entry-reception-page waiting">
+    <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
+    <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
+    <header className="entry-reception-header">
+      <div className="entry-header-main">
+        <h1>交通研究部QRコード管理システム</h1>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント認証QR読み取り</strong></div></div>
+      </div>
+    </header>
+    <main className="entry-reception-main">
+      <section className="entry-waiting-panel">
+        <div className="entry-scanner-card">
+          <div className="entry-scanner-card-header">
             <div className="entry-scanner-heading"><span className="entry-scanner-heading-icon"><QrIcon size={30}/></span><span className="entry-scanner-heading-copy"><small>EVENT AUTHENTICATION</small><strong>イベント認証QRを読み取り</strong></span></div>
-            <div className="entry-scanner-ready"><span className="entry-scanner-ready-dot"/>認証待機中</div>
+            <div className="entry-scanner-ready"><span className="entry-scanner-ready-dot"/>読み取り中</div>
           </div>
           <div className="entry-scanner-wrapper">
             <div className="camera-qr-scanner"><QrScanner readerId="event-auth-reader" onResult={handleAuthScan} onError={setError}/></div>
@@ -283,10 +317,10 @@ export default function App(){
         </div>
         <div className="entry-scan-instruction">
           <span className="entry-scan-instruction-number">1</span>
-          <span className="entry-scan-instruction-copy"><strong>管理アプリのイベント認証QRをカメラに向けてください</strong><small>認証後、この端末にイベントデータを準備します</small></span>
+          <span className="entry-scan-instruction-copy"><strong>管理アプリのイベント認証QRをカメラに向けてください</strong><small>読み取り後、イベントデータの準備を開始します</small></span>
         </div>
         {error&&<div className="entry-auth-error">{error}</div>}
-        <button type="button" className="entry-auth-dev-button" disabled={busy} onClick={()=>void startDemoEvent()}>{busy?"開発用イベントを準備中…":"開発用イベントで試す"}</button>
+        <button type="button" className="secondary" onClick={()=>{setError("");setScreen("auth");}}>戻る</button>
       </section>
     </main>
   </div>;
