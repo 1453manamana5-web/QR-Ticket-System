@@ -240,7 +240,6 @@ export default function App(){
         <button type="button" className="entry-auth-dev-button" disabled={busy} onClick={()=>void startDemoEvent()}>{busy?"開発用イベントを準備中…":"開発用イベントで試す"}</button>
       </section>
     </main>
-    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" disabled><span className="entry-footer-button-icon">⌂</span><span>ホーム</span></button></footer>
   </div>;
 
   if(screen==="confirm"&&authPayload)return <div className="entry-reception-page waiting">
@@ -259,7 +258,6 @@ export default function App(){
       <button type="button" className="primary" disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"イベントデータを準備中…":"このイベントで認証"}</button>
       <button type="button" className="secondary" disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
     </section></main>
-    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" onClick={()=>setScreen("auth")}><span className="entry-footer-button-icon">⌂</span><span>認証画面へ戻る</span></button></footer>
   </div>;
 
   if(screen==="preparing")return <div className="entry-reception-page waiting">
@@ -277,7 +275,6 @@ export default function App(){
       <p className="entry-result-primary">管理アプリからチケットデータを取得すると受付を開始できます</p>
       {error&&<p className="entry-result-secondary">{error}</p>}
     </section></main>
-    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" onClick={()=>setScreen("auth")}><span className="entry-footer-button-icon">⌂</span><span>ホームへ戻る</span></button></footer>
   </div>;
 
   if(screen==="ready"&&localEvent?.dataReady)return <div className="entry-reception-page waiting">
@@ -302,11 +299,6 @@ export default function App(){
   const eventName=localEvent?.event.eventName??"イベント";
   const receptionClass=result?.kind==="success"?"ticket-success":result?.kind==="error"?"error":"waiting";
 
-  const backHome=()=>{
-    setResult(null);
-    setScreen("auth");
-  };
-
   return <div className={`entry-reception-page ${entry?receptionClass:receptionClass}`}>
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
@@ -324,17 +316,17 @@ export default function App(){
             <strong>{eventName}</strong>
           </div>
         </div>
+        <div className="entry-reception-mode-switch" aria-label="受付種別">
+          <button type="button" className={entry?"is-active":""} onClick={()=>{if(!entry)switchMode();}} aria-pressed={entry}>
+            <EntryIcon />
+            <span><small>ENTRY</small><strong>入口受付</strong></span>
+          </button>
+          <button type="button" className={!entry?"is-active":""} onClick={()=>{if(entry)switchMode();}} aria-pressed={!entry}>
+            <EntryIcon exit />
+            <span><small>EXIT</small><strong>出口受付</strong></span>
+          </button>
+        </div>
       </div>
-
-      <button type="button" className="entry-reception-mode" onClick={switchMode} aria-label={entry?"出口受付に切り替え":"入口受付に切り替え"}>
-        <span className="entry-reception-mode-icon">
-          <EntryIcon exit={!entry}/>
-        </span>
-        <span className="entry-reception-mode-copy">
-          <small>{entry?"ENTRY":"EXIT"}</small>
-          <strong>{entry?"入口受付":"出口受付"}</strong>
-        </span>
-      </button>
     </header>
 
     <main className="entry-reception-main">
@@ -390,12 +382,6 @@ export default function App(){
     </main>
 
     <footer className="entry-reception-footer">
-      <button type="button" className="entry-home-button" onClick={backHome}>
-        <span className="entry-footer-button-icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
-        </span>
-        <span>ホームへ戻る</span>
-      </button>
       <button type="button" className="entry-admin-button">
         <span className="entry-footer-button-icon">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.4 7 10 4.1-1.6 7-5.3 7-10V6z"/><path d="M9 11.5a3 3 0 1 1 6 0M8 17c.8-1.7 2.1-2.5 4-2.5s3.2.8 4 2.5"/></svg>
