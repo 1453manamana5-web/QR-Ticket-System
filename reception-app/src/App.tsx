@@ -214,11 +214,6 @@ export default function App(){
     setScannerKey(value=>value+1);
   };
 
-  const backHome=()=>{
-    setResult(null);
-    setScreen("auth");
-  };
-
   if(screen==="auth")return <main className="auth-shell"><div className="auth-card">
     <small className="eyebrow">QR TICKET SYSTEM</small>
     <h1>イベント認証</h1>
