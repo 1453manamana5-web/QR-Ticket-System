@@ -7,12 +7,18 @@ type Mode="entry"|"exit";
 type Screen="auth"|"confirm"|"preparing"|"reception";
 type Result={kind:"success"|"error";title:string;detail:string};
 
-const DEMO_EVENT:EventAuthPayload={type:"qr-ticket-event-auth",eventId:"DEMO-2027",eventName:"○○文化祭 2027",dataVersion:1,authToken:"demo-auth-token"};
+const DEMO_EVENT:EventAuthPayload={
+  type:"qr-ticket-event-auth",
+  eventId:"DEMO-2027",
+  eventName:"○○文化祭 2027",
+  dataVersion:1,
+  authToken:"demo-auth-token"
+};
 
 function parseAuthPayload(text:string):EventAuthPayload|null{
   try{
     const value=JSON.parse(text) as Partial<EventAuthPayload>;
-    if(value.type!=="qr-ticket-event-auth"||typeof value.eventId!=="string"||typeof value.eventName!=="string"||typeof value.dataVersion!=="number"||typeof value.authToken!=="string") return null;
+    if(value.type!=="qr-ticket-event-auth"||typeof value.eventId!=="string"||typeof value.eventName!=="string"||typeof value.dataVersion!=="number"||typeof value.authToken!=="string")return null;
     return value as EventAuthPayload;
   }catch{return null;}
 }
@@ -28,21 +34,49 @@ function createDemoTickets(eventId:string):Ticket[]{
   }));
 }
 
+function QrIcon({size=26}:{size?:number}){
+  return <svg className="qr-icon" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M3 3h7v7H3zM5 5v3h3V5zM14 3h7v7h-7zM16 5v3h3V5zM3 14h7v7H3zM5 16v3h3v-3zM14 14h3v3h-3zM19 14h2v7h-2zM14 19h5v2h-5z"/>
+  </svg>;
+}
+
+function EntryIcon({exit=false}:{exit?:boolean}){
+  return <svg className="entry-icon" width="48" height="48" viewBox="0 0 48 48" aria-hidden="true">
+    <path d={exit?"M30 8l12 16-12 16":"M18 8L6 24l12 16"} />
+    <path d={exit?"M42 24H8M16 16l-8 8 8 8":"M6 24h34"} />
+    <path d="M28 10v28" />
+  </svg>;
+}
+
 export default function App(){
   const [screen,setScreen]=useState<Screen>("auth");
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
   const [localEvent,setLocalEvent]=useState<LocalEventData|null>(null);
   const [error,setError]=useState("");
-  const [scanning,setScanning]=useState(false);
   const [busy,setBusy]=useState(false);
   const [result,setResult]=useState<Result|null>(null);
+  const [scannerKey,setScannerKey]=useState(0);
+  const [online,setOnline]=useState(()=>navigator.onLine);
+
+  useEffect(()=>{
+    const update=()=>setOnline(navigator.onLine);
+    window.addEventListener("online",update);
+    window.addEventListener("offline",update);
+    return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update);};
+  },[]);
 
   useEffect(()=>{
     void loadLocalEvent().then(saved=>{
       if(!saved)return;
       setLocalEvent(saved);
-      setAuthPayload({type:"qr-ticket-event-auth",eventId:saved.event.eventId,eventName:saved.event.eventName,dataVersion:saved.event.dataVersion,authToken:"local"});
+      setAuthPayload({
+        type:"qr-ticket-event-auth",
+        eventId:saved.event.eventId,
+        eventName:saved.event.eventName,
+        dataVersion:saved.event.dataVersion,
+        authToken:"local"
+      });
       setScreen(saved.dataReady?"reception":"preparing");
     }).catch(()=>setError("ローカルデータを確認できませんでした。"));
   },[]);
@@ -50,7 +84,9 @@ export default function App(){
   const handleAuthScan=useCallback((text:string)=>{
     const payload=parseAuthPayload(text);
     if(!payload){setError("このQRコードはイベント認証QRではありません。");return;}
-    setError("");setAuthPayload(payload);setScreen("confirm");
+    setError("");
+    setAuthPayload(payload);
+    setScreen("confirm");
   },[]);
 
   const startDemoEvent=async()=>{
@@ -63,7 +99,10 @@ export default function App(){
       const event:LocalEventData={
         event:{eventId:DEMO_EVENT.eventId,eventName:DEMO_EVENT.eventName,eventStatus:"ready",dataVersion:DEMO_EVENT.dataVersion},
         settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},
-        terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:0
+        terminalId:getTerminalId(),
+        authenticatedAt:new Date().toISOString(),
+        dataReady:false,
+        ticketCount:0
       };
       await replaceTickets(tickets);
       event.dataReady=true;
@@ -71,6 +110,8 @@ export default function App(){
       await saveLocalEvent(event);
       setLocalEvent(event);
       setScreen("reception");
+      setResult(null);
+      setScannerKey(value=>value+1);
     }catch{
       setError("開発用イベントデータを端末に保存できませんでした。");
     }finally{setBusy(false);}
@@ -78,12 +119,16 @@ export default function App(){
 
   const authenticateEvent=async()=>{
     if(!authPayload||busy)return;
-    setBusy(true);setError("");
+    setBusy(true);
+    setError("");
     const isDemo=authPayload.eventId===DEMO_EVENT.eventId;
     const event:LocalEventData={
       event:{eventId:authPayload.eventId,eventName:authPayload.eventName,eventStatus:"ready",dataVersion:authPayload.dataVersion},
       settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},
-      terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:0
+      terminalId:getTerminalId(),
+      authenticatedAt:new Date().toISOString(),
+      dataReady:false,
+      ticketCount:0
     };
     try{
       if(isDemo){
@@ -95,49 +140,88 @@ export default function App(){
       await saveLocalEvent(event);
       setLocalEvent(event);
       setScreen(event.dataReady?"reception":"preparing");
+      setResult(null);
+      if(event.dataReady)setScannerKey(value=>value+1);
     }catch{
-      setError("イベントデータを端末に保存できませんでした。");setScreen("confirm");
+      setError("イベントデータを端末に保存できませんでした。");
+      setScreen("confirm");
     }finally{setBusy(false);}
   };
-
-  const startReception=()=>{if(!localEvent?.dataReady)return;setResult(null);setScanning(true);};
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
     if(!localEvent||busy)return;
     const ticketId=rawText.trim();
     if(!ticketId)return;
-    setBusy(true);setScanning(false);setResult(null);
+
+    setBusy(true);
+    setResult(null);
+
     try{
       const ticket=await getTicket(ticketId);
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
-        setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});return;
+        setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});
+        return;
       }
       if(!ticket.valid){
-        setResult({kind:"error",title:"このチケットは無効です",detail:"管理アプリで無効になっているチケットです。"});return;
+        setResult({kind:"error",title:"このチケットは無効です",detail:"管理アプリで無効になっているチケットです。"});
+        return;
       }
+
       const receptionType=getReceptionType(mode,ticket.currentStatus,localEvent.settings);
       if(!receptionType){
         const detail=mode==="entry"
-          ? ticket.currentStatus==="inside"?"このチケットはすでに入場しています。":"このチケットは受付できません。"
-          : ticket.currentStatus==="unused"?"このチケットはまだ入場していません。":"このチケットは受付できません。";
-        setResult({kind:"error",title:"受付できません",detail});return;
+          ?ticket.currentStatus==="inside"?"このチケットはすでに入場しています。":"このチケットは受付できません。"
+          :ticket.currentStatus==="unused"?"このチケットはまだ入場していません。":"このチケットは受付できません。";
+        setResult({kind:"error",title:"受付できません",detail});
+        return;
       }
+
       const nextStatus=receptionType==="exit"?"exited":"inside";
       const now=new Date().toISOString();
       const updatedTicket:Ticket={...ticket,currentStatus:nextStatus,updatedAt:now};
       const record:ReceptionRecord={
-        recordId:crypto.randomUUID(),eventId:localEvent.event.eventId,ticketId,type:receptionType,timestamp:now,terminalId:localEvent.terminalId
+        recordId:crypto.randomUUID(),
+        eventId:localEvent.event.eventId,
+        ticketId,
+        type:receptionType,
+        timestamp:now,
+        terminalId:localEvent.terminalId
       };
+
       await saveReceptionTransaction(updatedTicket,record);
-      setResult({kind:"success",title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",detail:ticketId});
-      speakReception(receptionType);playSuccessSound();
+      setResult({
+        kind:"success",
+        title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",
+        detail:ticketId
+      });
+      speakReception(receptionType);
+      playSuccessSound();
     }catch{
-      setResult({kind:"error",title:"受付データを保存できませんでした",detail:"受付を確定できていないため、もう一度読み取ってください。"});
-    }finally{setBusy(false);}
+      setResult({
+        kind:"error",
+        title:"受付データを保存できませんでした",
+        detail:"受付を確定できていないため、もう一度読み取ってください。"
+      });
+    }finally{
+      setBusy(false);
+      window.setTimeout(()=>setScannerKey(value=>value+1),650);
+    }
   },[localEvent,mode,busy]);
 
+  const switchMode=()=>{
+    setMode(current=>current==="entry"?"exit":"entry");
+    setResult(null);
+    setScannerKey(value=>value+1);
+  };
+
+  const backHome=()=>{
+    setResult(null);
+    setScreen("auth");
+  };
+
   if(screen==="auth")return <main className="auth-shell"><div className="auth-card">
-    <small className="eyebrow">QR TICKET SYSTEM</small><h1>イベント認証</h1>
+    <small className="eyebrow">QR TICKET SYSTEM</small>
+    <h1>イベント認証</h1>
     <p>管理アプリに表示されたイベント認証QRを読み取ってください。</p>
     <div className="auth-reader"><QrScanner readerId="event-auth-reader" onResult={handleAuthScan} onError={setError}/></div>
     {error&&<div className="error">{error}</div>}
@@ -145,7 +229,8 @@ export default function App(){
   </div></main>;
 
   if(screen==="confirm"&&authPayload)return <main className="auth-shell"><div className="auth-card confirm-card">
-    <small className="eyebrow">EVENT AUTHENTICATION</small><h1>このイベントで認証しますか？</h1>
+    <small className="eyebrow">EVENT AUTHENTICATION</small>
+    <h1>このイベントで認証しますか？</h1>
     <div className="event-preview"><span>イベント</span><strong>{authPayload.eventName}</strong><small>{authPayload.eventId}</small></div>
     {error&&<div className="error">{error}</div>}
     <button className="primary" disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"準備しています…":"このイベントで認証"}</button>
@@ -153,7 +238,8 @@ export default function App(){
   </div></main>;
 
   if(screen==="preparing")return <main className="auth-shell"><div className="auth-card">
-    <div className="spinner"/><small className="eyebrow">EVENT DATA</small>
+    <div className="spinner"/>
+    <small className="eyebrow">EVENT DATA</small>
     <h1>{localEvent?.event.eventName??authPayload?.eventName}</h1>
     <p>イベント認証情報を保存しました。管理アプリからチケットデータを取得すると受付を開始できます。</p>
     <div className="status-row"><span>イベント認証</span><b>✓ 保存済み</b></div>
@@ -162,23 +248,80 @@ export default function App(){
   </div></main>;
 
   const entry=mode==="entry";
+  const eventName=localEvent?.event.eventName??"イベント";
+  const modeLabel=entry?"入口受付":"出口受付";
+
   return <main className="reception-shell">
-    <button className={"mode mode-"+mode} onClick={()=>{setMode(entry?"exit":"entry");setResult(null);setScanning(false);}}>
-      <b>{entry?"入口受付":"出口受付"}</b><small>タップで切り替え</small>
-    </button>
-    <header className="reception-header"><div><small className="eyebrow">{localEvent?.event.eventName}</small><h1>{entry?"入場受付":"出口受付"}</h1></div><span className="ready-badge">受付準備完了</span></header>
-    <section className={"reception-stage "+(scanning?"is-scanning":"")}>
-      {scanning?<div className="scanner-panel">
-        <div className="ticket-reader"><QrScanner readerId="ticket-reader" onResult={text=>void handleTicketScan(text)} onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}/><div className="scan-guide"><span/><p>チケットのQRコードを枠内に合わせてください</p></div></div>
-        {result&&<div className={"result-card "+result.kind}><strong>{result.title}</strong><span>{result.detail}</span></div>}
-        <button className="stop-button" onClick={()=>{setScanning(false);setResult(null);}}>受付を一時停止</button>
-      </div>:<div className="standby-panel">
-        <div className="standby-icon">QR</div><small className="eyebrow">{entry?"ENTRY":"EXIT"}</small>
-        <h2>受付を開始できます</h2><p>「受付を開始する」を押すとカメラが起動します。</p>
-        <button className="start-button" onClick={startReception}>受付を開始する</button>
-        {result&&<div className={"result-card "+result.kind}><strong>{result.title}</strong><span>{result.detail}</span></div>}
-      </div>}
+    <header className="topbar">
+      <div className="brand-block">
+        <h1>交通研究部QRコード管理システム</h1>
+        <div className="event-meta">
+          <span className={"online-dot "+(online?"is-online":"is-offline")}/>
+          <span className="online-label">{online?"オンライン":"オフライン"}</span>
+          <span className="meta-divider"/>
+          <span className="meta-label">EVENT</span>
+          <strong>{eventName}</strong>
+        </div>
+      </div>
+
+      <button className={"mode-switch mode-"+mode} onClick={switchMode} aria-label={modeLabel+"に切り替え"}>
+        <EntryIcon exit={!entry}/>
+        <span>
+          <small>{entry?"ENTRY":"EXIT"}</small>
+          <b>{modeLabel}</b>
+        </span>
+      </button>
+    </header>
+
+    <section className="scanner-card">
+      <div className="scanner-card-header">
+        <div className="scanner-title">
+          <div className="scanner-icon"><QrIcon size={30}/></div>
+          <div>
+            <small>QR SCANNER</small>
+            <h2>QRコード読み取り</h2>
+          </div>
+        </div>
+        <div className="scan-status"><span/>読み取り待機中</div>
+      </div>
+
+      <div className="scanner-frame">
+        <QrScanner
+          key={scannerKey}
+          readerId="ticket-reader"
+          onResult={handleTicketScan}
+          onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}
+        />
+        <div className="scan-guide" aria-hidden="true">
+          <i className="corner top-left"/>
+          <i className="corner top-right"/>
+          <i className="corner bottom-left"/>
+          <i className="corner bottom-right"/>
+          <div className="scan-line"/>
+        </div>
+      </div>
+
+      <div className="instruction">
+        <div className="step-number">1</div>
+        <div>
+          <strong>QRコードをカメラに向けてください</strong>
+          <span>読み取り枠に入ると自動で受付します</span>
+        </div>
+      </div>
+
+      {result&&<div className={"result-card "+result.kind}><strong>{result.title}</strong><span>{result.detail}</span></div>}
     </section>
+
+    <footer className="bottom-actions">
+      <button className="home-button" onClick={backHome}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        ホームへ戻る
+      </button>
+      <button className="management-button" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.4 7 10 4.1-1.6 7-5.3 7-10V6z"/><path d="M9 11.5a3 3 0 1 1 6 0M8 17c.8-1.7 2.1-2.5 4-2.5s3.2.8 4 2.5"/></svg>
+        管理モード
+      </button>
+    </footer>
   </main>;
 }
 
@@ -196,27 +339,42 @@ function speakReception(type:ReceptionType){
   if(!("speechSynthesis" in window))return;
   window.speechSynthesis.cancel();
   const utterance=new SpeechSynthesisUtterance(type==="entry"?"入場を確認しました":type==="reentry"?"再入場を確認しました":"退場を確認しました");
-  utterance.lang="ja-JP";utterance.rate=1.05;window.speechSynthesis.speak(utterance);
+  utterance.lang="ja-JP";
+  utterance.rate=1.05;
+  window.speechSynthesis.speak(utterance);
 }
 
 function playSuccessSound(){
   try{
     const AudioContextClass=window.AudioContext||window.webkitAudioContext;
     const context=new AudioContextClass();
-    const oscillator=context.createOscillator();const gain=context.createGain();
-    oscillator.type="sine";oscillator.frequency.value=880;
+    const oscillator=context.createOscillator();
+    const gain=context.createGain();
+    oscillator.type="sine";
+    oscillator.frequency.value=880;
     gain.gain.setValueAtTime(0.0001,context.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.12,context.currentTime+0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.16);
-    oscillator.connect(gain);gain.connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+0.17);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime+0.17);
     oscillator.onended=()=>void context.close();
   }catch{}
 }
 
 function getTerminalId():string{
-  const key="qr-ticket-terminal-id";const existing=localStorage.getItem(key);
+  const key="qr-ticket-terminal-id";
+  const existing=localStorage.getItem(key);
   if(existing)return existing;
-  const id="T-"+crypto.randomUUID().slice(0,8).toUpperCase();localStorage.setItem(key,id);return id;
+  const id="T-"+crypto.randomUUID().slice(0,8).toUpperCase();
+  localStorage.setItem(key,id);
+  return id;
 }
 
-declare global{interface Window{webkitAudioContext?:typeof AudioContext;}}
+declare global{
+  interface Window{
+    webkitAudioContext?:typeof AudioContext;
+  }
+}
+}
