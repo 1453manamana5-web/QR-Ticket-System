@@ -2,6 +2,14 @@ export type TicketStatus = "unused" | "inside" | "exited";
 
 export type ReceptionType = "entry" | "exit" | "reentry";
 
+export type EventAuthPayload = {
+  type: "qr-ticket-event-auth";
+  eventId: string;
+  eventName: string;
+  dataVersion: number;
+  authToken: string;
+};
+
 export interface Ticket {
   ticketId: string;
   eventId: string;
@@ -25,4 +33,19 @@ export interface Event {
   eventName: string;
   eventStatus: "preparing" | "ready" | "active" | "finalizing" | "finished";
   dataVersion: number;
+}
+
+export interface ReceptionSettings {
+  entryEnabled: boolean;
+  exitEnabled: boolean;
+  reentryEnabled: boolean;
+}
+
+export interface LocalEventData {
+  event: Event;
+  settings: ReceptionSettings;
+  terminalId: string;
+  authenticatedAt: string;
+  dataReady: boolean;
+  ticketCount: number;
 }
