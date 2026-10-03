@@ -6,7 +6,7 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = {
   event: "event",
@@ -79,6 +79,63 @@ export async function loadLocalEvent(): Promise<LocalEventData | null> {
 
   database.close();
   return value ?? null;
+}
+
+export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[]): Promise<void> {
+  const database = await openDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [STORES.event, STORES.tickets],
+        "readwrite"
+      );
+      const eventStore = transaction.objectStore(STORES.event);
+      const ticketStore = transaction.objectStore(STORES.tickets);
+
+      ticketStore.clear();
+      eventStore.put(event);
+
+      for (const ticket of tickets) {
+        ticketStore.put(ticket);
+      }
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("イベントデータを保存できませんでした"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("イベントデータの保存が中断されました"));
+    });
+
+    const savedEvent = await loadLocalEvent();
+    const savedTicketCount = await countTickets(event.event.eventId);
+
+    if (!savedEvent || savedEvent.event.eventId !== event.event.eventId || savedTicketCount !== tickets.length) {
+      throw new Error("ローカルイベントデータの検証に失敗しました");
+    }
+  } finally {
+    database.close();
+  }
+}
+
+export async function countTickets(eventId: string): Promise<number> {
+  const database = await openDatabase();
+
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const request = database
+        .transaction(STORES.tickets, "readonly")
+        .objectStore(STORES.tickets)
+        .index("eventId")
+        .count(eventId);
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () =>
+        reject(request.error ?? new Error("チケット件数を確認できませんでした"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function replaceTickets(tickets: Ticket[]): Promise<void> {
