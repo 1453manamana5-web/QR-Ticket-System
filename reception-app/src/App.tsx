@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
 import {countTickets,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
@@ -58,6 +58,8 @@ export default function App(){
   const [result,setResult]=useState<Result|null>(null);
   const [scannerKey,setScannerKey]=useState(0);
   const [online,setOnline]=useState(()=>navigator.onLine);
+  const modeSwipeStartX=useRef<number|null>(null);
+  const modeSwipeMoved=useRef(false);
 
   useEffect(()=>{
     const update=()=>setOnline(navigator.onLine);
@@ -227,6 +229,38 @@ export default function App(){
     setScannerKey(value=>value+1);
   };
 
+  const handleModePointerDown=(event:React.PointerEvent<HTMLButtonElement>)=>{
+    modeSwipeStartX.current=event.clientX;
+    modeSwipeMoved.current=false;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleModePointerUp=(event:React.PointerEvent<HTMLButtonElement>)=>{
+    const startX=modeSwipeStartX.current;
+    modeSwipeStartX.current=null;
+    if(startX===null)return;
+    const deltaX=event.clientX-startX;
+    if(Math.abs(deltaX)>=45){
+      modeSwipeMoved.current=true;
+      switchMode();
+    }
+  };
+
+  const handleModeClick=()=>{
+    if(modeSwipeMoved.current){
+      modeSwipeMoved.current=false;
+      return;
+    }
+    switchMode();
+  };
+
+  const handleModeKeyDown=(event:React.KeyboardEvent<HTMLButtonElement>)=>{
+    if(event.key==="Enter"||event.key===" "){
+      event.preventDefault();
+      switchMode();
+    }
+  };
+
   if(screen==="auth")return <div className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
@@ -307,7 +341,6 @@ export default function App(){
       <p className="entry-result-secondary">この端末で受付を開始できます</p>
       <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
     </section></main>
-    <footer className="entry-reception-footer"><button type="button" className="entry-home-button" onClick={()=>setScreen("auth")}><span className="entry-footer-button-icon">⌂</span><span>ホームへ戻る</span></button></footer>
   </div>;
 
   const entry=mode==="entry";
@@ -331,16 +364,25 @@ export default function App(){
             <strong>{eventName}</strong>
           </div>
         </div>
-        <div className="entry-reception-mode-switch" aria-label="受付種別">
-          <button type="button" className={entry?"is-active":""} onClick={()=>{if(!entry)switchMode();}} aria-pressed={entry}>
+        <button
+          type="button"
+          className={`entry-reception-mode-switch ${entry?"is-entry":"is-exit"}`}
+          onPointerDown={handleModePointerDown}
+          onPointerUp={handleModePointerUp}
+          onClick={handleModeClick}
+          onKeyDown={handleModeKeyDown}
+          aria-label={entry?"入口受付。左右にスワイプして出口受付へ切り替え":"出口受付。左右にスワイプして入口受付へ切り替え"}
+          aria-pressed={!entry}
+        >
+          <span className="entry-reception-mode-switch-face entry-reception-mode-switch-front">
             <EntryIcon />
             <span><small>ENTRY</small><strong>入口受付</strong></span>
-          </button>
-          <button type="button" className={!entry?"is-active":""} onClick={()=>{if(entry)switchMode();}} aria-pressed={!entry}>
+          </span>
+          <span className="entry-reception-mode-switch-face entry-reception-mode-switch-back">
             <EntryIcon exit />
             <span><small>EXIT</small><strong>出口受付</strong></span>
-          </button>
-        </div>
+          </span>
+        </button>
       </div>
     </header>
 
