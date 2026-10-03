@@ -2781,3 +2781,76 @@
 .reception-start-content .primary{
   min-width:220px;
 }
+
+
+/* Final reception UI override: keep the active mode switch unmistakably in the upper-right. */
+.entry-reception-page .entry-reception-header .entry-header-main{
+  position:relative!important;
+  width:100%!important;
+  padding-right:clamp(205px,22vw,275px)!important;
+}
+.entry-reception-page .entry-reception-mode-switch{
+  display:block!important;
+  position:absolute!important;
+  top:0!important;
+  right:0!important;
+  width:clamp(190px,20vw,250px)!important;
+  height:clamp(64px,7.5vh,82px)!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+  overflow:visible!important;
+  z-index:50!important;
+}
+.entry-reception-page .entry-reception-mode-switch-face{
+  display:flex!important;
+  position:absolute!important;
+  inset:0!important;
+  align-items:center!important;
+  gap:10px!important;
+  padding:8px 18px!important;
+  box-sizing:border-box!important;
+  visibility:visible!important;
+  opacity:1!important;
+}
+.entry-reception-page .entry-reception-mode-switch-face.entry-reception-mode-switch-front{
+  transform:rotateY(0deg)!important;
+}
+.entry-reception-page .entry-reception-mode-switch-face.entry-reception-mode-switch-back{
+  transform:rotateY(180deg)!important;
+}
+.entry-reception-page .entry-reception-mode-switch.is-entry .entry-reception-mode-switch-front{
+  z-index:2!important;
+}
+.entry-reception-page .entry-reception-mode-switch.is-entry .entry-reception-mode-switch-back{
+  z-index:1!important;
+}
+.entry-reception-page .entry-reception-mode-switch.is-exit .entry-reception-mode-switch-front{
+  z-index:1!important;
+}
+.entry-reception-page .entry-reception-mode-switch.is-exit .entry-reception-mode-switch-back{
+  z-index:2!important;
+}
+@media (max-width:760px){
+  .entry-reception-page .entry-reception-header .entry-header-main{
+    padding-right:200px!important;
+  }
+  .entry-reception-page .entry-reception-mode-switch{
+    width:190px!important;
+    height:58px!important;
+  }
+}
+
+/* Make the start action clearly occupy the former camera viewport. */
+.entry-reception-page .reception-start-panel{
+  width:100%!important;
+  height:100%!important;
+  min-height:clamp(260px,38vh,520px)!important;
+  box-sizing:border-box!important;
+}
+.entry-reception-page .reception-start-content .primary{
+  min-width:260px!important;
+  min-height:64px!important;
+  font-size:18px!important;
+}
