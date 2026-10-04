@@ -1173,3 +1173,209 @@ body:has(.ticket-screen),
   .ticket-operation-card{grid-area:operation}
   .ticket-list-launch{grid-area:list}
 }
+
+/* Ticket dashboard: operation on top, status + list below */
+@media(min-width:761px){
+  .ticket-screen{
+    width:100%;
+    min-width:0;
+    height:calc(100dvh - 86px);
+    max-height:calc(100dvh - 86px);
+    min-height:0;
+    margin:0;
+    padding:6px 18px 10px;
+    box-sizing:border-box;
+    overflow:hidden;
+  }
+
+  .ticket-screen > main.ticket-home-grid{
+    width:100%;
+    max-width:none;
+    min-width:0;
+    height:calc(100% - 2px);
+    min-height:0;
+    max-height:none;
+    margin:0;
+    padding:0;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,.72fr);
+    grid-template-rows:170px minmax(0,1fr);
+    grid-template-areas:
+      "operation operation"
+      "status list";
+    gap:12px;
+    box-sizing:border-box;
+  }
+
+  .ticket-home-card{
+    width:100%;
+    min-width:0;
+    min-height:0;
+    height:100%;
+    max-height:none;
+    margin:0;
+    box-sizing:border-box;
+  }
+
+  /* Top: ticket operations */
+  .ticket-operation-card{
+    grid-area:operation;
+    padding:18px 22px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+  }
+
+  .ticket-operation-card h2{
+    margin:0 0 12px;
+    font-size:23px;
+  }
+
+  .ticket-operation-buttons{
+    width:100%;
+    display:flex;
+    flex-direction:row;
+    gap:12px;
+  }
+
+  .ticket-operation-buttons .ticket-tool-button{
+    flex:1 1 0;
+    min-width:0;
+    min-height:68px;
+    height:68px;
+    padding:9px 14px;
+  }
+
+  /* Bottom left: compact status */
+  .ticket-home-grid .ticket-status-card{
+    grid-area:status;
+    padding:18px 20px;
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+
+  .ticket-home-grid .ticket-status-heading{
+    margin:0 0 10px;
+    flex:0 0 auto;
+  }
+
+  .ticket-home-grid .ticket-status-heading h2{
+    font-size:22px;
+  }
+
+  .ticket-home-grid .ticket-status-heading>strong{
+    font-size:34px;
+  }
+
+  .ticket-home-grid .ticket-status-grid{
+    flex:1 1 auto;
+    min-height:0;
+    height:auto;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-template-rows:repeat(2,minmax(0,1fr));
+    gap:8px;
+  }
+
+  .ticket-home-grid .ticket-status-box{
+    min-height:0;
+    height:auto;
+    padding:10px 12px;
+    border-radius:14px;
+  }
+
+  .ticket-home-grid .ticket-status-box>span{
+    font-size:10px;
+  }
+
+  .ticket-home-grid .ticket-status-box>strong{
+    font-size:30px;
+  }
+
+  .ticket-home-grid .ticket-status-box>em{
+    font-size:8px;
+  }
+
+  .ticket-home-grid .ticket-sync-state{
+    flex:0 0 auto;
+    margin-top:7px;
+  }
+
+  /* Bottom right: compact launcher */
+  .ticket-list-launch{
+    grid-area:list;
+    padding:20px 22px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+  }
+
+  .ticket-list-launch-top{
+    margin:0;
+  }
+
+  .ticket-list-launch-top h2{
+    font-size:23px;
+    margin:0;
+  }
+
+  .ticket-list-launch-bottom{
+    margin:12px 0 0;
+    padding:0;
+  }
+
+  .ticket-list-launch-bottom strong{
+    font-size:30px;
+  }
+
+  .ticket-launch-arrow{
+    width:46px;
+    height:46px;
+  }
+}
+
+@media(max-width:1050px) and (min-width:761px){
+  .ticket-screen{
+    padding-left:12px;
+    padding-right:12px;
+    padding-bottom:8px;
+  }
+
+  .ticket-screen > main.ticket-home-grid{
+    grid-template-rows:150px minmax(0,1fr);
+    gap:9px;
+  }
+
+  .ticket-operation-card{
+    padding:14px 16px;
+  }
+
+  .ticket-operation-card h2{
+    margin-bottom:8px;
+    font-size:20px;
+  }
+
+  .ticket-operation-buttons .ticket-tool-button{
+    min-height:60px;
+    height:60px;
+  }
+
+  .ticket-home-grid .ticket-status-card,
+  .ticket-list-launch{
+    padding:14px 16px;
+  }
+
+  .ticket-home-grid .ticket-status-heading h2,
+  .ticket-list-launch-top h2{
+    font-size:20px;
+  }
+
+  .ticket-home-grid .ticket-status-heading>strong{
+    font-size:30px;
+  }
+
+  .ticket-home-grid .ticket-status-box>strong{
+    font-size:25px;
+  }
+}
