@@ -116,6 +116,9 @@ export default function App() {
   const [memberName, setMemberName] = useState("");
   const [memberRegistrationOpen, setMemberRegistrationOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [memberBulkModalOpen, setMemberBulkModalOpen] = useState(false);
+  const [memberBulkText, setMemberBulkText] = useState("");
   const [memberQrModal, setMemberQrModal] = useState<{ memberId: string; memberNumber: number; name: string } | null>(null);
 
   const eventStatus = event.eventStatus;
@@ -371,6 +374,31 @@ export default function App() {
     const target = members.find(member => member.memberId === memberId);
     if (!target || !window.confirm(`「${target.name}」を部員一覧から削除しますか？`)) return;
     setMembers(current => current.filter(member => member.memberId !== memberId));
+  };
+
+  const toggleMemberSelection = (memberId: string) => {
+    setSelectedMemberIds(current => current.includes(memberId) ? current.filter(id => id !== memberId) : [...current, memberId]);
+  };
+
+  const toggleAllFilteredMembers = () => {
+    setSelectedMemberIds(current => {
+      const ids = filteredMembers.map(member => member.memberId);
+      const allSelected = ids.length > 0 && ids.every(id => current.includes(id));
+      return allSelected ? current.filter(id => !ids.includes(id)) : Array.from(new Set([...current, ...ids]));
+    });
+  };
+
+  const applyBulkMemberNames = () => {
+    const names = memberBulkText.split(/\r?\n/).map(name => name.trim());
+    const orderedIds = filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => member.memberId);
+    if (!orderedIds.length || names.length !== orderedIds.length || names.some(name => !name)) return;
+    setMembers(current => current.map(member => {
+      const index = orderedIds.indexOf(member.memberId);
+      return index >= 0 ? { ...member, name: names[index] } : member;
+    }));
+    setSelectedMemberIds([]);
+    setMemberBulkText("");
+    setMemberBulkModalOpen(false);
   };
 
   const filteredMembers = useMemo(() => {
@@ -725,17 +753,21 @@ export default function App() {
             <small>MEMBER LIST</small>
             <h3>部員一覧</h3>
           </div>
-          <label className="member-search">
-            <SearchIcon />
-            <input placeholder="名前・部員番号を検索" value={memberQuery} onChange={e => setMemberQuery(e.target.value)} />
-          </label>
+          <div className="member-toolbar-actions">
+            <label className="member-search">
+              <SearchIcon />
+              <input placeholder="名前・部員番号を検索" value={memberQuery} onChange={e => setMemberQuery(e.target.value)} />
+            </label>
+            <button className="secondary member-bulk-button" onClick={() => { setMemberBulkText(""); setMemberBulkModalOpen(true); }}>まとめて変更</button>
+          </div>
+
         </div>
 
         {members.length ? (
           <div className="member-table">
-            <div className="member-table-head"><span>部員番号</span><span>氏名</span><span>認証QR</span><span>操作</span></div>
+            <div className="member-table-head"><span className="member-check-cell"><input type="checkbox" checked={filteredMembers.length > 0 && filteredMembers.every(member => selectedMemberIds.includes(member.memberId))} onChange={toggleAllFilteredMembers} aria-label="表示中の部員をすべて選択" /></span><span>部員番号</span><span>氏名</span><span>認証QR</span><span>操作</span></div>
             {filteredMembers.map(member => (
-              <div className="member-row" key={member.memberId}>
+              <div className="member-row" key={member.memberId}><div className="member-check-cell"><input type="checkbox" checked={selectedMemberIds.includes(member.memberId)} onChange={() => toggleMemberSelection(member.memberId)} aria-label={`${member.memberNumber}番を選択`} /></div>
                 <div>
                   <strong>{member.memberId}</strong>
                   <small>#{String(member.memberNumber).padStart(3, "0")}</small>
@@ -759,6 +791,17 @@ export default function App() {
           </div>
         )}
       </section>
+
+      {memberBulkModalOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberBulkModalOpen(false)}>
+        <section className="member-registration-modal member-bulk-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="member-registration-close" onClick={() => setMemberBulkModalOpen(false)} aria-label="閉じる">×</button>
+          <div className="member-registration-heading"><small>BULK MEMBER EDIT</small><h2>部員名をまとめて変更</h2><p>選択した部員の順番に合わせて、1行に1人ずつ入力してください。</p></div>
+          <div className="member-bulk-info">{selectedMemberIds.length}人を変更</div>
+          <textarea className="member-bulk-textarea" value={memberBulkText} onChange={e => setMemberBulkText(e.target.value)} placeholder={filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => member.name || "未登録").join("\n")} rows={Math.max(5, selectedMemberIds.length)} />
+          <div className="member-bulk-order">{filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => <span key={member.memberId}>#{member.memberNumber}</span>)}</div>
+          <div className="member-registration-actions"><button className="secondary" onClick={() => setMemberBulkModalOpen(false)}>キャンセル</button><button className="primary-action" disabled={memberBulkText.split(/\r?\n/).filter(name => name.trim()).length !== selectedMemberIds.length} onClick={applyBulkMemberNames}>変更を適用</button></div>
+        </section>
+      </div>}
 
       {memberRegistrationOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberRegistrationOpen(false)}>
         <section className="member-registration-modal" onMouseDown={e => e.stopPropagation()}>
