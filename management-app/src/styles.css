@@ -2740,3 +2740,21 @@ body:has(.ticket-screen),
   .member-selection-bar{align-items:stretch;flex-wrap:wrap}
   .member-selection-bar span{width:100%;margin-right:0}
 }
+
+.sidebar-group-items button.coming-soon{
+  opacity:.48;
+  cursor:not-allowed;
+}
+.sidebar-group-items button.coming-soon:hover{
+  background:transparent;
+}
+.sidebar-coming-soon{
+  margin-left:auto;
+  padding:3px 6px;
+  border:1px solid currentColor;
+  border-radius:999px;
+  font-size:8px;
+  font-weight:800;
+  white-space:nowrap;
+  opacity:.9;
+}
