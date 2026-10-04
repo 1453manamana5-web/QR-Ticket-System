@@ -310,6 +310,7 @@ export default function App() {
   };
 
   const changeEventStatus = (status: Event["eventStatus"]) => {
+    if (status === "finished") saveAnalysisSnapshot(event);
     const updated = { ...event, eventStatus: status };
     setEvent(updated);
     setEventHistory(current => current.map(item => item.eventId === updated.eventId ? updated : item));
