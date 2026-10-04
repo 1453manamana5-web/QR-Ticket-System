@@ -89,6 +89,17 @@ export default function App() {
   const [ticketStartNumber, setTicketStartNumber] = useState(1);
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
   const [ticketDesignImage, setTicketDesignImage] = useState("");
+  const [ticketAspectRatio, setTicketAspectRatio] = useState("16:9");
+  const [ticketPrintWidth, setTicketPrintWidth] = useState(90);
+  const [ticketQrX, setTicketQrX] = useState(76);
+  const [ticketQrY, setTicketQrY] = useState(50);
+  const [ticketQrSize, setTicketQrSize] = useState(29);
+  const [ticketNumberEnabled, setTicketNumberEnabled] = useState(true);
+  const [ticketNumberX, setTicketNumberX] = useState(31);
+  const [ticketNumberY, setTicketNumberY] = useState(72);
+  const [ticketNumberSize, setTicketNumberSize] = useState(18);
+  const [ticketColumns, setTicketColumns] = useState(2);
+  const [ticketGapMm, setTicketGapMm] = useState(4);
   const [savedEventName, setSavedEventName] = useState(baseEvent.eventName);
   const [settings, setSettings] = useState<ReceptionSettings>({
     entryEnabled: true,
@@ -278,6 +289,8 @@ export default function App() {
     if (!window.confirm("このチケットを削除しますか？")) return;
     setTickets(current => current.filter(ticket => ticket.ticketId !== ticketId));
   };
+
+  const ticketPrintHeight = Number((ticketPrintWidth / (Number(ticketAspectRatio.split(":")[0]) / Number(ticketAspectRatio.split(":")[1]))).toFixed(1));
 
   const handleTicketDesignChange = (file?: File) => {
     if (!file) return;
@@ -537,17 +550,103 @@ export default function App() {
         </div>
       </div>}
 
-      {ticketDesignModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketDesignModalOpen(false)}>
-        <div className="ticket-modal ticket-design-modal" onMouseDown={e => e.stopPropagation()}>
-          <button className="ticket-modal-close" onClick={() => setTicketDesignModalOpen(false)}>×</button>
-          <small>DESIGN & PRINT</small><h2>デザイン・印刷</h2><p>チケットデザイン画像を設定して、発行済みチケットを一括印刷します。</p>
-          <label className="ticket-design-upload">チケットデザイン画像<input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} /></label>
-          {ticketDesignImage && <div className="ticket-design-current"><img src={ticketDesignImage} alt="" /><button className="secondary" onClick={() => setTicketDesignImage("")}>デザインを外す</button></div>}
-          <div className="ticket-print-preview"><strong>{event.eventName}</strong><span>{ticketTitle}</span><b>{tickets.length || ticketCount}枚</b></div>
-          <div className="ticket-modal-actions">
-            <button className="secondary" onClick={() => setTicketDesignModalOpen(false)}>閉じる</button>
-            <button className="ticket-modal-primary" disabled={!tickets.length} onClick={() => window.print()}>まとめて印刷</button>
+      {ticketDesignModalOpen && <div className="ticket-modal-backdrop ticket-design-backdrop" onMouseDown={() => setTicketDesignModalOpen(false)}>
+        <div className="ticket-design-editor" onMouseDown={e => e.stopPropagation()}>
+          <header className="ticket-design-editor-header">
+            <div>
+              <h2>チケットデザイン・印刷</h2>
+              <p>背景画像にQRコードとチケット番号を配置します</p>
+            </div>
+            <button className="ticket-design-editor-close" onClick={() => setTicketDesignModalOpen(false)}>×</button>
+          </header>
+
+          <div className="ticket-design-editor-body">
+            <section className="ticket-design-preview-pane">
+              <div className="ticket-design-preview-title">
+                <h3>印刷プレビュー</h3>
+                <strong>{ticketPrintWidth.toFixed(1)}mm × {ticketPrintHeight.toFixed(1)}mm</strong>
+              </div>
+              <div className="ticket-design-preview-stage">
+                <div
+                  className="ticket-design-ticket-preview"
+                  style={{aspectRatio: ticketAspectRatio.replace(":", " / ")}}
+                >
+                  {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <span className="ticket-design-empty">背景画像を選択して</span>}
+                  <div className="ticket-design-qr-preview" style={{
+                    left: `${ticketQrX}%`, top: `${ticketQrY}%`,
+                    width: `${ticketQrSize * 1.75}%`,
+                    transform: "translate(-50%, -50%)",
+                  }}>
+                    <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin />
+                  </div>
+                  {ticketNumberEnabled && <strong className="ticket-design-number-preview" style={{
+                    left: `${ticketNumberX}%`, top: `${ticketNumberY}%`,
+                    fontSize: `${Math.max(10, ticketNumberSize)}px`,
+                    transform: "translate(-50%, -50%)",
+                  }}>{tickets[0]?.ticketId || "TK000001"}</strong>}
+                </div>
+              </div>
+            </section>
+
+            <aside className="ticket-design-controls">
+              <section className="ticket-design-control-card">
+                <h3>デザイン設定</h3>
+                <div className="ticket-design-control-block">
+                  <h4>チケットサイズ</h4>
+                  <label>比率<select value={ticketAspectRatio} onChange={e => setTicketAspectRatio(e.target.value)}>
+                    <option value="16:9">16:9</option><option value="3:2">3:2</option><option value="4:3">4:3</option><option value="1:1">1:1</option>
+                  </select></label>
+                  <label className="mm-input-row">印刷時の横幅<input type="number" min="40" max="210" step="0.1" value={ticketPrintWidth} onChange={e => setTicketPrintWidth(Math.min(210, Math.max(40, Number(e.target.value) || 40)))} /><span>mm</span></label>
+                </div>
+              </section>
+
+              <section className="ticket-design-control-card">
+                <h3>QRコード</h3>
+                <RangeSetting label="横位置" value={ticketQrX} suffix="%" min={0} max={100} onChange={setTicketQrX} />
+                <RangeSetting label="縦位置" value={ticketQrY} suffix="%" min={0} max={100} onChange={setTicketQrY} />
+                <RangeSetting label="大きさ" value={ticketQrSize} suffix="%" min={15} max={45} onChange={setTicketQrSize} />
+              </section>
+
+              <section className="ticket-design-control-card">
+                <h3>チケット番号</h3>
+                <button className={ticketNumberEnabled ? "ticket-design-toggle active" : "ticket-design-toggle"} onClick={() => setTicketNumberEnabled(v => !v)}>
+                  <span>チケット番号を印刷する</span><b>{ticketNumberEnabled ? "✓" : ""}</b>
+                </button>
+                <RangeSetting label="横位置" value={ticketNumberX} suffix="%" min={0} max={100} onChange={setTicketNumberX} />
+                <RangeSetting label="縦位置" value={ticketNumberY} suffix="%" min={0} max={100} onChange={setTicketNumberY} />
+                <RangeSetting label="文字サイズ" value={ticketNumberSize} suffix="px" min={10} max={40} onChange={setTicketNumberSize} />
+              </section>
+
+              <section className="ticket-design-control-card">
+                <h3>まとめて印刷</h3>
+                <label>1行に並べる枚数<select value={ticketColumns} onChange={e => setTicketColumns(Number(e.target.value))}>
+                  <option value={1}>1枚</option><option value={2}>2枚</option><option value={3}>3枚</option><option value={4}>4枚</option>
+                </select></label>
+                <label className="mm-input-row">チケット間の余白<input type="number" min="0" max="20" step="1" value={ticketGapMm} onChange={e => setTicketGapMm(Math.min(20, Math.max(0, Number(e.target.value) || 0)))} /><span>mm</span></label>
+              </section>
+
+              <section className="ticket-design-control-card">
+                <h3>背景画像</h3>
+                <strong className="ticket-design-format">PNG・JPEG画像</strong>
+                <label className="ticket-design-file">
+                  <span>ファイルを選択</span><input type="file" accept="image/png,image/jpeg" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
+                </label>
+                <p>KeynoteやPowerPointから書き出したPNG画像も使用できます。</p>
+                <p>画像の縦横比は、カスタムを除く最も近い比率へ自動設定します。</p>
+                <div className="ticket-design-marker-help"><i />QRを置きたい場所に、鮮やかなピンク（目安 #FF00FF）の塗りつぶし正方形を1つ置いてください。近いピンク色でも自動検出します。</div>
+              </section>
+            </aside>
           </div>
+
+          <footer className="ticket-design-editor-footer">
+            <button className="ticket-design-save" onClick={() => setTicketDesignModalOpen(false)}>デザインを保存</button>
+            <button className="ticket-design-print" disabled={!tickets.length} onClick={() => window.print()}>選択した範囲を印刷</button>
+            <button className="ticket-design-reset" onClick={() => {
+              setTicketAspectRatio("16:9"); setTicketPrintWidth(90); setTicketQrX(76); setTicketQrY(50); setTicketQrSize(29);
+              setTicketNumberEnabled(true); setTicketNumberX(31); setTicketNumberY(72); setTicketNumberSize(18); setTicketColumns(2); setTicketGapMm(4);
+            }}>初期状態に戻す</button>
+            <button className="ticket-design-close" onClick={() => setTicketDesignModalOpen(false)}>閉じる</button>
+          </footer>
         </div>
       </div>}
 
@@ -644,6 +743,9 @@ export default function App() {
     </>;
   };
 
+function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
+  return <label className="ticket-design-range"><span>{label}</span><input type="range" min={min} max={max} value={value} onChange={e => onChange(Number(e.target.value))}/><strong>{value}{suffix}</strong></label>;
+}
 function TicketIcon(){return <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 13h32v22H8z"/><path d="M14 13v7m0 8v7M34 13v7m0 8v7"/><path d="M21 18h8v12h-8z"/></svg>;}
 function PlusIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 7v18M7 16h18"/></svg>;}
 function PaletteIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5C9.9 5 5 9.5 5 15.2 5 20 8.6 23 13 23h2.5c1.8 0 2.6 2.3 1.6 3.6-.4.5 0 .9.7.9C24.2 27.5 27 22.2 27 16c0-6.1-4.9-11-11-11Z"/><circle cx="10.5" cy="14" r="1.2"/><circle cx="15" cy="10.5" r="1.2"/><circle cx="21" cy="11.5" r="1.2"/><circle cx="23" cy="17" r="1.2"/></svg>;}
