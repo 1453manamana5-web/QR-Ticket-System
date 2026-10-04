@@ -96,6 +96,10 @@ export default function App() {
     reentryEnabled: true,
   });
   const [ticketQuery, setTicketQuery] = useState("");
+  const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
+  const [ticketCreateModalOpen, setTicketCreateModalOpen] = useState(false);
+  const [ticketDesignModalOpen, setTicketDesignModalOpen] = useState(false);
+  const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
   const [staffNames, setStaffNames] = useState<string[]>([]);
   const [staffName, setStaffName] = useState("");
 
@@ -109,12 +113,14 @@ export default function App() {
 
   const filteredTickets = useMemo(() => {
     const query = ticketQuery.trim().toLowerCase();
-    if (!query) return tickets.slice(0, 20);
-    return tickets.filter(ticket =>
-      ticket.ticketId.toLowerCase().includes(query) ||
-      String(ticket.basicInfo.ticketNumber).includes(query),
-    ).slice(0, 20);
-  }, [tickets, ticketQuery]);
+    return tickets.filter(ticket => {
+      const matchesQuery = !query ||
+        ticket.ticketId.toLowerCase().includes(query) ||
+        String(ticket.basicInfo.ticketNumber).includes(query);
+      const matchesStatus = ticketStatusFilter === "all" || ticket.currentStatus === ticketStatusFilter;
+      return matchesQuery && matchesStatus;
+    }).slice(0, 10);
+  }, [tickets, ticketQuery, ticketStatusFilter]);
 
   const saveEvent = async () => {
     const normalizedName = eventName.trim() || baseEvent.eventName;
@@ -247,7 +253,29 @@ export default function App() {
     setTicketPrefix(prefix);
     setTicketStartNumber(startNumber);
     setTickets(createTickets(event.eventId, count, startNumber, prefix));
+    setTicketStatusFilter("all");
     setError("");
+  };
+
+  const updateTicketStatus = (ticketId: string, status: Ticket["currentStatus"]) => {
+    setTickets(current => current.map(ticket =>
+      ticket.ticketId === ticketId
+        ? { ...ticket, currentStatus: status, updatedAt: new Date().toISOString() }
+        : ticket,
+    ));
+  };
+
+  const toggleTicketValidity = (ticketId: string) => {
+    setTickets(current => current.map(ticket =>
+      ticket.ticketId === ticketId
+        ? { ...ticket, valid: !ticket.valid, updatedAt: new Date().toISOString() }
+        : ticket,
+    ));
+  };
+
+  const deleteTicket = (ticketId: string) => {
+    if (!window.confirm("このチケットを削除しますか？")) return;
+    setTickets(current => current.filter(ticket => ticket.ticketId !== ticketId));
   };
 
   const handleTicketDesignChange = (file?: File) => {
@@ -397,107 +425,145 @@ export default function App() {
 
     </section>;
 
-    if (page === "チケット管理") return <section className="panel ticket-management-panel">
-      <div className="panel-title">
-        <div><small>TICKET MANAGEMENT</small><h2>チケット管理</h2><p>チケットのデザイン・番号・QRをまとめて管理します。</p></div>
-        <span className="pill">{ticketStats.total}枚</span>
-      </div>
-
-      <div className="ticket-config-card">
-        <div className="ticket-config-heading">
-          <div><small>TICKET DESIGN</small><h3>チケット発行設定</h3></div>
-          <span>現在のイベント：{event.eventName}</span>
-        </div>
-        <div className="ticket-config-grid">
-          <label>チケットタイトル
-            <input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} />
-          </label>
-          <label>チケット枚数
-            <input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} />
-          </label>
-          <label>番号プレフィックス
-            <input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} />
-          </label>
-          <label>開始番号
-            <input type="number" min="1" value={ticketStartNumber} onChange={e => setTicketStartNumber(Math.max(1, Number(e.target.value) || 1))} />
-          </label>
-        </div>
-        <div className="ticket-design-row">
-          <label className="ticket-upload">
-            <span>チケットデザイン画像</span>
-            <input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
-            <small>{ticketDesignImage ? "デザイン画像を読み込み済み" : "任意。画像を貼り付けると印刷チケットに反映します。"}</small>
-          </label>
-          {ticketDesignImage && <button className="secondary" onClick={() => setTicketDesignImage("")}>デザインを外す</button>}
-        </div>
-        <div className="actions">
-          <button className="primary-action" onClick={generateTickets}>QR・チケット番号を生成</button>
-          <button className="secondary" onClick={() => setTickets([])} disabled={!tickets.length}>生成結果をクリア</button>
-        </div>
-      </div>
-
-      <div className="metrics">
-        <Metric title="総チケット" value={String(ticketStats.total)} sub="枚" />
-        <Metric title="未使用" value={String(ticketStats.unused)} sub="枚" />
-        <Metric title="入場中" value={String(ticketStats.inside)} sub="人" />
-      </div>
-
-      <div className="ticket-preview-card">
-        <div className="ticket-preview-heading">
-          <div><small>PREVIEW</small><h3>チケットプレビュー</h3></div>
-          <span>{tickets.length ? "QR・番号の発行済み" : "未生成"}</span>
-        </div>
-        {tickets.length > 0 ? <div className="ticket-preview-grid">
-          {tickets.slice(0, 6).map(ticket => (
-            <div className="ticket-preview" key={ticket.ticketId}>
-              {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <div className="ticket-preview-top"><b>{event.eventName}</b><span>{ticketTitle}</span></div>}
-              <div className="ticket-preview-body">
-                <div><small>NO.</small><strong>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</strong><span className="mono">{ticket.ticketId}</span></div>
-                <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={104} includeMargin />
+    if (page === "チケット管理") return <>
+      <div className="ticket-screen">
+        <header className="ticket-screen-header">
+          <div className="ticket-brand">
+            <div className="ticket-brand-mark">QR</div>
+            <div>
+              <h1>交通研究部QRコード管理システム</h1>
+              <div className="ticket-brand-meta">
+                <span className="online-dot"><i />オンライン</span>
+                <span className="ticket-divider" />
+                <span className="event-chip">EVENT&nbsp;&nbsp; {event.eventName}</span>
               </div>
             </div>
-          ))}
-        </div> : <div className="empty"><h3>まだチケットがありません</h3><p>上の「QR・チケット番号を生成」を押すと、連番とQRを自動で発行します。</p></div>}
+          </div>
+          <div className="ticket-page-title">
+            <span className="ticket-page-icon"><TicketIcon /></span>
+            <div><small>TICKET MANAGEMENT</small><strong>チケット管理</strong></div>
+          </div>
+        </header>
+
+        <div className="ticket-screen-grid">
+          <div className="ticket-left-column">
+            <section className="ticket-tool-card">
+              <small>TICKET TOOLS</small>
+              <h2>チケット操作</h2>
+              <button className="ticket-tool-button ticket-tool-create" onClick={() => setTicketCreateModalOpen(true)}>
+                <span className="tool-icon"><PlusIcon /></span>
+                <span><small>CREATE TICKETS</small><b>チケットを新規発行</b></span>
+              </button>
+              <button className="ticket-tool-button ticket-tool-design" onClick={() => setTicketDesignModalOpen(true)}>
+                <span className="tool-icon"><PaletteIcon /></span>
+                <span><small>DESIGN & PRINT</small><b>デザイン・まとめて印刷</b></span>
+              </button>
+            </section>
+
+            <section className="ticket-status-card">
+              <div className="ticket-status-heading">
+                <div><small>TICKET STATUS</small><h2>チケット状況</h2></div>
+                <strong>{ticketStats.total}<span>枚</span></strong>
+              </div>
+              <div className="ticket-status-grid">
+                <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
+                <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
+                <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
+                <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
+              </div>
+              <div className="ticket-sync-state"><i />リアルタイム同期中</div>
+            </section>
+          </div>
+
+          <section className="ticket-list-screen-card">
+            <div className="ticket-list-screen-heading">
+              <div><small>ALL TICKETS</small><h2>チケット一覧</h2></div>
+              <div className="ticket-count-badge">表示件数 <strong>{Math.min(10, filteredTickets.length || (tickets.length ? 10 : 0))}</strong>件</div>
+            </div>
+
+            <div className="ticket-search-row">
+              <div className="ticket-search-box"><SearchIcon /><input placeholder="QR番号を検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} /></div>
+              <div className="ticket-filter-box"><FilterIcon /><select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value as typeof ticketStatusFilter)}>
+                <option value="all">すべての状態</option>
+                <option value="unused">未使用</option>
+                <option value="inside">入場中</option>
+                <option value="exited">使用済み</option>
+              </select></div>
+            </div>
+
+            {tickets.length > 0 ? <div className="ticket-screen-table">
+              <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
+              {filteredTickets.map(ticket => (
+                <div className="ticket-screen-row" key={ticket.ticketId}>
+                  <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</strong></div>
+                  <select
+                    className={`ticket-status-select status-${ticket.currentStatus}`}
+                    value={ticket.currentStatus}
+                    onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}
+                  >
+                    <option value="unused">未使用</option>
+                    <option value="inside">入場中</option>
+                    <option value="exited">使用済み</option>
+                  </select>
+                  <div className="ticket-row-actions">
+                    <button className="ticket-row-view" onClick={() => setTicketQrModalTicket(ticket)}>QR表示</button>
+                    <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
+                    <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
+                  </div>
+                </div>
+              ))}
+            </div> : <div className="ticket-list-empty"><h3>チケットがありません</h3><p>「チケットを新規発行」からQRチケットを作成してください。</p></div>}
+
+            {tickets.length > 10 && <div className="ticket-list-footer">先頭10件を表示中　・　全{tickets.length}件</div>}
+          </section>
+        </div>
+
+        <button className="ticket-back-button" onClick={() => setPage("ホーム")}><BackIcon />管理モードに戻る</button>
       </div>
 
-      <div className="ticket-list-card">
-        <div className="ticket-preview-heading">
-          <div><small>TICKET LIST</small><h3>発行済みチケット</h3></div>
-          <div className="ticket-list-actions">
-            <span>{tickets.length ? `表示 ${filteredTickets.length}件 / ${tickets.length}件` : "チケット未生成"}</span>
-            <button className="secondary" onClick={() => window.print()} disabled={!tickets.length}>チケットを印刷</button>
+      {ticketCreateModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketCreateModalOpen(false)}>
+        <div className="ticket-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="ticket-modal-close" onClick={() => setTicketCreateModalOpen(false)}>×</button>
+          <small>CREATE TICKETS</small><h2>チケットを新規発行</h2><p>番号とQRコードをまとめて生成します。</p>
+          <div className="ticket-modal-grid">
+            <label>チケットタイトル<input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} /></label>
+            <label>発行枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
+            <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
+            <label>開始番号<input type="number" min="1" value={ticketStartNumber} onChange={e => setTicketStartNumber(Math.max(1, Number(e.target.value) || 1))} /></label>
+          </div>
+          <div className="ticket-modal-actions">
+            <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
+            <button className="ticket-modal-primary" onClick={() => { generateTickets(); setTicketCreateModalOpen(false); }}>QR・チケットを発行</button>
           </div>
         </div>
-        <div className="ticket-toolbar">
-          <input placeholder="チケット番号・IDを検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} />
-        </div>
-        {tickets.length > 0 ? <div className="ticket-table">
-          <div className="ticket-row ticket-head"><b>番号</b><b>チケットID</b><b>状態</b><b>有効</b></div>
-          {filteredTickets.map(ticket => (
-            <div className="ticket-row" key={ticket.ticketId}>
-              <span>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</span>
-              <span className="mono">{ticket.ticketId}</span>
-              <span>{ticket.currentStatus === "unused" ? "未使用" : ticket.currentStatus === "inside" ? "入場中" : "退場済み"}</span>
-              <span>{ticket.valid ? "有効" : "無効"}</span>
-            </div>
-          ))}
-        </div> : <div className="empty"><h3>まだチケットがありません</h3><p>イベントを選択して、発行設定からチケットを生成してください。</p></div>}
-      </div>
-
-      {tickets.length > 0 && <div className="ticket-print-area">
-        {tickets.map(ticket => (
-          <article className="print-ticket" key={`print-${ticket.ticketId}`}>
-            {ticketDesignImage && <img className="print-ticket-design" src={ticketDesignImage} alt="" />}
-            <div className="print-ticket-header"><strong>{event.eventName}</strong><span>{ticketTitle}</span></div>
-            <div className="print-ticket-content">
-              <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</b><span>{ticket.ticketId}</span></div>
-              <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={118} includeMargin />
-            </div>
-            <div className="print-ticket-footer">このQRは入場・退場認証に使用します</div>
-          </article>
-        ))}
       </div>}
-    </section>;
+
+      {ticketDesignModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketDesignModalOpen(false)}>
+        <div className="ticket-modal ticket-design-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="ticket-modal-close" onClick={() => setTicketDesignModalOpen(false)}>×</button>
+          <small>DESIGN & PRINT</small><h2>デザイン・まとめて印刷</h2><p>チケットデザイン画像を設定して、発行済みチケットを一括印刷します。</p>
+          <label className="ticket-design-upload">チケットデザイン画像
+            <input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
+          </label>
+          {ticketDesignImage && <div className="ticket-design-current"><img src={ticketDesignImage} alt="" /><button className="secondary" onClick={() => setTicketDesignImage("")}>デザインを外す</button></div>}
+          <div className="ticket-print-preview"><strong>{event.eventName}</strong><span>{ticketTitle}</span><b>{tickets.length || ticketCount}枚</b></div>
+          <div className="ticket-modal-actions">
+            <button className="secondary" onClick={() => setTicketDesignModalOpen(false)}>閉じる</button>
+            <button className="ticket-modal-primary" disabled={!tickets.length} onClick={() => window.print()}>まとめて印刷</button>
+          </div>
+        </div>
+      </div>}
+
+      {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
+        <div className="ticket-modal ticket-qr-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="ticket-modal-close" onClick={() => setTicketQrModalTicket(null)}>×</button>
+          <small>QR CODE</small><h2>QR表示</h2><p>{event.eventName}</p>
+          <div className="ticket-qr-large"><QRCodeSVG value={ticketQrValue(event.eventId, ticketQrModalTicket)} size={280} includeMargin /></div>
+          <strong className="ticket-qr-number">TKT {String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(5, "0")}</strong>
+          <div className="ticket-modal-actions"><button className="secondary" onClick={() => setTicketQrModalTicket(null)}>閉じる</button></div>
+        </div>
+      </div>}
+    </>;
 
     if (page === "端末管理") return <section className="panel">
       <div className="panel-title"><div><small>TERMINAL MANAGEMENT</small><h2>端末管理</h2></div></div>
@@ -569,6 +635,14 @@ export default function App() {
       </section>
     </>;
   };
+
+function TicketIcon(){return <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 13h32v22H8z"/><path d="M14 13v7m0 8v7M34 13v7m0 8v7"/><path d="M21 18h8v12h-8z"/></svg>;}
+function PlusIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 7v18M7 16h18"/></svg>;}
+function PaletteIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5C9.9 5 5 9.5 5 15.2 5 20 8.6 23 13 23h2.5c1.8 0 2.6 2.3 1.6 3.6-.4.5 0 .9.7.9C24.2 27.5 27 22.2 27 16c0-6.1-4.9-11-11-11Z"/><circle cx="10.5" cy="14" r="1.2"/><circle cx="15" cy="10.5" r="1.2"/><circle cx="21" cy="11.5" r="1.2"/><circle cx="23" cy="17" r="1.2"/></svg>;}
+function SearchIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>;}
+function FilterIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>;}
+function QrIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zM14 14h3v3h-3zm5 0h1v1h-1zm-5 5h1v1h-1zm3-2h3v3h-3z"/></svg>;}
+function BackIcon(){return <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M18 5 7 14l11 9M8 14h15"/></svg>;}
 
   return <div className="app-shell">
     <aside className="sidebar">
