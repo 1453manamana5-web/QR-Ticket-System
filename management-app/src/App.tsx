@@ -62,6 +62,11 @@ export default function App() {
   const [event, setEvent] = useState<Event>(baseEvent);
   const [eventHistory, setEventHistory] = useState<Event[]>([baseEvent]);
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState(baseEvent.eventId);
+  const [newEventModalOpen, setNewEventModalOpen] = useState(false);
+  const [newEventName, setNewEventName] = useState("");
+  const [newEventDate, setNewEventDate] = useState("");
+  const [newStartTime, setNewStartTime] = useState("10:00");
+  const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -132,16 +137,41 @@ export default function App() {
     }
   };
 
+  const openNewEventModal = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    setNewEventName("新しいイベント");
+    setNewEventDate(today);
+    setNewStartTime("10:00");
+    setNewEndTime("16:00");
+    setError("");
+    setNewEventModalOpen(true);
+  };
+
+  const closeNewEventModal = () => {
+    setNewEventModalOpen(false);
+  };
+
   const createNewEvent = () => {
+    const normalizedName = newEventName.trim();
+    if (!normalizedName || !newEventDate || !newStartTime || !newEndTime) {
+      setError("イベント名・開催日・開始時刻・終了時刻を入力してください。");
+      return;
+    }
+    if (newStartTime >= newEndTime) {
+      setError("終了時刻は開始時刻より後にしてください。");
+      return;
+    }
+
     const next: Event = {
       eventId: createEventId(),
-      eventName: "新しいイベント",
-      eventDate: new Date().toISOString().slice(0, 10),
-      startTime: "10:00",
-      endTime: "16:00",
+      eventName: normalizedName,
+      eventDate: newEventDate,
+      startTime: newStartTime,
+      endTime: newEndTime,
       eventStatus: "preparing",
       dataVersion: 1,
     };
+
     setEvent(next);
     setEventHistory(current => [next, ...current.filter(item => item.eventId !== next.eventId)]);
     setSelectedHistoryEventId(next.eventId);
@@ -153,6 +183,7 @@ export default function App() {
     setBundle(null);
     setTickets([]);
     setError("");
+    setNewEventModalOpen(false);
     setPage("イベント管理");
   };
 
@@ -257,8 +288,41 @@ export default function App() {
         <span className="pill">{statusLabel[eventStatus]}</span>
       </div>
 
+      <div className="event-history">
+        <div className="event-history-header">
+          <div><small>EVENT HISTORY</small><h2>イベント履歴</h2></div>
+          <span>{eventHistory.length}件</span>
+        </div>
+        <div className="event-history-list">
+          {eventHistory.map(item => {
+            const selected = item.eventId === selectedHistoryEventId;
+            return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
+              <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
+                <div>
+                  <b>{item.eventName}</b>
+                  <small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small>
+                  <span>{item.eventId}</span>
+                </div>
+                <span className="pill">{statusLabel[item.eventStatus]}</span>
+              </button>
+              {selected && <div className="event-history-actions">
+                <span className="event-history-label">このイベントを操作</span>
+                <div>
+                  <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
+                  <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
+                  <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
+                  <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
+                  <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
+                  <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
+                </div>
+              </div>}
+            </div>;
+          })}
+        </div>
+      </div>
+
       <div className="actions event-actions">
-        <button className="secondary" onClick={createNewEvent}>＋ 新しいイベント</button>
+        <button className="secondary" onClick={openNewEventModal}>＋ 新しいイベント</button>
         <button className="secondary" onClick={() => void saveEvent()}>イベント情報を保存</button>
         <button className="secondary" onClick={() => changeEventStatus(nextStatus(eventStatus))} disabled={eventStatus === "finished"}>
           {eventStatus === "preparing" ? "受付可能にする" : eventStatus === "ready" ? "開催を開始" : eventStatus === "active" ? "終了処理へ" : "イベントを終了"}
@@ -300,38 +364,6 @@ export default function App() {
         <div className="qr-box"><QRCodeSVG value={authQrValue} size={220} includeMargin /></div>
       </div>}
 
-      <div className="event-history">
-        <div className="event-history-header">
-          <div><small>EVENT HISTORY</small><h2>イベント履歴</h2></div>
-          <span>{eventHistory.length}件</span>
-        </div>
-        <div className="event-history-list">
-          {eventHistory.map(item => {
-            const selected = item.eventId === selectedHistoryEventId;
-            return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
-              <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
-                <div>
-                  <b>{item.eventName}</b>
-                  <small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small>
-                  <span>{item.eventId}</span>
-                </div>
-                <span className="pill">{statusLabel[item.eventStatus]}</span>
-              </button>
-              {selected && <div className="event-history-actions">
-                <span className="event-history-label">このイベントを操作</span>
-                <div>
-                  <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
-                  <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
-                  <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
-                  <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
-                  <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
-                  <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
-                </div>
-              </div>}
-            </div>;
-          })}
-        </div>
-      </div>
     </section>;
 
     if (page === "チケット管理") return <section className="panel">
@@ -383,7 +415,7 @@ export default function App() {
         <button className="primary-action" onClick={addStaff}>スタッフを追加</button>
       </div>
       {staffNames.length ? staffNames.map((name, index) => (
-        <div className="staff-row" key={`${name}-${index}`}><div><b>{name}</b><small>スタッフQR #{index + 1}</small></div><button className="secondary" onClick={() => setStaffNames(current => current.filter((_, i) => i !== index))}>削除</button></div>
+        <div className="staff-row" key={`${name}-${index}`}><div><b>{name}</b><small>スタッフQR #${index + 1}</small></div><button className="secondary" onClick={() => setStaffNames(current => current.filter((_, i) => i !== index))}>削除</button></div>
       )) : <div className="empty"><h3>スタッフを登録</h3><p>旧アプリと同じように、スタッフ名とスタッフ用QRをここで管理します。</p></div>}
     </section>;
 
@@ -445,10 +477,30 @@ export default function App() {
     <main className="management-main">
       <header className="management-header">
         <div><small>管理画面</small><h1>{page}</h1></div>
-        <div className="header-actions"><button className="secondary" onClick={createNewEvent}>＋ 新規イベント</button><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>
+        <div className="header-actions"><button className="secondary" onClick={openNewEventModal}>＋ 新規イベント</button><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>
       </header>
       {pageContent()}
     </main>
+
+    {newEventModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={closeNewEventModal}>
+      <div className="new-event-modal" role="dialog" aria-modal="true" aria-labelledby="new-event-title" onMouseDown={e => e.stopPropagation()}>
+        <div className="new-event-modal-header">
+          <div><small>NEW EVENT</small><h2 id="new-event-title">新しいイベントを作成</h2><p>イベントの基本情報を入力してください。</p></div>
+          <button className="modal-close" aria-label="閉じる" onClick={closeNewEventModal}>×</button>
+        </div>
+        <div className="form-grid new-event-form">
+          <label>イベント名<input autoFocus value={newEventName} onChange={e => setNewEventName(e.target.value)} /></label>
+          <label>開催日<input type="date" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} /></label>
+          <label>開始時刻<input type="time" value={newStartTime} onChange={e => setNewStartTime(e.target.value)} /></label>
+          <label>終了時刻<input type="time" value={newEndTime} onChange={e => setNewEndTime(e.target.value)} /></label>
+        </div>
+        {error && <div className="notice error">{error}</div>}
+        <div className="modal-actions">
+          <button className="secondary" onClick={closeNewEventModal}>キャンセル</button>
+          <button className="primary-action" onClick={createNewEvent}>イベントを作成</button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 
