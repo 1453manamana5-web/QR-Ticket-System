@@ -179,6 +179,36 @@ export default function App() {
     exitEnabled: true,
     reentryEnabled: true,
   });
+  type AppSettings = {
+    volume: number;
+    successSound: boolean;
+    voiceGuidance: boolean;
+    controlAssist: boolean;
+    deviceName: string;
+    controlLinkCode: string;
+    aiLabEnabled: boolean;
+  };
+  const defaultAppSettings: AppSettings = {
+    volume: 70,
+    successSound: true,
+    voiceGuidance: false,
+    controlAssist: false,
+    deviceName: "受付端末",
+    controlLinkCode: "",
+    aiLabEnabled: false,
+  };
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
+    try {
+      const raw = localStorage.getItem("qr-ticket-app-settings");
+      if (!raw) return defaultAppSettings;
+      return { ...defaultAppSettings, ...JSON.parse(raw) };
+    } catch {
+      return defaultAppSettings;
+    }
+  });
+  const [settingsNotice, setSettingsNotice] = useState("");
+  const [controlCodeInput, setControlCodeInput] = useState("");
+
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
   const [ticketCreateModalOpen, setTicketCreateModalOpen] = useState(false);
@@ -201,6 +231,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory));
   }, [analysisHistory]);
+  useEffect(() => {
+    localStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings));
+  }, [appSettings]);
+
 
   const saveAnalysisSnapshot = (targetEvent: Event = event) => {
     const record: AnalysisRecord = {
@@ -477,6 +511,105 @@ export default function App() {
   const toggleSetting = (key: keyof ReceptionSettings) => {
     setSettings(current => ({ ...current, [key]: !current[key] }));
   };
+  const updateAppSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setAppSettings(current => ({ ...current, [key]: value }));
+    setSettingsNotice("設定を保存しました。");
+    window.setTimeout(() => setSettingsNotice(""), 1800);
+  };
+
+  const resetAppSettings = () => {
+    setAppSettings(defaultAppSettings);
+    setControlCodeInput("");
+    setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+    setSettingsNotice("設定を初期状態に戻しました。");
+  };
+
+  const exportBackup = () => {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      appSettings,
+      receptionSettings: settings,
+      eventHistory,
+      analysisHistory,
+      tickets,
+      members,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `qr-ticket-backup-${new Date().toISOString().slice(0,10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setSettingsNotice("バックアップを保存しました。");
+  };
+
+  const importBackup = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+          if (!parsed || typeof parsed !== "object") throw new Error("invalid");
+          if (parsed.appSettings) setAppSettings({ ...defaultAppSettings, ...parsed.appSettings });
+          if (parsed.receptionSettings) setSettings({ ...settings, ...parsed.receptionSettings });
+          if (Array.isArray(parsed.eventHistory) && parsed.eventHistory.length) setEventHistory(parsed.eventHistory);
+          if (Array.isArray(parsed.analysisHistory)) setAnalysisHistory(parsed.analysisHistory);
+          if (Array.isArray(parsed.tickets)) setTickets(parsed.tickets);
+          if (Array.isArray(parsed.members)) setMembers(parsed.members);
+          setSettingsNotice("バックアップを復元しました。");
+        } catch {
+          setError("バックアップファイルを読み込めませんでした。");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const resetAllData = () => {
+    if (!window.confirm("すべてのローカルデータを初期化します。イベント履歴・分析履歴・チケット・部員情報・設定が削除されます。実行しますか？")) return;
+    [
+      "qr-ticket-event-history",
+      "qr-ticket-analysis-history",
+      "qr-ticket-app-settings",
+    ].forEach(key => localStorage.removeItem(key));
+    setEvent(baseEvent);
+    setEventHistory([baseEvent]);
+    setAnalysisHistory([]);
+    setSelectedHistoryEventId(baseEvent.eventId);
+    setSelectedAnalysisEventId(baseEvent.eventId);
+    setTickets([]);
+    setMembers([]);
+    setAppSettings(defaultAppSettings);
+    setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+    setBundle(null);
+    setSettingsNotice("ローカルデータを初期化しました。");
+  };
+
+  const linkControlApp = () => {
+    const code = controlCodeInput.trim();
+    if (!code) {
+      setSettingsNotice("連携コードを入力してください。");
+      return;
+    }
+    updateAppSetting("controlLinkCode", code);
+    setControlCodeInput("");
+    setSettingsNotice("管制アプリとの連携情報を保存しました。");
+  };
+
+  const unlinkControlApp = () => {
+    if (!window.confirm("管制アプリとの連携を解除しますか？")) return;
+    updateAppSetting("controlLinkCode", "");
+    setSettingsNotice("管制アプリとの連携を解除しました。");
+  };
+
 
   const addMember = () => {
     const normalized = memberName.trim();
@@ -1079,17 +1212,90 @@ export default function App() {
       </div>;
     }
 
-    if (page === "設定") return <section className="panel">
-      <div className="panel-title"><div><small>SETTINGS</small><h2>設定</h2></div></div>
-      <Setting title="入口受付" text="入場処理を有効にする" checked={settings.entryEnabled} onChange={() => toggleSetting("entryEnabled")} />
-      <Setting title="出口受付" text="退場処理を有効にする" checked={settings.exitEnabled} onChange={() => toggleSetting("exitEnabled")} />
-      <Setting title="再入場" text="退場後の再入場を許可する" checked={settings.reentryEnabled} onChange={() => toggleSetting("reentryEnabled")} />
-      <div className="actions">
-        <button className="secondary" onClick={() => setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true })}>初期設定に戻す</button>
-        <button className="primary-action" onClick={() => void publish()}>設定をFirebaseへ反映</button>
-      </div>
-      <div className="notice">設定はFirebase公開後に受付端末へ反映されます。</div>
-    </section>;
+    if (page === "設定") return <div className="settings-screen">
+      <section className="settings-hero">
+        <div><small>SYSTEM SETTINGS</small><h2>設定</h2><p>受付端末・受付動作・データ管理・実験機能をまとめて管理します。</p></div>
+        <span className="settings-device-pill">{appSettings.deviceName}</span>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>APP</small><h3>アプリ設定</h3><p>受付時の音や案内を調整します。</p></div>
+        <div className="settings-card">
+          <div className="settings-row settings-range-row">
+            <div><b>音量</b><small>受付端末で再生する成功音・案内音の音量</small></div>
+            <div className="settings-range"><input type="range" min="0" max="100" value={appSettings.volume} onChange={e => updateAppSetting("volume", Number(e.target.value))} /><strong>{appSettings.volume}%</strong></div>
+          </div>
+          <Setting title="成功音" text="チケット認証成功時に音を鳴らす" checked={appSettings.successSound} onChange={() => updateAppSetting("successSound", !appSettings.successSound)} />
+          <Setting title="音声案内" text="受付結果を音声で案内する" checked={appSettings.voiceGuidance} onChange={() => updateAppSetting("voiceGuidance", !appSettings.voiceGuidance)} />
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>RECEPTION</small><h3>受付設定</h3><p>受付端末に公開する入退場ルールを設定します。</p></div>
+        <div className="settings-card">
+          <Setting title="入口受付" text="入場処理を有効にする" checked={settings.entryEnabled} onChange={() => toggleSetting("entryEnabled")} />
+          <Setting title="出口受付" text="退場処理を有効にする" checked={settings.exitEnabled} onChange={() => toggleSetting("exitEnabled")} />
+          <Setting title="再入場" text="退場後の再入場を許可する" checked={settings.reentryEnabled} onChange={() => toggleSetting("reentryEnabled")} />
+        </div>
+        <div className="settings-actions"><button className="primary-action" onClick={() => void publish()}>受付設定をFirebaseへ反映</button></div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>DEVICE</small><h3>端末設定</h3><p>この端末の識別情報と管制アプリ連携を管理します。</p></div>
+        <div className="settings-card">
+          <label className="settings-input-row"><div><b>端末名</b><small>管理画面で表示する端末名</small></div><input value={appSettings.deviceName} onChange={e => updateAppSetting("deviceName", e.target.value)} /></label>
+          <div className="settings-info-grid">
+            <div><span>端末種別</span><strong>Web / iPad</strong></div>
+            <div><span>イベント</span><strong>{event.eventName}</strong></div>
+            <div><span>イベントID</span><strong>{event.eventId}</strong></div>
+            <div><span>接続状態</span><strong className="settings-state-ok">ブラウザ動作中</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>CONTROL APP</small><h3>管制アプリ連携</h3><p>管制アプリからこの端末を管理するための連携情報です。</p></div>
+        <div className="settings-card">
+          {appSettings.controlLinkCode ? (
+            <div className="settings-linked"><div><span>連携状態</span><strong>連携済み</strong><small>連携コードを保存しています。</small></div><button className="secondary" onClick={unlinkControlApp}>連携を解除</button></div>
+          ) : (
+            <div className="settings-link-form"><label><span>連携コード</span><input value={controlCodeInput} onChange={e => setControlCodeInput(e.target.value)} placeholder="管制アプリから発行されたコード" /></label><button className="primary-action" onClick={linkControlApp}>連携する</button></div>
+          )}
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>DATA</small><h3>データ</h3><p>バックアップ、復元、現在の保存状態を確認します。</p></div>
+        <div className="settings-card">
+          <div className="settings-info-grid">
+            <div><span>イベント履歴</span><strong>{eventHistory.length}件</strong></div>
+            <div><span>分析データ</span><strong>{analysisHistory.length}件</strong></div>
+            <div><span>チケット</span><strong>{tickets.length || ticketCount}枚</strong></div>
+            <div><span>部員データ</span><strong>{members.length}人</strong></div>
+          </div>
+          <div className="settings-data-actions"><button className="secondary" onClick={exportBackup}>バックアップを保存</button><button className="secondary" onClick={importBackup}>バックアップを復元</button></div>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><small>AI LAB</small><h3>AI試験機能</h3><p>実験用機能です。本番のQR認証判定には使用しません。</p></div>
+        <div className="settings-card">
+          <Setting title="AI試験機能" text="ONにするとAI LABなどの実験メニューを表示します" checked={appSettings.aiLabEnabled} onChange={() => updateAppSetting("aiLabEnabled", !appSettings.aiLabEnabled)} />
+          <div className={appSettings.aiLabEnabled ? "settings-experiment unlocked" : "settings-experiment"}><span>実験機能</span><strong>{appSettings.aiLabEnabled ? "有効" : "無効"}</strong></div>
+        </div>
+      </section>
+
+      <section className="settings-section settings-danger">
+        <div className="settings-section-heading"><small>SYSTEM</small><h3>システム</h3><p>初期化はこの端末に保存されたデータにのみ適用されます。</p></div>
+        <div className="settings-card">
+          <div className="settings-danger-row"><div><b>すべてのデータを初期化</b><small>イベント履歴・分析履歴・チケット・部員情報・設定を削除します。</small></div><button className="danger-action" onClick={resetAllData}>データを初期化</button></div>
+          <div className="settings-actions"><button className="secondary" onClick={resetAppSettings}>設定を初期状態に戻す</button></div>
+        </div>
+      </section>
+
+      {settingsNotice && <div className="settings-toast">{settingsNotice}</div>}
+      {error && <div className="notice error">{error}</div>}
+    </div>;
 
     return <>
       <section className="hero">
