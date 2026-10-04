@@ -26,7 +26,7 @@ const navigationGroups = [
     label: "運用",
     items: [
       { label: "端末管理", icon: "terminal" },
-      { label: "部員管理", icon: "members" },
+      { label: "部員管理", icon: "members", comingSoon: true },
     ],
   },
   {
@@ -989,9 +989,10 @@ function NavIcon({type}:{type:string}){
             <div className="sidebar-group-title"><strong>{group.label}</strong><span /></div>
             <div className="sidebar-group-items">
               {group.items.map(item => (
-                <button key={item.label} className={page === item.label ? "active" : ""} onClick={() => setPage(item.label)}>
+                <button key={item.label} disabled={item.comingSoon} className={`${page === item.label ? "active" : ""} ${item.comingSoon ? "coming-soon" : ""}`} onClick={() => { if (!item.comingSoon) setPage(item.label); }}>
                   <span className="sidebar-item-icon"><NavIcon type={item.icon} /></span>
                   <span className="sidebar-item-label">{item.label}</span>
+                  {item.comingSoon && <small className="sidebar-coming-soon">近日公開</small>}
                 </button>
               ))}
             </div>
