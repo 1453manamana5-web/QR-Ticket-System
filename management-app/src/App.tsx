@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
@@ -12,6 +12,28 @@ const baseEvent: Event = {
   eventStatus: "preparing",
   dataVersion: 1,
 };
+
+type AnalysisRecord = {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  total: number;
+  unused: number;
+  inside: number;
+  exited: number;
+  savedAt: string;
+};
+
+function loadAnalysisHistory(): AnalysisRecord[] {
+  try {
+    const raw = localStorage.getItem("qr-ticket-analysis-history");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const navigationGroups = [
   {
@@ -97,8 +119,19 @@ function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
 export default function App() {
   const [page, setPage] = useState("ホーム");
   const [event, setEvent] = useState<Event>(baseEvent);
-  const [eventHistory, setEventHistory] = useState<Event[]>([baseEvent]);
+  const [eventHistory, setEventHistory] = useState<Event[]>(() => {
+    try {
+      const raw = localStorage.getItem("qr-ticket-event-history");
+      if (!raw) return [baseEvent];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : [baseEvent];
+    } catch {
+      return [baseEvent];
+    }
+  });
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState(baseEvent.eventId);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(loadAnalysisHistory);
+  const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState(baseEvent.eventId);
   const [newEventModalOpen, setNewEventModalOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [newEventDate, setNewEventDate] = useState("");
@@ -148,6 +181,29 @@ export default function App() {
   const [memberBulkModalOpen, setMemberBulkModalOpen] = useState(false);
   const [memberBulkText, setMemberBulkText] = useState("");
   const [memberQrModal, setMemberQrModal] = useState<{ memberId: string; memberNumber: number; name: string } | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory));
+  }, [eventHistory]);
+
+  useEffect(() => {
+    localStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory));
+  }, [analysisHistory]);
+
+  const saveAnalysisSnapshot = (targetEvent: Event = event) => {
+    const record: AnalysisRecord = {
+      eventId: targetEvent.eventId,
+      eventName: targetEvent.eventName,
+      eventDate: targetEvent.eventDate,
+      total: ticketStats.total,
+      unused: ticketStats.unused,
+      inside: ticketStats.inside,
+      exited: ticketStats.exited,
+      savedAt: new Date().toISOString(),
+    };
+    setAnalysisHistory(current => [record, ...current.filter(item => item.eventId !== record.eventId)]);
+    setSelectedAnalysisEventId(record.eventId);
+  };
 
   const eventStatus = event.eventStatus;
   const ticketStats = useMemo(() => ({
@@ -237,6 +293,7 @@ export default function App() {
       dataVersion: 1,
     };
 
+    saveAnalysisSnapshot(event);
     setEvent(next);
     setEventHistory(current => [next, ...current.filter(item => item.eventId !== next.eventId)]);
     setSelectedHistoryEventId(next.eventId);
@@ -272,6 +329,7 @@ export default function App() {
     setEndTime(selected.endTime);
     setSavedEventName(selected.eventName);
     setSelectedHistoryEventId(selected.eventId);
+    setSelectedAnalysisEventId(selected.eventId);
     setBundle(null);
     setTickets([]);
     setError("");
@@ -562,9 +620,9 @@ export default function App() {
               <strong>{ticketStats.total}<span>枚</span></strong>
             </div>
             <div className="ticket-status-grid">
-              <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
-              <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
-              <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
+              <div className="ticket-status-box unused"><span>未使用</span><strong>{unused}</strong><em>枚</em></div>
+              <div className="ticket-status-box inside"><span>入場中</span><strong>{inside}</strong><em>枚</em></div>
+              <div className="ticket-status-box used"><span>使用済み</span><strong>{exited}</strong><em>枚</em></div>
               <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
             </div>
             <div className="ticket-sync-state"><i />リアルタイム同期中</div>
@@ -892,23 +950,54 @@ export default function App() {
     </>;
 
     if (page === "分析") {
-      const analyzedTotal = ticketStats.inside + ticketStats.exited;
-      const utilization = ticketStats.total > 0 ? Math.round((analyzedTotal / ticketStats.total) * 100) : 0;
-      const insideRate = analyzedTotal > 0 ? Math.round((ticketStats.inside / analyzedTotal) * 100) : 0;
-      const exitedRate = analyzedTotal > 0 ? Math.round((ticketStats.exited / analyzedTotal) * 100) : 0;
+      const selectedRecord = analysisHistory.find(item => item.eventId === selectedAnalysisEventId);
+      const isCurrentAnalysis = !selectedRecord || selectedAnalysisEventId === event.eventId;
+      const analyzedTotal = isCurrentAnalysis ? ticketStats.inside + ticketStats.exited : selectedRecord.total - selectedRecord.unused;
+      const total = isCurrentAnalysis ? ticketStats.total : selectedRecord.total;
+      const unused = isCurrentAnalysis ? ticketStats.unused : selectedRecord.unused;
+      const inside = isCurrentAnalysis ? ticketStats.inside : selectedRecord.inside;
+      const exited = isCurrentAnalysis ? ticketStats.exited : selectedRecord.exited;
+      const utilization = total > 0 ? Math.round((analyzedTotal / total) * 100) : 0;
+      const insideRate = analyzedTotal > 0 ? Math.round((inside / analyzedTotal) * 100) : 0;
+      const exitedRate = analyzedTotal > 0 ? Math.round((exited / analyzedTotal) * 100) : 0;
+      const analysisEventName = isCurrentAnalysis ? event.eventName : selectedRecord.eventName;
+      const analysisEventDate = isCurrentAnalysis ? event.eventDate : selectedRecord.eventDate;
 
       return <div className="analysis-screen">
         <section className="analysis-summary">
           <div className="analysis-summary-heading">
-            <div><small>ANALYSIS OVERVIEW</small><h2>イベント分析</h2><p>{savedEventName} ・ {event.eventDate}</p></div>
+            <div><small>ANALYSIS OVERVIEW</small><h2>イベント分析</h2><p>{analysisEventName} ・ {analysisEventDate}</p></div>
             <span className="analysis-live"><i />リアルタイム集計</span>
           </div>
           <div className="analysis-metrics">
             <div className="analysis-metric primary"><small>来場者数</small><strong>{analyzedTotal}</strong><span>人</span><b>入場済み + 退場済み</b></div>
-            <div className="analysis-metric"><small>現在の会場内</small><strong>{ticketStats.inside}</strong><span>人</span><b>{insideRate}% が会場内</b></div>
-            <div className="analysis-metric"><small>退場者数</small><strong>{ticketStats.exited}</strong><span>人</span><b>{exitedRate}% が退場済み</b></div>
-            <div className="analysis-metric"><small>チケット利用率</small><strong>{utilization}</strong><span>%</span><b>{analyzedTotal} / {ticketStats.total} 枚</b></div>
+            <div className="analysis-metric"><small>現在の会場内</small><strong>{inside}</strong><span>人</span><b>{insideRate}% が会場内</b></div>
+            <div className="analysis-metric"><small>退場者数</small><strong>{exited}</strong><span>人</span><b>{exitedRate}% が退場済み</b></div>
+            <div className="analysis-metric"><small>チケット利用率</small><strong>{utilization}</strong><span>%</span><b>{analyzedTotal} / {total} 枚</b></div>
           </div>
+        </section>
+
+        <section className="analysis-history-panel">
+          <div className="analysis-history-heading">
+            <div><small>PAST EVENTS</small><h3>過去のイベントデータ</h3></div>
+            <button className="secondary" onClick={() => saveAnalysisSnapshot()}>{isCurrentAnalysis ? "現在のデータを保存" : "現在のイベントを保存"}</button>
+          </div>
+          {analysisHistory.length === 0 ? (
+            <div className="analysis-history-empty">まだ保存された過去データはありません。イベント終了時に保存すると、あとから確認できます。</div>
+          ) : (
+            <div className="analysis-history-list">
+              {analysisHistory.map(record => (
+                <button key={record.eventId} className={selectedAnalysisEventId === record.eventId ? "analysis-history-item selected" : "analysis-history-item"} onClick={() => setSelectedAnalysisEventId(record.eventId)}>
+                  <span><b>{record.eventName}</b><small>{record.eventDate} ・ 利用 {record.total - record.unused}人</small></span>
+                  <strong>{record.total}枚</strong>
+                </button>
+              ))}
+              <button className={selectedAnalysisEventId === event.eventId ? "analysis-history-item selected current" : "analysis-history-item current"} onClick={() => setSelectedAnalysisEventId(event.eventId)}>
+                <span><b>{event.eventName}</b><small>{event.eventDate} ・ 現在のイベント</small></span>
+                <strong>現在</strong>
+              </button>
+            </div>
+          )}
         </section>
 
         <div className="analysis-grid">
@@ -925,17 +1014,17 @@ export default function App() {
           </section>
 
           <section className="analysis-card">
-            <div className="analysis-card-heading"><div><small>TICKET STATUS</small><h3>チケット利用状況</h3></div><span>{ticketStats.total}枚</span></div>
+            <div className="analysis-card-heading"><div><small>TICKET STATUS</small><h3>チケット利用状況</h3></div><span>{total}枚</span></div>
             <div className="analysis-status-list">
-              <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{ticketStats.unused}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.unused / ticketStats.total) * 100}%` : "0%"}} /></div></div>
-              <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{ticketStats.inside}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.inside / ticketStats.total) * 100}%` : "0%"}} /></div></div>
-              <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{ticketStats.exited}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.exited / ticketStats.total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{ticketStats.unused}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(unused / total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{ticketStats.inside}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(inside / total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{ticketStats.exited}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(exited / total) * 100}%` : "0%"}} /></div></div>
             </div>
             <div className="analysis-total-box"><span>利用済み</span><strong>{analyzedTotal}枚</strong><small>全チケットの {utilization}%</small></div>
           </section>
 
           <section className="analysis-card analysis-chart-card">
-            <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {ticketStats.inside}人</span></div>
+            <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {inside}人</span></div>
             <div className="analysis-capacity-empty"><div><strong>まだ推移データがありません</strong><span>入退場記録が蓄積されると、会場内人数の変化を確認できます。</span></div></div>
           </section>
 
