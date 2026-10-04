@@ -2854,3 +2854,81 @@
   min-height:64px!important;
   font-size:18px!important;
 }
+
+
+/* Mode color theme */
+.entry-reception-page.reception-mode-entry{
+  --reception-mode-color:#2f80ed;
+  --reception-mode-color-dark:#1769d2;
+  --reception-mode-bg:#eaf3ff;
+  --reception-mode-bg-strong:#d8eaff;
+}
+.entry-reception-page.reception-mode-exit{
+  --reception-mode-color:#e2a900;
+  --reception-mode-color-dark:#c78f00;
+  --reception-mode-bg:#fff8dc;
+  --reception-mode-bg-strong:#ffefaa;
+}
+.entry-reception-page.reception-mode-entry,
+.entry-reception-page.reception-mode-exit{
+  background:
+    radial-gradient(circle at 12% 8%,rgba(255,255,255,.9) 0,rgba(255,255,255,0) 30%),
+    linear-gradient(135deg,var(--reception-mode-bg-strong) 0%,var(--reception-mode-bg) 46%,#fff 100%);
+  transition:background 520ms ease;
+}
+.entry-reception-page.reception-mode-entry .entry-reception-mode-switch-face.entry-reception-mode-switch-front{
+  background:linear-gradient(135deg,#4b98f4,#2f80ed 58%,#1769d2);
+  border-color:rgba(47,128,237,.4);
+  color:#fff;
+  box-shadow:0 14px 30px rgba(47,128,237,.25);
+}
+.entry-reception-page.reception-mode-exit .entry-reception-mode-switch-face.entry-reception-mode-switch-back{
+  background:linear-gradient(135deg,#ffe37a,#e2a900 58%,#c78f00);
+  border-color:rgba(226,169,0,.42);
+  color:#fff;
+  box-shadow:0 14px 30px rgba(226,169,0,.25);
+}
+.entry-reception-page.reception-mode-entry .entry-scanner-card-header,
+.entry-reception-page.reception-mode-exit .entry-scanner-card-header{
+  border-top:4px solid var(--reception-mode-color);
+}
+.entry-reception-page.reception-mode-entry .entry-scanner-ready-dot,
+.entry-reception-page.reception-mode-exit .entry-scanner-ready-dot{
+  background:var(--reception-mode-color);
+}
+.entry-reception-page.reception-mode-entry .entry-scanner-heading-icon,
+.entry-reception-page.reception-mode-exit .entry-scanner-heading-icon{
+  color:var(--reception-mode-color);
+}
+.entry-reception-page.reception-mode-entry .entry-scan-instruction-number,
+.entry-reception-page.reception-mode-exit .entry-scan-instruction-number{
+  background:var(--reception-mode-color);
+}
+.entry-reception-page.reception-mode-entry .primary,
+.entry-reception-page.reception-mode-exit .primary{
+  background:linear-gradient(135deg,var(--reception-mode-color),var(--reception-mode-color-dark));
+  box-shadow:0 14px 28px color-mix(in srgb,var(--reception-mode-color) 25%,transparent);
+}
+
+/* Stronger 3D flip: the card visibly travels more than a simple half-turn. */
+.entry-reception-page .entry-reception-mode-switch{
+  transition:transform 700ms cubic-bezier(.16,.8,.22,1);
+}
+.entry-reception-page .entry-reception-mode-switch.is-entry{
+  transform:rotateY(0deg) scale(1);
+}
+.entry-reception-page .entry-reception-mode-switch.is-exit{
+  transform:rotateY(540deg) scale(1);
+}
+.entry-reception-page .entry-reception-mode-switch-face{
+  transition:box-shadow 300ms ease,filter 300ms ease;
+}
+.entry-reception-page.reception-mode-entry .entry-reception-mode-switch-face.entry-reception-mode-switch-front,
+.entry-reception-page.reception-mode-exit .entry-reception-mode-switch-face.entry-reception-mode-switch-back{
+  filter:saturate(1.08);
+}
+@media (prefers-reduced-motion:reduce){
+  .entry-reception-page .entry-reception-mode-switch{
+    transition-duration:1ms;
+  }
+}
