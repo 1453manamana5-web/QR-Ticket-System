@@ -2545,3 +2545,153 @@ body:has(.ticket-screen),
   .member-qr-modal{box-shadow:none;border:0}
   .member-qr-close,.member-qr-actions{display:none!important}
 }
+
+
+.member-register-launch{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  margin:0 0 28px;
+  padding:18px 20px;
+  border:1px solid #dfe5eb;
+  border-radius:16px;
+  background:#f8fafb;
+}
+.member-register-launch>div{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.member-register-launch small{
+  color:#71809a;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.12em;
+}
+.member-register-launch strong{
+  font-size:20px;
+}
+.member-register-launch span{
+  color:#788292;
+  font-size:12px;
+}
+.member-registration-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:1250;
+  display:grid;
+  place-items:center;
+  padding:24px;
+  background:rgb(23 32 51/.38);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+.member-registration-modal{
+  position:relative;
+  width:min(520px,100%);
+  padding:30px;
+  border:1px solid #e0e5eb;
+  border-radius:24px;
+  background:#fff;
+  box-shadow:0 28px 80px rgb(23 32 51/.22);
+}
+.member-registration-close{
+  position:absolute;
+  top:16px;
+  right:16px;
+  width:38px;
+  height:38px;
+  border:0;
+  border-radius:50%;
+  background:#f0f3f6;
+  color:#596475;
+  font-size:27px;
+  line-height:1;
+  cursor:pointer;
+}
+.member-registration-heading{
+  padding-right:46px;
+  margin-bottom:26px;
+}
+.member-registration-heading small{
+  color:#71809a;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.13em;
+}
+.member-registration-heading h2{
+  margin:6px 0 7px;
+  font-size:27px;
+}
+.member-registration-heading p{
+  margin:0;
+  color:#788292;
+  font-size:12px;
+}
+.member-registration-field{
+  display:flex!important;
+  flex-direction:column;
+  gap:8px;
+}
+.member-registration-field>span{
+  font-size:13px;
+  font-weight:800;
+}
+.member-registration-field input{
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid #d5dce4;
+  border-radius:12px;
+  padding:14px;
+  font-size:16px;
+  color:#172033;
+  outline:none;
+}
+.member-registration-field input:focus{
+  border-color:#7d9ab8;
+  box-shadow:0 0 0 3px rgb(49 93 139/.10);
+}
+.member-registration-preview{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:18px;
+  padding:14px 16px;
+  border-radius:13px;
+  background:#f5f7f9;
+}
+.member-registration-preview span{
+  color:#788292;
+  font-size:11px;
+  font-weight:700;
+}
+.member-registration-preview strong{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:16px;
+  color:#315d8b;
+}
+.member-registration-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:24px;
+  padding-top:18px;
+  border-top:1px solid #e7eaf0;
+}
+.member-registration-actions .primary-action:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+@media(max-width:560px){
+  .member-register-launch{
+    align-items:stretch;
+    flex-direction:column;
+  }
+  .member-register-launch .primary-action{
+    width:100%;
+  }
+  .member-registration-modal{
+    padding:24px 18px;
+  }
+}
