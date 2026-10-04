@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type TouchEvent } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
@@ -744,7 +744,7 @@ function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:
     onChange(next);
   };
 
-  const handleTouch = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouch = (e: TouchEvent<HTMLDivElement>) => {
     e.preventDefault();
     const touch = e.touches[0];
     if (touch) updateFromClientX(touch.clientX, e.currentTarget);
