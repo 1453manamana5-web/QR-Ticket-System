@@ -13,7 +13,35 @@ const baseEvent: Event = {
   dataVersion: 1,
 };
 
-const pages = ["ホーム", "イベント管理", "チケット管理", "端末管理", "部員管理", "分析", "設定"];
+const navigationGroups = [
+  {
+    label: "メイン",
+    items: [
+      { label: "ホーム", icon: "home" },
+      { label: "イベント管理", icon: "event" },
+      { label: "チケット管理", icon: "ticket" },
+    ],
+  },
+  {
+    label: "運用",
+    items: [
+      { label: "端末管理", icon: "terminal" },
+      { label: "部員管理", icon: "members" },
+    ],
+  },
+  {
+    label: "確認",
+    items: [
+      { label: "分析", icon: "analysis" },
+    ],
+  },
+  {
+    label: "システム",
+    items: [
+      { label: "設定", icon: "settings" },
+    ],
+  },
+];
 
 const statusLabel: Record<Event["eventStatus"], string> = {
   preparing: "準備中",
@@ -934,12 +962,42 @@ function SearchIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle
 function FilterIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>;}
 function QrIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zM14 14h3v3h-3zm5 0h1v1h-1zm-5 5h1v1h-1zm3-2h3v3h-3z"/></svg>;}
 function BackIcon(){return <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M18 5 7 14l11 9M8 14h15"/></svg>;}
+function NavIcon({type}:{type:string}){
+  if(type==="home") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>;
+  if(type==="event") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M7 14h4M7 17h7"/></svg>;
+  if(type==="ticket") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M9 6v12"/></svg>;
+  if(type==="terminal") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 7h6M9 17h6"/></svg>;
+  if(type==="members") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c.4-4 2.2-6 6-6s5.6 2 6 6M17 11a3 3 0 1 0 0-6M17 14c2.5 0 4 2 4 6"/></svg>;
+  if(type==="analysis") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20V7"/><path d="M2 20h21"/></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1h-2.5V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1A1.7 1.7 0 0 0 8.1 15a1.7 1.7 0 0 0-1.6-1H6v-2.5h.5a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V5H15v.5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.5V14h-.5a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
+}
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
-      <div className="event-mini"><small>現在のイベント</small><b>{savedEventName}</b><span>● {statusLabel[eventStatus]}</span></div>
-      <nav>{pages.map(item => <button key={item} className={page === item ? "active" : ""} onClick={() => setPage(item)}>{item}<b>›</b></button>)}</nav>
+      <div className="brand">
+        <div className="brand-mark">QR</div>
+        <div><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
+      </div>
+      <div className="event-mini">
+        <small>現在のイベント</small>
+        <b>{savedEventName}</b>
+        <span>● {statusLabel[eventStatus]}</span>
+      </div>
+      <nav className="sidebar-nav">
+        {navigationGroups.map(group => (
+          <div className="sidebar-group" key={group.label}>
+            <div className="sidebar-group-title"><strong>{group.label}</strong><span /></div>
+            <div className="sidebar-group-items">
+              {group.items.map(item => (
+                <button key={item.label} className={page === item.label ? "active" : ""} onClick={() => setPage(item.label)}>
+                  <span className="sidebar-item-icon"><NavIcon type={item.icon} /></span>
+                  <span className="sidebar-item-label">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
     </aside>
     <main className="management-main">
       <header className="management-header">
