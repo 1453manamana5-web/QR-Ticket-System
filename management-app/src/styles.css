@@ -2695,3 +2695,25 @@ body:has(.ticket-screen),
     padding:24px 18px;
   }
 }
+
+
+.member-toolbar-actions{display:flex;align-items:center;gap:10px}
+.member-bulk-button{white-space:nowrap}
+.member-selection-bar{display:flex;align-items:center;gap:10px;margin:-10px 0 12px;padding:10px 14px;border:1px solid #dfe5eb;border-radius:12px;background:#f8fafb}
+.member-selection-bar span{margin-right:auto;font-size:12px;font-weight:800}
+.member-selection-bar button:not(.primary-action){border:0;background:none;color:#667487;font-weight:700;cursor:pointer}
+.member-check-cell{width:38px!important;min-width:38px!important;text-align:center}
+.member-check-cell input{width:17px;height:17px;margin:0;accent-color:#315d8b;cursor:pointer}
+.member-bulk-info{padding:10px 13px;border-radius:10px;background:#f5f7f9;color:#536174;font-size:12px;font-weight:800}
+.member-bulk-textarea{display:block;width:100%;box-sizing:border-box;min-height:150px;margin-top:12px;padding:12px;border:1px solid #d5dce4;border-radius:12px;resize:vertical;font:inherit;line-height:1.7;outline:none}
+.member-bulk-textarea:focus{border-color:#7d9ab8;box-shadow:0 0 0 3px rgb(49 93 139/.10)}
+.member-bulk-order{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.member-bulk-order span{padding:4px 8px;border-radius:999px;background:#eef2f6;color:#667487;font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace}
+.member-registration-actions .primary-action:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:700px){
+  .member-toolbar-actions{align-items:stretch;flex-direction:column;width:100%}
+  .member-toolbar-actions .member-search{width:100%}
+  .member-bulk-button{width:100%}
+  .member-selection-bar{align-items:stretch;flex-wrap:wrap}
+  .member-selection-bar span{width:100%;margin-right:0}
+}
