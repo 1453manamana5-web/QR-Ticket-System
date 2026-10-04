@@ -1058,3 +1058,76 @@ body:has(.ticket-screen),
     height:auto;
   }
 }
+
+/* Final dashboard layout: status large on left, operation/list stacked on right */
+@media(min-width:761px){
+  .ticket-screen{
+    height:calc(100dvh - 86px);
+    max-height:calc(100dvh - 86px);
+    overflow:hidden;
+    padding:8px 18px 12px;
+  }
+
+  .ticket-home-grid{
+    flex:1 1 auto;
+    width:100%;
+    height:auto;
+    max-height:none;
+    min-height:0;
+    display:grid;
+    grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);
+    grid-template-rows:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:
+      "status operation"
+      "status list";
+    gap:12px;
+    align-content:stretch;
+  }
+
+  .ticket-home-card{
+    width:100%;
+    height:auto;
+    max-height:none;
+    min-height:0;
+    align-self:stretch;
+  }
+
+  .ticket-home-grid .ticket-status-card{
+    grid-area:status;
+    padding:20px;
+  }
+
+  .ticket-operation-card{
+    grid-area:operation;
+    padding:18px 20px;
+    justify-content:center;
+  }
+
+  .ticket-list-launch{
+    grid-area:list;
+    padding:18px 20px;
+  }
+
+  .ticket-operation-card h2,
+  .ticket-list-launch-top h2,
+  .ticket-home-grid .ticket-status-heading h2{
+    font-size:23px;
+  }
+
+  .ticket-operation-buttons{
+    flex-direction:row;
+    gap:10px;
+  }
+
+  .ticket-operation-buttons .ticket-tool-button{
+    flex:1;
+    min-width:0;
+    min-height:72px;
+  }
+
+  .ticket-home-grid .ticket-status-grid{
+    flex:1;
+    height:auto;
+    min-height:0;
+  }
+}
