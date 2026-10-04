@@ -2872,8 +2872,8 @@
 .entry-reception-page.reception-mode-entry,
 .entry-reception-page.reception-mode-exit{
   background:
-    radial-gradient(circle at 12% 8%,rgba(255,255,255,.9) 0,rgba(255,255,255,0) 30%),
-    linear-gradient(135deg,var(--reception-mode-bg-strong) 0%,var(--reception-mode-bg) 46%,#fff 100%);
+    radial-gradient(circle at 12% 8%,rgba(255,255,255,.72) 0,rgba(255,255,255,0) 28%),
+    linear-gradient(135deg,var(--reception-mode-bg-strong) 0%,var(--reception-mode-bg) 58%,var(--reception-mode-bg-strong) 100%);
   transition:background 520ms ease;
 }
 .entry-reception-page.reception-mode-entry .entry-reception-mode-switch-face.entry-reception-mode-switch-front{
