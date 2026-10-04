@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { publishEventBundle, type PublishedEventBundle } from "./eventPublisher";
+import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
   eventName: "○○文化祭 2027",
+  eventDate: "2027-10-01",
+  startTime: "10:00",
+  endTime: "16:00",
   eventStatus: "preparing",
   dataVersion: 1,
 };
@@ -62,6 +65,9 @@ export default function App() {
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [eventName, setEventName] = useState(baseEvent.eventName);
+  const [eventDate, setEventDate] = useState(baseEvent.eventDate);
+  const [startTime, setStartTime] = useState(baseEvent.startTime);
+  const [endTime, setEndTime] = useState(baseEvent.endTime);
   const [ticketCount, setTicketCount] = useState(500);
   const [savedEventName, setSavedEventName] = useState(baseEvent.eventName);
   const [settings, setSettings] = useState<ReceptionSettings>({
@@ -90,22 +96,53 @@ export default function App() {
     ).slice(0, 20);
   }, [tickets, ticketQuery]);
 
-  const saveEvent = () => {
+  const saveEvent = async () => {
     const normalizedName = eventName.trim() || baseEvent.eventName;
-    setEvent(current => ({ ...current, eventName: normalizedName }));
+    if (!eventDate || !startTime || !endTime) {
+      setError("開催日・開始時刻・終了時刻を入力してください。");
+      return;
+    }
+    if (startTime >= endTime) {
+      setError("終了時刻は開始時刻より後にしてください。");
+      return;
+    }
+
+    const updatedEvent: Event = {
+      ...event,
+      eventName: normalizedName,
+      eventDate,
+      startTime,
+      endTime,
+    };
+
+    setEvent(updatedEvent);
     setSavedEventName(normalizedName);
     setError("");
+
+    try {
+      await saveEventMetadata(updatedEvent);
+      setBundle(null);
+    } catch (reason) {
+      console.error(reason);
+      setError("イベント情報をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+    }
   };
 
   const createNewEvent = () => {
     const next: Event = {
       eventId: createEventId(),
       eventName: "新しいイベント",
+      eventDate: new Date().toISOString().slice(0, 10),
+      startTime: "10:00",
+      endTime: "16:00",
       eventStatus: "preparing",
       dataVersion: 1,
     };
     setEvent(next);
     setEventName(next.eventName);
+    setEventDate(next.eventDate);
+    setStartTime(next.startTime);
+    setEndTime(next.endTime);
     setSavedEventName(next.eventName);
     setBundle(null);
     setTickets([]);
@@ -128,7 +165,13 @@ export default function App() {
     if (publishing) return;
     const normalizedName = eventName.trim() || baseEvent.eventName;
     const preparedTickets = tickets.length === ticketCount ? tickets : createTickets(event.eventId, ticketCount);
-    const readyEvent: Event = { ...event, eventName: normalizedName };
+    const readyEvent: Event = {
+      ...event,
+      eventName: normalizedName,
+      eventDate,
+      startTime,
+      endTime,
+    };
     setPublishing(true);
     setError("");
     setEvent(readyEvent);
@@ -173,7 +216,7 @@ export default function App() {
 
       <div className="actions event-actions">
         <button className="secondary" onClick={createNewEvent}>＋ 新しいイベント</button>
-        <button className="secondary" onClick={saveEvent}>イベント情報を保存</button>
+        <button className="secondary" onClick={() => void saveEvent()}>イベント情報を保存</button>
         <button className="secondary" onClick={() => changeEventStatus(nextStatus(eventStatus))} disabled={eventStatus === "finished"}>
           {eventStatus === "preparing" ? "受付可能にする" : eventStatus === "ready" ? "開催を開始" : eventStatus === "active" ? "終了処理へ" : "イベントを終了"}
         </button>
@@ -184,6 +227,9 @@ export default function App() {
 
       <div className="form-grid">
         <label>イベント名<input value={eventName} onChange={e => setEventName(e.target.value)} /></label>
+        <label>開催日<input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} /></label>
+        <label>開始時刻<input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></label>
+        <label>終了時刻<input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></label>
         <label>イベントID<input value={event.eventId} onChange={e => setEvent(current => ({ ...current, eventId: e.target.value }))} /></label>
         <label>チケット枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
         <label>データバージョン<input value={event.dataVersion} disabled /></label>
@@ -294,7 +340,7 @@ export default function App() {
 
     return <>
       <section className="hero">
-        <div><small>EVENT CONTROL CENTER</small><h2>{savedEventName}</h2><p>{event.eventId} ・ {statusLabel[eventStatus]} ・ チケット {ticketStats.total}枚</p></div>
+        <div><small>EVENT CONTROL CENTER</small><h2>{savedEventName}</h2><p>{event.eventDate} {event.startTime}–{event.endTime} ・ {event.eventId} ・ {statusLabel[eventStatus]} ・ チケット {ticketStats.total}枚</p></div>
         <span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span>
       </section>
       <div className="metrics">
