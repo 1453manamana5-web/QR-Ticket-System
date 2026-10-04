@@ -116,6 +116,18 @@ function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
   return "finished";
 }
 
+function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
+  const startAt = new Date(`${target.eventDate}T${target.startTime}:00`);
+  const endAt = new Date(`${target.eventDate}T${target.endTime}:00`);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
+
+  const now = new Date();
+  if (now >= endAt && target.eventStatus !== "finished") return "finished";
+  if (now >= startAt && (target.eventStatus === "preparing" || target.eventStatus === "ready")) return "active";
+  return null;
+}
+
+
 export default function App() {
   const [page, setPage] = useState("ホーム");
   const [event, setEvent] = useState<Event>(baseEvent);
@@ -212,6 +224,32 @@ export default function App() {
     inside: tickets.filter(ticket => ticket.currentStatus === "inside").length,
     exited: tickets.filter(ticket => ticket.currentStatus === "exited").length,
   }), [tickets, ticketCount]);
+
+
+  useEffect(() => {
+    if (eventHistory[0]?.eventId !== event.eventId) return;
+
+    const syncAutomaticStatus = () => {
+      const next = getAutomaticEventStatus(event);
+      if (!next || next === event.eventStatus) return;
+
+      const updated = { ...event, eventStatus: next };
+      if (next === "finished") saveAnalysisSnapshot(event);
+      setEvent(updated);
+      setEventHistory(current =>
+        current.map(item => item.eventId === updated.eventId ? updated : item),
+      );
+      setSelectedHistoryEventId(updated.eventId);
+      void saveEventMetadata(updated).catch(reason => {
+        console.error(reason);
+        setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+      });
+    };
+
+    syncAutomaticStatus();
+    const timer = window.setInterval(syncAutomaticStatus, 10000);
+    return () => window.clearInterval(timer);
+  }, [event, eventHistory, ticketStats]);
 
   const filteredTickets = useMemo(() => {
     const query = ticketQuery.trim().toLowerCase();
