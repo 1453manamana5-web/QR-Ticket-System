@@ -659,9 +659,9 @@ export default function App() {
               <strong>{ticketStats.total}<span>枚</span></strong>
             </div>
             <div className="ticket-status-grid">
-              <div className="ticket-status-box unused"><span>未使用</span><strong>{unused}</strong><em>枚</em></div>
-              <div className="ticket-status-box inside"><span>入場中</span><strong>{inside}</strong><em>枚</em></div>
-              <div className="ticket-status-box used"><span>使用済み</span><strong>{exited}</strong><em>枚</em></div>
+              <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
+              <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
+              <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
               <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
             </div>
             <div className="ticket-sync-state"><i />リアルタイム同期中</div>
