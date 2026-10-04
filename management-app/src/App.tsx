@@ -473,8 +473,6 @@ export default function App() {
           </section>
         </main>
 
-        <button className="ticket-back-button" onClick={() => setPage("ホーム")}><BackIcon />管理モードに戻る</button>
-
         {tickets.length > 0 && <div className="ticket-print-area">
           {tickets.map(ticket => (
             <article className="print-ticket" key={`print-${ticket.ticketId}`}>
