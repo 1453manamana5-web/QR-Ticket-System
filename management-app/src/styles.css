@@ -943,3 +943,74 @@ body:has(.ticket-screen),
   }
   .ticket-home-card{height:auto;min-height:210px}
 }
+
+/* Compact centered cards: do not stretch cards to the full content height */
+.ticket-screen{
+  height:calc(100dvh - 86px);
+  min-height:0;
+  max-height:calc(100dvh - 86px);
+  padding:8px 18px 12px;
+}
+.ticket-home-grid{
+  flex:1 1 auto;
+  align-content:center;
+  grid-template-rows:560px;
+  height:560px;
+  max-height:calc(100% - 10px);
+  gap:12px;
+}
+.ticket-home-card{
+  height:560px;
+  max-height:100%;
+  align-self:center;
+}
+
+/* Keep content compact instead of vertically centering large empty areas */
+.ticket-operation-card{
+  justify-content:flex-start;
+  padding:28px 20px;
+}
+.ticket-operation-card h2{
+  margin:6px 0 20px;
+}
+.ticket-operation-buttons{
+  gap:10px;
+}
+.ticket-operation-buttons .ticket-tool-button{
+  min-height:82px;
+}
+
+.ticket-list-launch{
+  justify-content:flex-start;
+  padding:28px 20px;
+}
+.ticket-list-launch-bottom{
+  margin-top:auto;
+  padding-top:20px;
+}
+
+.ticket-home-grid .ticket-status-card{
+  padding:24px 18px;
+}
+.ticket-home-grid .ticket-status-heading{
+  margin-bottom:12px;
+}
+.ticket-home-grid .ticket-status-grid{
+  flex:1;
+  min-height:0;
+}
+
+@media(max-width:1050px) and (min-width:761px){
+  .ticket-home-grid{
+    grid-template-rows:500px;
+    height:500px;
+  }
+  .ticket-home-card{
+    height:500px;
+  }
+  .ticket-operation-card,
+  .ticket-list-launch,
+  .ticket-home-grid .ticket-status-card{
+    padding:20px 15px;
+  }
+}
