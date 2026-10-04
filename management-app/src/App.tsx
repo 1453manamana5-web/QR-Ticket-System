@@ -1,4 +1,4 @@
-import { useMemo, useState, type TouchEvent } from "react";
+import { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
@@ -579,11 +579,6 @@ export default function App() {
                   }}>
                     <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin />
                   </div>
-                  {ticketNumberEnabled && <strong className="ticket-design-number-preview" style={{
-                    left: `${ticketNumberX}%`, top: `${ticketNumberY}%`,
-                    fontSize: `${Math.max(10, ticketNumberSize)}px`,
-                    transform: "translate(-50%, -50%)",
-                  }}>{tickets[0]?.ticketId || "TK000001"}</strong>}
                 </div>
               </div>
             </section>
@@ -736,75 +731,20 @@ export default function App() {
   };
 
 function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
-  const updateFromClientX = (clientX:number, element:HTMLDivElement) => {
-    const rect = element.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const next = Math.round(min + ratio * (max - min));
-    onChange(next);
-  };
-
-  const handleTouch = (e: TouchEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) updateFromClientX(touch.clientX, e.currentTarget);
-  };
-
   return <label className="ticket-design-range">
     <span>{label}</span>
-    <div
-      className="ticket-design-range-control"
-      role="slider"
+    <input
+      type="range"
+      min={min}
+      max={max}
+      value={value}
+      onChange={e => onChange(Number(e.target.value))}
       aria-label={label}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={value}
-      tabIndex={0}
-      onPointerDown={e => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        updateFromClientX(e.clientX, e.currentTarget);
-      }}
-      onPointerMove={e => {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          updateFromClientX(e.clientX, e.currentTarget);
-        }
-      }}
-      onPointerUp={e => {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-        }
-      }}
-      onPointerCancel={e => {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-        }
-      }}
-      onTouchStart={handleTouch}
-      onTouchMove={handleTouch}
-      onKeyDown={e => {
-        if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
-          e.preventDefault();
-          onChange(Math.max(min, value - 1));
-        } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
-          e.preventDefault();
-          onChange(Math.min(max, value + 1));
-        } else if (e.key === "Home") {
-          e.preventDefault();
-          onChange(min);
-        } else if (e.key === "End") {
-          e.preventDefault();
-          onChange(max);
-        }
-      }}
-    >
-      <span className="ticket-design-range-track">
-        <span className="ticket-design-range-fill" style={{width: `${((value - min) / (max - min)) * 100}%`}} />
-        <span className="ticket-design-range-thumb" style={{left: `${((value - min) / (max - min)) * 100}%`}} />
-      </span>
-    </div>
+    />
     <strong>{value}{suffix}</strong>
   </label>;
 }
+
 function TicketIcon(){return <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 13h32v22H8z"/><path d="M14 13v7m0 8v7M34 13v7m0 8v7"/><path d="M21 18h8v12h-8z"/></svg>;}
 function PlusIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 7v18M7 16h18"/></svg>;}
 function PaletteIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5C9.9 5 5 9.5 5 15.2 5 20 8.6 23 13 23h2.5c1.8 0 2.6 2.3 1.6 3.6-.4.5 0 .9.7.9C24.2 27.5 27 22.2 27 16c0-6.1-4.9-11-11-11Z"/><circle cx="10.5" cy="14" r="1.2"/><circle cx="15" cy="10.5" r="1.2"/><circle cx="21" cy="11.5" r="1.2"/><circle cx="23" cy="17" r="1.2"/></svg>;}
