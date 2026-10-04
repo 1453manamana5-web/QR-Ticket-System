@@ -572,7 +572,7 @@ export default function App() {
           </div>
         </div>
       </div>}
-
+    </>;
 
     if (page === "端末管理") return <section className="panel">
       <div className="panel-title"><div><small>TERMINAL MANAGEMENT</small><h2>端末管理</h2></div></div>
