@@ -494,10 +494,7 @@ export default function App(){
                   <strong>QRコード読み取り</strong>
                 </span>
               </div>
-              <div className="entry-scanner-ready">
-                <span className="entry-scanner-ready-dot" aria-hidden="true"/>
-                読み取り待機中
-              </div>
+  
             </div>
             <div className="entry-scanner-wrapper">
               <div className="camera-qr-scanner">
