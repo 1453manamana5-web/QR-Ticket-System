@@ -1986,7 +1986,7 @@ body:has(.ticket-screen),
 .ticket-design-range>strong{text-align:right;font-size:18px}
 .ticket-design-range input[type="range"]{
   width:100%;
-  height:34px;
+  height:44px;
   margin:0;
   padding:0;
   appearance:none;
@@ -1994,7 +1994,10 @@ body:has(.ticket-screen),
   background:transparent;
   accent-color:#36775f;
   cursor:pointer;
-  touch-action:pan-x;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
 }
 .ticket-design-range input[type="range"]::-webkit-slider-runnable-track{
   height:10px;
