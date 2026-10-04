@@ -2836,3 +2836,19 @@ body:has(.ticket-screen),
 .analysis-history-empty{padding:17px;border-radius:13px;background:#f6f8fa;color:#7d8794;font-size:11px;line-height:1.55}
 @media(max-width:900px){.analysis-history-list{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.analysis-history-heading{align-items:flex-start;flex-direction:column}.analysis-history-heading .secondary{width:100%}.analysis-history-list{grid-template-columns:1fr}}
+
+
+/* Force ticket-management text colors */
+.ticket-screen .ticket-tool-design,
+.ticket-screen .ticket-tool-design * ,
+.ticket-screen .ticket-status-box.used,
+.ticket-screen .ticket-status-select.status-exited,
+.ticket-screen .ticket-row-view,
+.ticket-screen .ticket-list-launch,
+.ticket-screen .ticket-list-launch * {
+  color:#172033!important;
+}
+.ticket-screen .ticket-search-box input,
+.ticket-screen .ticket-filter-box select {
+  color:#172033!important;
+}
