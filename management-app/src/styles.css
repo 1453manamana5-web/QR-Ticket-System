@@ -1379,3 +1379,150 @@ body:has(.ticket-screen),
     font-size:25px;
   }
 }
+
+/* Height-safe iPad layout: header consumes its own space, dashboard uses only the remainder */
+@media(min-width:761px){
+  .ticket-screen{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    height:100dvh;
+    min-height:0;
+    max-height:100dvh;
+    margin:0;
+    padding:18px 18px 14px;
+    box-sizing:border-box;
+    overflow:hidden;
+    background:#f5f7fa;
+  }
+
+  .ticket-screen-header{
+    flex:0 0 auto;
+    width:100%;
+    max-width:none;
+    margin:0 0 14px;
+    min-height:0;
+  }
+
+  .ticket-screen > main.ticket-home-grid{
+    flex:1 1 0;
+    width:100%;
+    max-width:none;
+    min-width:0;
+    min-height:0;
+    height:auto;
+    max-height:none;
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,.72fr);
+    grid-template-rows:minmax(0,150px) minmax(0,1fr);
+    grid-template-areas:
+      "operation operation"
+      "status list";
+    gap:10px;
+    overflow:hidden;
+  }
+
+  .ticket-home-card{
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    max-height:none;
+    margin:0;
+    box-sizing:border-box;
+    overflow:hidden;
+  }
+
+  .ticket-operation-card{
+    grid-area:operation;
+    padding:14px 20px;
+    justify-content:center;
+  }
+
+  .ticket-operation-card h2{
+    margin:0 0 9px;
+    font-size:21px;
+  }
+
+  .ticket-operation-buttons{
+    display:flex;
+    flex-direction:row;
+    width:100%;
+    gap:10px;
+  }
+
+  .ticket-operation-buttons .ticket-tool-button{
+    flex:1 1 0;
+    min-width:0;
+    height:60px;
+    min-height:60px;
+    padding:8px 14px;
+  }
+
+  .ticket-home-grid .ticket-status-card{
+    grid-area:status;
+    padding:14px 18px;
+  }
+
+  .ticket-home-grid .ticket-status-heading{
+    margin:0 0 7px;
+  }
+
+  .ticket-home-grid .ticket-status-heading h2{
+    font-size:21px;
+  }
+
+  .ticket-home-grid .ticket-status-heading>strong{
+    font-size:30px;
+  }
+
+  .ticket-home-grid .ticket-status-grid{
+    flex:1 1 0;
+    min-height:0;
+    height:auto;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-template-rows:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+
+  .ticket-home-grid .ticket-status-box{
+    min-height:0;
+    height:auto;
+    padding:8px 11px;
+    border-radius:13px;
+  }
+
+  .ticket-home-grid .ticket-status-box>strong{
+    font-size:27px;
+  }
+
+  .ticket-home-grid .ticket-sync-state{
+    margin-top:5px;
+  }
+
+  .ticket-list-launch{
+    grid-area:list;
+    padding:16px 20px;
+    justify-content:center;
+  }
+
+  .ticket-list-launch-top h2{
+    font-size:21px;
+  }
+
+  .ticket-list-launch-bottom{
+    margin-top:8px;
+  }
+
+  .ticket-list-launch-bottom strong{
+    font-size:28px;
+  }
+
+  .ticket-launch-arrow{
+    width:44px;
+    height:44px;
+  }
+}
