@@ -100,6 +100,7 @@ export default function App() {
   const [ticketCreateModalOpen, setTicketCreateModalOpen] = useState(false);
   const [ticketDesignModalOpen, setTicketDesignModalOpen] = useState(false);
   const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
+  const [ticketListOpen, setTicketListOpen] = useState(false);
   const [staffNames, setStaffNames] = useState<string[]>([]);
   const [staffName, setStaffName] = useState("");
 
@@ -445,78 +446,50 @@ export default function App() {
           </div>
         </header>
 
-        <div className="ticket-screen-grid">
-          <div className="ticket-left-column">
-            <section className="ticket-tool-card">
-              <small>TICKET TOOLS</small>
-              <h2>チケット操作</h2>
+        <main className="ticket-home-grid">
+          <section className="ticket-home-card ticket-operation-card">
+            <div className="ticket-home-label">TICKET TOOLS</div>
+            <h2>チケット操作</h2>
+            <div className="ticket-operation-buttons">
               <button className="ticket-tool-button ticket-tool-create" onClick={() => setTicketCreateModalOpen(true)}>
                 <span className="tool-icon"><PlusIcon /></span>
                 <span><small>CREATE TICKETS</small><b>チケットを新規発行</b></span>
               </button>
               <button className="ticket-tool-button ticket-tool-design" onClick={() => setTicketDesignModalOpen(true)}>
                 <span className="tool-icon"><PaletteIcon /></span>
-                <span><small>DESIGN & PRINT</small><b>デザイン・まとめて印刷</b></span>
+                <span><small>DESIGN & PRINT</small><b>デザイン・印刷</b></span>
               </button>
-            </section>
-
-            <section className="ticket-status-card">
-              <div className="ticket-status-heading">
-                <div><small>TICKET STATUS</small><h2>チケット状況</h2></div>
-                <strong>{ticketStats.total}<span>枚</span></strong>
-              </div>
-              <div className="ticket-status-grid">
-                <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
-                <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
-                <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
-                <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
-              </div>
-              <div className="ticket-sync-state"><i />リアルタイム同期中</div>
-            </section>
-          </div>
-
-          <section className="ticket-list-screen-card">
-            <div className="ticket-list-screen-heading">
-              <div><small>ALL TICKETS</small><h2>チケット一覧</h2></div>
-              <div className="ticket-count-badge">表示件数 <strong>{Math.min(10, filteredTickets.length || (tickets.length ? 10 : 0))}</strong>件</div>
             </div>
-
-            <div className="ticket-search-row">
-              <div className="ticket-search-box"><SearchIcon /><input placeholder="QR番号を検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} /></div>
-              <div className="ticket-filter-box"><FilterIcon /><select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value as typeof ticketStatusFilter)}>
-                <option value="all">すべての状態</option>
-                <option value="unused">未使用</option>
-                <option value="inside">入場中</option>
-                <option value="exited">使用済み</option>
-              </select></div>
-            </div>
-
-            {tickets.length > 0 ? <div className="ticket-screen-table">
-              <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
-              {filteredTickets.map(ticket => (
-                <div className="ticket-screen-row" key={ticket.ticketId}>
-                  <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}</strong></div>
-                  <select
-                    className={`ticket-status-select status-${ticket.currentStatus}`}
-                    value={ticket.currentStatus}
-                    onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}
-                  >
-                    <option value="unused">未使用</option>
-                    <option value="inside">入場中</option>
-                    <option value="exited">使用済み</option>
-                  </select>
-                  <div className="ticket-row-actions">
-                    <button className="ticket-row-view" onClick={() => setTicketQrModalTicket(ticket)}>QR表示</button>
-                    <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
-                    <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
-                  </div>
-                </div>
-              ))}
-            </div> : <div className="ticket-list-empty"><h3>チケットがありません</h3><p>「チケットを新規発行」からQRチケットを作成してください。</p></div>}
-
-            {tickets.length > 10 && <div className="ticket-list-footer">先頭10件を表示中　・　全{tickets.length}件</div>}
           </section>
-        </div>
+
+          <button className="ticket-home-card ticket-list-launch" onClick={() => setTicketListOpen(true)}>
+            <div className="ticket-list-launch-top">
+              <div>
+                <div className="ticket-home-label">ALL TICKETS</div>
+                <h2>チケット一覧</h2>
+              </div>
+              <span className="ticket-launch-arrow">→</span>
+            </div>
+            <div className="ticket-list-launch-bottom">
+              <span>QR番号・状態・操作を確認</span>
+              <strong>{tickets.length || 0}<small>件</small></strong>
+            </div>
+          </button>
+
+          <section className="ticket-home-card ticket-status-card">
+            <div className="ticket-status-heading">
+              <div><div className="ticket-home-label">TICKET STATUS</div><h2>チケット状況</h2></div>
+              <strong>{ticketStats.total}<span>枚</span></strong>
+            </div>
+            <div className="ticket-status-grid">
+              <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
+              <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
+              <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
+              <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
+            </div>
+            <div className="ticket-sync-state"><i />リアルタイム同期中</div>
+          </section>
+        </main>
 
         <button className="ticket-back-button" onClick={() => setPage("ホーム")}><BackIcon />管理モードに戻る</button>
 
@@ -526,7 +499,7 @@ export default function App() {
               {ticketDesignImage && <img className="print-ticket-design" src={ticketDesignImage} alt="" />}
               <div className="print-ticket-header"><strong>{event.eventName}</strong><span>{ticketTitle}</span></div>
               <div className="print-ticket-content">
-                <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</b><span>{ticket.ticketId}</span></div>
+                <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(6, "0")}</b><span>{ticket.ticketId}</span></div>
                 <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={118} includeMargin />
               </div>
               <div className="print-ticket-footer">このQRは入場・退場認証に使用します</div>
@@ -534,6 +507,39 @@ export default function App() {
           ))}
         </div>}
       </div>
+
+      {ticketListOpen && <div className="ticket-list-overlay" onMouseDown={() => setTicketListOpen(false)}>
+        <section className="ticket-list-fullscreen" onMouseDown={e => e.stopPropagation()}>
+          <header className="ticket-list-fullscreen-header">
+            <div><div className="ticket-home-label">ALL TICKETS</div><h2>チケット一覧</h2></div>
+            <button className="ticket-list-close" onClick={() => setTicketListOpen(false)}>×</button>
+          </header>
+          <div className="ticket-list-toolbar">
+            <div className="ticket-search-box"><SearchIcon /><input placeholder="QR番号を検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} /></div>
+            <div className="ticket-filter-box"><FilterIcon /><select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value as typeof ticketStatusFilter)}>
+              <option value="all">すべての状態</option><option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
+            </select></div>
+            <div className="ticket-list-total">全<strong>{tickets.length}</strong>件</div>
+          </div>
+          {tickets.length > 0 ? <div className="ticket-screen-table ticket-full-table">
+            <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
+            {filteredTickets.map(ticket => (
+              <div className="ticket-screen-row" key={ticket.ticketId}>
+                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}</strong></div>
+                <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
+                  <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
+                </select>
+                <div className="ticket-row-actions">
+                  <button className="ticket-row-view" onClick={() => setTicketQrModalTicket(ticket)}>QR表示</button>
+                  <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
+                  <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
+                </div>
+              </div>
+            ))}
+          </div> : <div className="ticket-list-empty"><h3>チケットがありません</h3><p>「チケットを新規発行」からQRチケットを作成してください。</p></div>}
+          {tickets.length > 10 && <div className="ticket-list-footer">先頭10件を表示中 ・ 全{tickets.length}件</div>}
+        </section>
+      </div>}
 
       {ticketCreateModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketCreateModalOpen(false)}>
         <div className="ticket-modal" onMouseDown={e => e.stopPropagation()}>
@@ -555,10 +561,8 @@ export default function App() {
       {ticketDesignModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketDesignModalOpen(false)}>
         <div className="ticket-modal ticket-design-modal" onMouseDown={e => e.stopPropagation()}>
           <button className="ticket-modal-close" onClick={() => setTicketDesignModalOpen(false)}>×</button>
-          <small>DESIGN & PRINT</small><h2>デザイン・まとめて印刷</h2><p>チケットデザイン画像を設定して、発行済みチケットを一括印刷します。</p>
-          <label className="ticket-design-upload">チケットデザイン画像
-            <input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
-          </label>
+          <small>DESIGN & PRINT</small><h2>デザイン・印刷</h2><p>チケットデザイン画像を設定して、発行済みチケットを一括印刷します。</p>
+          <label className="ticket-design-upload">チケットデザイン画像<input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} /></label>
           {ticketDesignImage && <div className="ticket-design-current"><img src={ticketDesignImage} alt="" /><button className="secondary" onClick={() => setTicketDesignImage("")}>デザインを外す</button></div>}
           <div className="ticket-print-preview"><strong>{event.eventName}</strong><span>{ticketTitle}</span><b>{tickets.length || ticketCount}枚</b></div>
           <div className="ticket-modal-actions">
