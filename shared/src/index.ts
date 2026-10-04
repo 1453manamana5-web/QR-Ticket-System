@@ -38,6 +38,9 @@ export interface SyncQueueItem {
 export interface Event {
   eventId: string;
   eventName: string;
+  eventDate: string;
+  startTime: string;
+  endTime: string;
   eventStatus: "preparing" | "ready" | "active" | "finalizing" | "finished";
   dataVersion: number;
 }
