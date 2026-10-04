@@ -1014,3 +1014,47 @@ body:has(.ticket-screen),
     padding:20px 15px;
   }
 }
+
+/* Definitive compact sizing for iPad: cards are content-sized, not viewport-sized */
+@media(min-width:761px){
+  .ticket-screen{
+    height:calc(100dvh - 86px);
+    max-height:calc(100dvh - 86px);
+    overflow:hidden;
+    padding:8px 18px 12px;
+  }
+  .ticket-home-grid{
+    flex:none;
+    height:420px;
+    max-height:420px;
+    grid-template-rows:420px;
+    align-content:center;
+  }
+  .ticket-home-card{
+    height:420px;
+    max-height:420px;
+  }
+  .ticket-operation-card{
+    justify-content:flex-start;
+    padding:24px 18px;
+  }
+  .ticket-operation-card h2{
+    margin:5px 0 16px;
+  }
+  .ticket-operation-buttons .ticket-tool-button{
+    min-height:72px;
+  }
+  .ticket-list-launch{
+    padding:24px 18px;
+  }
+  .ticket-home-grid .ticket-status-card{
+    padding:20px 16px;
+  }
+  .ticket-home-grid .ticket-status-grid{
+    flex:none;
+    height:245px;
+  }
+  .ticket-home-grid .ticket-status-box{
+    height:auto;
+  }
+}
