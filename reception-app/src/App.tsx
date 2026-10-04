@@ -128,8 +128,10 @@ export default function App(){
       setLocalEvent(event);
       setScreen("ready");
       setResult(null);
-    }catch{
-      setError("開発用イベントデータを端末に保存できませんでした。");
+    }catch(error){
+      console.error("開発用イベントの端末保存に失敗しました",error);
+      const detail=error instanceof Error&&error.message?error.message:"原因不明の保存エラー";
+      setError(`開発用イベントデータを端末に保存できませんでした。(${detail})`);
     }finally{setBusy(false);}
   };
 
@@ -375,6 +377,25 @@ export default function App(){
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
         <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
+        <button
+          type="button"
+          className={`entry-reception-mode-switch ${mode==="entry"?"is-entry":"is-exit"}`}
+          onPointerDown={handleModePointerDown}
+          onPointerUp={handleModePointerUp}
+          onClick={handleModeClick}
+          onKeyDown={handleModeKeyDown}
+          aria-label={mode==="entry"?"入口受付。左右にスワイプして出口受付へ切り替え":"出口受付。左右にスワイプして入口受付へ切り替え"}
+          aria-pressed={mode==="exit"}
+        >
+          <span className="entry-reception-mode-switch-face entry-reception-mode-switch-front">
+            <EntryIcon />
+            <span><small>ENTRY</small><strong>入口受付</strong></span>
+          </span>
+          <span className="entry-reception-mode-switch-face entry-reception-mode-switch-back">
+            <EntryIcon exit />
+            <span><small>EXIT</small><strong>出口受付</strong></span>
+          </span>
+        </button>
       </div>
     </header>
     <main className="entry-reception-main">
