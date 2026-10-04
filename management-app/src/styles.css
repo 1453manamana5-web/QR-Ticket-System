@@ -2166,3 +2166,65 @@ body:has(.ticket-screen),
 @media print{
   .ticket-design-backdrop{display:none!important}
 }
+
+
+/* Legacy print engine connected to the new ticket design editor */
+.ticket-design-print-area{
+  align-content:start;
+  justify-content:start;
+}
+.ticket-design-print-ticket{
+  margin:0;
+  box-sizing:border-box;
+  position:relative;
+  overflow:hidden;
+  border:1px solid #cfd6df;
+  border-radius:0;
+  background:#fff;
+  break-inside:avoid;
+}
+.ticket-design-print-canvas{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  background-position:center;
+  background-repeat:no-repeat;
+  background-size:cover;
+}
+.ticket-design-print-qr{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  line-height:0;
+}
+.ticket-design-print-qr svg{
+  display:block;
+  width:100%;
+  height:100%;
+}
+@media print{
+  .ticket-design-print-area{
+    display:grid!important;
+    width:100%!important;
+    box-sizing:border-box;
+    align-content:start;
+    justify-content:start;
+    overflow:visible!important;
+  }
+  .ticket-design-print-ticket{
+    display:block!important;
+    box-sizing:border-box;
+    border:0;
+    border-radius:0;
+    overflow:hidden;
+    page-break-inside:avoid;
+    break-inside:avoid;
+  }
+  .ticket-design-print-canvas{
+    position:absolute;
+    inset:0;
+  }
+  .ticket-design-print-qr{
+    position:absolute;
+  }
+}
