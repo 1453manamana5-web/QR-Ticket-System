@@ -34,18 +34,27 @@ function createEventId() {
   return `EV-${stamp}-${random}`;
 }
 
-function createTickets(eventId: string, count: number): Ticket[] {
+function createTickets(eventId: string, count: number, startNumber = 1, prefix = "TKT"): Ticket[] {
   return Array.from({ length: count }, (_, index) => {
-    const random = crypto.getRandomValues(new Uint32Array(2));
-    const id = Array.from(random, value => value.toString(36).toUpperCase()).join("").slice(0, 10).padEnd(10, "0");
+    const ticketNumber = startNumber + index;
+    const id = `${prefix}-${String(ticketNumber).padStart(5, "0")}`;
     return {
       ticketId: id,
       eventId,
-      basicInfo: { ticketNumber: index + 1 },
+      basicInfo: { ticketNumber },
       currentStatus: "unused",
       valid: true,
       updatedAt: new Date().toISOString(),
     };
+  });
+}
+
+function ticketQrValue(eventId: string, ticket: Ticket) {
+  return JSON.stringify({
+    type: "qr-ticket",
+    eventId,
+    ticketId: ticket.ticketId,
+    ticketNumber: ticket.basicInfo.ticketNumber,
   });
 }
 
@@ -76,6 +85,10 @@ export default function App() {
   const [startTime, setStartTime] = useState(baseEvent.startTime);
   const [endTime, setEndTime] = useState(baseEvent.endTime);
   const [ticketCount, setTicketCount] = useState(500);
+  const [ticketPrefix, setTicketPrefix] = useState("TKT");
+  const [ticketStartNumber, setTicketStartNumber] = useState(1);
+  const [ticketTitle, setTicketTitle] = useState("入場チケット");
+  const [ticketDesignImage, setTicketDesignImage] = useState("");
   const [savedEventName, setSavedEventName] = useState(baseEvent.eventName);
   const [settings, setSettings] = useState<ReceptionSettings>({
     entryEnabled: true,
@@ -229,14 +242,32 @@ export default function App() {
 
   const generateTickets = () => {
     const count = Math.min(5000, Math.max(1, ticketCount));
-    setTickets(createTickets(event.eventId, count));
+    const startNumber = Math.max(1, ticketStartNumber);
+    const prefix = ticketPrefix.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "TKT";
+    setTicketPrefix(prefix);
+    setTicketStartNumber(startNumber);
+    setTickets(createTickets(event.eventId, count, startNumber, prefix));
     setError("");
+  };
+
+  const handleTicketDesignChange = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("チケットデザインには画像ファイルを選択してください。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setTicketDesignImage(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => setError("チケットデザイン画像を読み込めませんでした。");
+    reader.readAsDataURL(file);
   };
 
   const publish = async () => {
     if (publishing) return;
     const normalizedName = eventName.trim() || baseEvent.eventName;
-    const preparedTickets = tickets.length === ticketCount ? tickets : createTickets(event.eventId, ticketCount);
+    const preparedTickets = tickets.length === ticketCount
+      ? tickets
+      : createTickets(event.eventId, ticketCount, ticketStartNumber, ticketPrefix);
     const readyEvent: Event = {
       ...event,
       eventName: normalizedName,
@@ -366,35 +397,106 @@ export default function App() {
 
     </section>;
 
-    if (page === "チケット管理") return <section className="panel">
+    if (page === "チケット管理") return <section className="panel ticket-management-panel">
       <div className="panel-title">
-        <div><small>TICKET MANAGEMENT</small><h2>チケット管理</h2></div>
+        <div><small>TICKET MANAGEMENT</small><h2>チケット管理</h2><p>チケットのデザイン・番号・QRをまとめて管理します。</p></div>
         <span className="pill">{ticketStats.total}枚</span>
       </div>
+
+      <div className="ticket-config-card">
+        <div className="ticket-config-heading">
+          <div><small>TICKET DESIGN</small><h3>チケット発行設定</h3></div>
+          <span>現在のイベント：{event.eventName}</span>
+        </div>
+        <div className="ticket-config-grid">
+          <label>チケットタイトル
+            <input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} />
+          </label>
+          <label>チケット枚数
+            <input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} />
+          </label>
+          <label>番号プレフィックス
+            <input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} />
+          </label>
+          <label>開始番号
+            <input type="number" min="1" value={ticketStartNumber} onChange={e => setTicketStartNumber(Math.max(1, Number(e.target.value) || 1))} />
+          </label>
+        </div>
+        <div className="ticket-design-row">
+          <label className="ticket-upload">
+            <span>チケットデザイン画像</span>
+            <input type="file" accept="image/*" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
+            <small>{ticketDesignImage ? "デザイン画像を読み込み済み" : "任意。画像を貼り付けると印刷チケットに反映します。"}</small>
+          </label>
+          {ticketDesignImage && <button className="secondary" onClick={() => setTicketDesignImage("")}>デザインを外す</button>}
+        </div>
+        <div className="actions">
+          <button className="primary-action" onClick={generateTickets}>QR・チケット番号を生成</button>
+          <button className="secondary" onClick={() => setTickets([])} disabled={!tickets.length}>生成結果をクリア</button>
+        </div>
+      </div>
+
       <div className="metrics">
         <Metric title="総チケット" value={String(ticketStats.total)} sub="枚" />
         <Metric title="未使用" value={String(ticketStats.unused)} sub="枚" />
         <Metric title="入場中" value={String(ticketStats.inside)} sub="人" />
       </div>
-      <div className="actions">
-        <button className="primary-action" onClick={generateTickets}>チケットを生成・更新</button>
-        <button className="secondary" onClick={() => window.print()} disabled={!tickets.length}>チケットを印刷</button>
+
+      <div className="ticket-preview-card">
+        <div className="ticket-preview-heading">
+          <div><small>PREVIEW</small><h3>チケットプレビュー</h3></div>
+          <span>{tickets.length ? "QR・番号の発行済み" : "未生成"}</span>
+        </div>
+        {tickets.length > 0 ? <div className="ticket-preview-grid">
+          {tickets.slice(0, 6).map(ticket => (
+            <div className="ticket-preview" key={ticket.ticketId}>
+              {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <div className="ticket-preview-top"><b>{event.eventName}</b><span>{ticketTitle}</span></div>}
+              <div className="ticket-preview-body">
+                <div><small>NO.</small><strong>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</strong><span className="mono">{ticket.ticketId}</span></div>
+                <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={104} includeMargin />
+              </div>
+            </div>
+          ))}
+        </div> : <div className="empty"><h3>まだチケットがありません</h3><p>上の「QR・チケット番号を生成」を押すと、連番とQRを自動で発行します。</p></div>}
       </div>
-      <div className="ticket-toolbar">
-        <input placeholder="チケット番号・IDを検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} />
-        <span>{tickets.length ? `表示 ${filteredTickets.length}件 / ${tickets.length}件` : "チケット未生成"}</span>
-      </div>
-      {tickets.length > 0 ? <div className="ticket-table">
-        <div className="ticket-row ticket-head"><b>番号</b><b>チケットID</b><b>状態</b><b>有効</b></div>
-        {filteredTickets.map(ticket => (
-          <div className="ticket-row" key={ticket.ticketId}>
-            <span>{String(ticket.basicInfo.ticketNumber)}</span>
-            <span className="mono">{ticket.ticketId}</span>
-            <span>{ticket.currentStatus === "unused" ? "未使用" : ticket.currentStatus === "inside" ? "入場中" : "退場済み"}</span>
-            <span>{ticket.valid ? "有効" : "無効"}</span>
+
+      <div className="ticket-list-card">
+        <div className="ticket-preview-heading">
+          <div><small>TICKET LIST</small><h3>発行済みチケット</h3></div>
+          <div className="ticket-list-actions">
+            <span>{tickets.length ? `表示 ${filteredTickets.length}件 / ${tickets.length}件` : "チケット未生成"}</span>
+            <button className="secondary" onClick={() => window.print()} disabled={!tickets.length}>チケットを印刷</button>
           </div>
+        </div>
+        <div className="ticket-toolbar">
+          <input placeholder="チケット番号・IDを検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} />
+        </div>
+        {tickets.length > 0 ? <div className="ticket-table">
+          <div className="ticket-row ticket-head"><b>番号</b><b>チケットID</b><b>状態</b><b>有効</b></div>
+          {filteredTickets.map(ticket => (
+            <div className="ticket-row" key={ticket.ticketId}>
+              <span>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</span>
+              <span className="mono">{ticket.ticketId}</span>
+              <span>{ticket.currentStatus === "unused" ? "未使用" : ticket.currentStatus === "inside" ? "入場中" : "退場済み"}</span>
+              <span>{ticket.valid ? "有効" : "無効"}</span>
+            </div>
+          ))}
+        </div> : <div className="empty"><h3>まだチケットがありません</h3><p>イベントを選択して、発行設定からチケットを生成してください。</p></div>}
+      </div>
+
+      {tickets.length > 0 && <div className="ticket-print-area">
+        {tickets.map(ticket => (
+          <article className="print-ticket" key={`print-${ticket.ticketId}`}>
+            {ticketDesignImage && <img className="print-ticket-design" src={ticketDesignImage} alt="" />}
+            <div className="print-ticket-header"><strong>{event.eventName}</strong><span>{ticketTitle}</span></div>
+            <div className="print-ticket-content">
+              <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</b><span>{ticket.ticketId}</span></div>
+              <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={118} includeMargin />
+            </div>
+            <div className="print-ticket-footer">このQRは入場・退場認証に使用します</div>
+          </article>
         ))}
-      </div> : <div className="empty"><h3>まだチケットがありません</h3><p>イベントのチケット枚数を設定して、チケットを生成してください。</p></div>}
+      </div>}
     </section>;
 
     if (page === "端末管理") return <section className="panel">
