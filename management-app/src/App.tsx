@@ -120,7 +120,7 @@ export default function App() {
         String(ticket.basicInfo.ticketNumber).includes(query);
       const matchesStatus = ticketStatusFilter === "all" || ticket.currentStatus === ticketStatusFilter;
       return matchesQuery && matchesStatus;
-    }).slice(0, 10);
+    });
   }, [tickets, ticketQuery, ticketStatusFilter]);
 
   const saveEvent = async () => {
@@ -517,7 +517,6 @@ export default function App() {
               </div>
             ))}
           </div> : <div className="ticket-list-empty"><h3>チケットがありません</h3><p>「チケットを新規発行」からQRチケットを作成してください。</p></div>}
-          {tickets.length > 10 && <div className="ticket-list-footer">先頭10件を表示中 ・ 全{tickets.length}件</div>}
         </section>
       </div>}
 
