@@ -114,6 +114,7 @@ export default function App() {
   const [ticketListOpen, setTicketListOpen] = useState(false);
   const [members, setMembers] = useState<Array<{ memberId: string; memberNumber: number; name: string }>>([]);
   const [memberName, setMemberName] = useState("");
+  const [memberRegistrationOpen, setMemberRegistrationOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [memberQrModal, setMemberQrModal] = useState<{ memberId: string; memberNumber: number; name: string } | null>(null);
 
@@ -710,14 +711,13 @@ export default function App() {
           <div><small>AUTHENTICATION</small><strong>{members.length}</strong><span>認証QR発行可能</span></div>
         </div>
 
-        <div className="member-add">
-          <input
-            placeholder="部員名を入力"
-            value={memberName}
-            onChange={e => setMemberName(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") addMember(); }}
-          />
-          <button className="primary-action" onClick={addMember}>＋ 部員を追加</button>
+        <div className="member-register-launch">
+          <div>
+            <small>MEMBER REGISTRATION</small>
+            <strong>部員を登録</strong>
+            <span>新しい部員を登録して、部員番号を発行します。</span>
+          </div>
+          <button className="primary-action" onClick={() => { setMemberName(""); setMemberRegistrationOpen(true); }}>＋ 部員を登録</button>
         </div>
 
         <div className="member-toolbar">
@@ -759,6 +759,35 @@ export default function App() {
           </div>
         )}
       </section>
+
+      {memberRegistrationOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberRegistrationOpen(false)}>
+        <section className="member-registration-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="member-registration-close" onClick={() => setMemberRegistrationOpen(false)} aria-label="閉じる">×</button>
+          <div className="member-registration-heading">
+            <small>MEMBER REGISTRATION</small>
+            <h2>部員を登録</h2>
+            <p>部員名を入力すると、部員番号が自動で発行されます。</p>
+          </div>
+          <label className="member-registration-field">
+            <span>部員名</span>
+            <input
+              autoFocus
+              placeholder="例：山田 太郎"
+              value={memberName}
+              onChange={e => setMemberName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { addMember(); setMemberRegistrationOpen(false); } }}
+            />
+          </label>
+          <div className="member-registration-preview">
+            <span>発行される部員番号</span>
+            <strong>MBR-{String(members.reduce((max, member) => Math.max(max, member.memberNumber), 0) + 1).padStart(4, "0")}</strong>
+          </div>
+          <div className="member-registration-actions">
+            <button className="secondary" onClick={() => setMemberRegistrationOpen(false)}>キャンセル</button>
+            <button className="primary-action" disabled={!memberName.trim()} onClick={() => { addMember(); setMemberRegistrationOpen(false); }}>部員を登録</button>
+          </div>
+        </section>
+      </div>}
 
       {memberQrModal && <div className="member-qr-backdrop" onMouseDown={() => setMemberQrModal(null)}>
         <section className="member-qr-modal" onMouseDown={e => e.stopPropagation()}>
