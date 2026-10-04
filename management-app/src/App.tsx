@@ -428,24 +428,6 @@ export default function App() {
 
     if (page === "チケット管理") return <>
       <div className="ticket-screen">
-        <header className="ticket-screen-header">
-          <div className="ticket-brand">
-            <div className="ticket-brand-mark">QR</div>
-            <div>
-              <h1>交通研究部QRコード管理システム</h1>
-              <div className="ticket-brand-meta">
-                <span className="online-dot"><i />オンライン</span>
-                <span className="ticket-divider" />
-                <span className="event-chip">EVENT&nbsp;&nbsp; {event.eventName}</span>
-              </div>
-            </div>
-          </div>
-          <div className="ticket-page-title">
-            <span className="ticket-page-icon"><TicketIcon /></span>
-            <div><small>TICKET MANAGEMENT</small><strong>チケット管理</strong></div>
-          </div>
-        </header>
-
         <main className="ticket-home-grid">
           <section className="ticket-home-card ticket-operation-card">
             <div className="ticket-home-label">TICKET TOOLS</div>
@@ -671,7 +653,7 @@ function BackIcon(){return <svg viewBox="0 0 28 28" aria-hidden="true"><path d="
     <main className="management-main">
       <header className="management-header">
         <div><small>管理画面</small><h1>{page}</h1></div>
-        <div className="header-actions"><button className="secondary" onClick={openNewEventModal}>＋ 新規イベント</button><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>
+        <div className="header-actions"><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>
       </header>
       {pageContent()}
     </main>
