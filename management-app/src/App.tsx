@@ -590,6 +590,17 @@ export default function App() {
 
             <aside className="ticket-design-controls">
               <section className="ticket-design-control-card">
+                <h3>背景画像</h3>
+                <strong className="ticket-design-format">PNG・JPEG画像</strong>
+                <label className="ticket-design-file">
+                  <span>ファイルを選択</span><input type="file" accept="image/png,image/jpeg" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
+                </label>
+                <p>KeynoteやPowerPointから書き出したPNG画像も使用できます。</p>
+                <p>画像の縦横比は、カスタムを除く最も近い比率へ自動設定します。</p>
+                <div className="ticket-design-marker-help"><i />QRを置きたい場所に、鮮やかなピンク（目安 #FF00FF）の塗りつぶし正方形を1つ置いてください。近いピンク色でも自動検出します。</div>
+              </section>
+
+              <section className="ticket-design-control-card">
                 <h3>デザイン設定</h3>
                 <div className="ticket-design-control-block">
                   <h4>チケットサイズ</h4>
@@ -607,15 +618,6 @@ export default function App() {
                 <RangeSetting label="大きさ" value={ticketQrSize} suffix="%" min={15} max={45} onChange={setTicketQrSize} />
               </section>
 
-              <section className="ticket-design-control-card">
-                <h3>チケット番号</h3>
-                <button className={ticketNumberEnabled ? "ticket-design-toggle active" : "ticket-design-toggle"} onClick={() => setTicketNumberEnabled(v => !v)}>
-                  <span>チケット番号を印刷する</span><b>{ticketNumberEnabled ? "✓" : ""}</b>
-                </button>
-                <RangeSetting label="横位置" value={ticketNumberX} suffix="%" min={0} max={100} onChange={setTicketNumberX} />
-                <RangeSetting label="縦位置" value={ticketNumberY} suffix="%" min={0} max={100} onChange={setTicketNumberY} />
-                <RangeSetting label="文字サイズ" value={ticketNumberSize} suffix="px" min={10} max={40} onChange={setTicketNumberSize} />
-              </section>
 
               <section className="ticket-design-control-card">
                 <h3>まとめて印刷</h3>
@@ -625,16 +627,6 @@ export default function App() {
                 <label className="mm-input-row">チケット間の余白<input type="number" min="0" max="20" step="1" value={ticketGapMm} onChange={e => setTicketGapMm(Math.min(20, Math.max(0, Number(e.target.value) || 0)))} /><span>mm</span></label>
               </section>
 
-              <section className="ticket-design-control-card">
-                <h3>背景画像</h3>
-                <strong className="ticket-design-format">PNG・JPEG画像</strong>
-                <label className="ticket-design-file">
-                  <span>ファイルを選択</span><input type="file" accept="image/png,image/jpeg" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
-                </label>
-                <p>KeynoteやPowerPointから書き出したPNG画像も使用できます。</p>
-                <p>画像の縦横比は、カスタムを除く最も近い比率へ自動設定します。</p>
-                <div className="ticket-design-marker-help"><i />QRを置きたい場所に、鮮やかなピンク（目安 #FF00FF）の塗りつぶし正方形を1つ置いてください。近いピンク色でも自動検出します。</div>
-              </section>
             </aside>
           </div>
 
