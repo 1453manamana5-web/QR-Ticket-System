@@ -744,7 +744,55 @@ export default function App() {
   };
 
 function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
-  return <label className="ticket-design-range"><span>{label}</span><input type="range" min={min} max={max} value={value} onChange={e => onChange(Number(e.target.value))}/><strong>{value}{suffix}</strong></label>;
+  const updateFromPointer = (clientX:number, element:HTMLDivElement) => {
+    const rect = element.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const next = Math.round(min + ratio * (max - min));
+    onChange(next);
+  };
+
+  return <label className="ticket-design-range">
+    <span>{label}</span>
+    <div
+      className="ticket-design-range-control"
+      role="slider"
+      aria-label={label}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      tabIndex={0}
+      onPointerDown={e => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        updateFromPointer(e.clientX, e.currentTarget);
+      }}
+      onPointerMove={e => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          updateFromPointer(e.clientX, e.currentTarget);
+        }
+      }}
+      onKeyDown={e => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+          e.preventDefault();
+          onChange(Math.max(min, value - 1));
+        } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+          e.preventDefault();
+          onChange(Math.min(max, value + 1));
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          onChange(min);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          onChange(max);
+        }
+      }}
+    >
+      <span className="ticket-design-range-track">
+        <span className="ticket-design-range-fill" style={{width: `${((value - min) / (max - min)) * 100}%`}} />
+        <span className="ticket-design-range-thumb" style={{left: `${((value - min) / (max - min)) * 100}%`}} />
+      </span>
+    </div>
+    <strong>{value}{suffix}</strong>
+  </label>;
 }
 function TicketIcon(){return <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 13h32v22H8z"/><path d="M14 13v7m0 8v7M34 13v7m0 8v7"/><path d="M21 18h8v12h-8z"/></svg>;}
 function PlusIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 7v18M7 16h18"/></svg>;}
