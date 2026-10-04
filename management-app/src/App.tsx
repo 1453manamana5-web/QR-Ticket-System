@@ -185,7 +185,6 @@ export default function App() {
     voiceGuidance: boolean;
     controlAssist: boolean;
     deviceName: string;
-    controlLinkCode: string;
     aiLabEnabled: boolean;
   };
   const defaultAppSettings: AppSettings = {
@@ -194,7 +193,6 @@ export default function App() {
     voiceGuidance: false,
     controlAssist: false,
     deviceName: "受付端末",
-    controlLinkCode: "",
     aiLabEnabled: false,
   };
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
@@ -207,7 +205,6 @@ export default function App() {
     }
   });
   const [settingsNotice, setSettingsNotice] = useState("");
-  const [controlCodeInput, setControlCodeInput] = useState("");
 
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
@@ -508,9 +505,6 @@ export default function App() {
     authToken: bundle.authToken,
   }) : "";
 
-  const toggleSetting = (key: keyof ReceptionSettings) => {
-    setSettings(current => ({ ...current, [key]: !current[key] }));
-  };
   const updateAppSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setAppSettings(current => ({ ...current, [key]: value }));
     setSettingsNotice("設定を保存しました。");
@@ -519,8 +513,6 @@ export default function App() {
 
   const resetAppSettings = () => {
     setAppSettings(defaultAppSettings);
-    setControlCodeInput("");
-    setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
     setSettingsNotice("設定を初期状態に戻しました。");
   };
 
@@ -592,24 +584,6 @@ export default function App() {
     setBundle(null);
     setSettingsNotice("ローカルデータを初期化しました。");
   };
-
-  const linkControlApp = () => {
-    const code = controlCodeInput.trim();
-    if (!code) {
-      setSettingsNotice("連携コードを入力してください。");
-      return;
-    }
-    updateAppSetting("controlLinkCode", code);
-    setControlCodeInput("");
-    setSettingsNotice("管制アプリとの連携情報を保存しました。");
-  };
-
-  const unlinkControlApp = () => {
-    if (!window.confirm("管制アプリとの連携を解除しますか？")) return;
-    updateAppSetting("controlLinkCode", "");
-    setSettingsNotice("管制アプリとの連携を解除しました。");
-  };
-
 
   const addMember = () => {
     const normalized = memberName.trim();
@@ -1219,29 +1193,7 @@ export default function App() {
       </section>
 
       <section className="settings-section">
-        <div className="settings-section-heading"><small>APP</small><h3>アプリ設定</h3><p>受付時の音や案内を調整します。</p></div>
-        <div className="settings-card">
-          <div className="settings-row settings-range-row">
-            <div><b>音量</b><small>受付端末で再生する成功音・案内音の音量</small></div>
-            <div className="settings-range"><input type="range" min="0" max="100" value={appSettings.volume} onChange={e => updateAppSetting("volume", Number(e.target.value))} /><strong>{appSettings.volume}%</strong></div>
-          </div>
-          <Setting title="成功音" text="チケット認証成功時に音を鳴らす" checked={appSettings.successSound} onChange={() => updateAppSetting("successSound", !appSettings.successSound)} />
-          <Setting title="音声案内" text="受付結果を音声で案内する" checked={appSettings.voiceGuidance} onChange={() => updateAppSetting("voiceGuidance", !appSettings.voiceGuidance)} />
-        </div>
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-heading"><small>RECEPTION</small><h3>受付設定</h3><p>受付端末に公開する入退場ルールを設定します。</p></div>
-        <div className="settings-card">
-          <Setting title="入口受付" text="入場処理を有効にする" checked={settings.entryEnabled} onChange={() => toggleSetting("entryEnabled")} />
-          <Setting title="出口受付" text="退場処理を有効にする" checked={settings.exitEnabled} onChange={() => toggleSetting("exitEnabled")} />
-          <Setting title="再入場" text="退場後の再入場を許可する" checked={settings.reentryEnabled} onChange={() => toggleSetting("reentryEnabled")} />
-        </div>
-        <div className="settings-actions"><button className="primary-action" onClick={() => void publish()}>受付設定をFirebaseへ反映</button></div>
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-heading"><small>DEVICE</small><h3>端末設定</h3><p>この端末の識別情報と管制アプリ連携を管理します。</p></div>
+        <div className="settings-section-heading"><small>DEVICE</small><h3>端末設定</h3><p>この端末の識別情報を管理します。</p></div>
         <div className="settings-card">
           <label className="settings-input-row"><div><b>端末名</b><small>管理画面で表示する端末名</small></div><input value={appSettings.deviceName} onChange={e => updateAppSetting("deviceName", e.target.value)} /></label>
           <div className="settings-info-grid">
@@ -1250,17 +1202,6 @@ export default function App() {
             <div><span>イベントID</span><strong>{event.eventId}</strong></div>
             <div><span>接続状態</span><strong className="settings-state-ok">ブラウザ動作中</strong></div>
           </div>
-        </div>
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-heading"><small>CONTROL APP</small><h3>管制アプリ連携</h3><p>管制アプリからこの端末を管理するための連携情報です。</p></div>
-        <div className="settings-card">
-          {appSettings.controlLinkCode ? (
-            <div className="settings-linked"><div><span>連携状態</span><strong>連携済み</strong><small>連携コードを保存しています。</small></div><button className="secondary" onClick={unlinkControlApp}>連携を解除</button></div>
-          ) : (
-            <div className="settings-link-form"><label><span>連携コード</span><input value={controlCodeInput} onChange={e => setControlCodeInput(e.target.value)} placeholder="管制アプリから発行されたコード" /></label><button className="primary-action" onClick={linkControlApp}>連携する</button></div>
-          )}
         </div>
       </section>
 
