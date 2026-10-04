@@ -495,3 +495,12 @@
   .ticket-list-toolbar{padding:0 15px 10px}
   .ticket-full-table{margin:0 15px 15px}
 }
+
+/* Clean ticket management framing */
+.ticket-screen{min-height:calc(100vh - 86px);padding:4px 0 14px}
+.ticket-home-grid{max-width:1160px;margin:0 auto;gap:13px}
+.ticket-home-card{box-shadow:0 8px 24px rgb(23 32 51/.065)}
+@media(min-width:900px){
+  .ticket-home-grid{grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr)}
+}
+@media(max-width:900px){.ticket-screen{min-height:calc(100vh - 76px);padding-top:2px}}
