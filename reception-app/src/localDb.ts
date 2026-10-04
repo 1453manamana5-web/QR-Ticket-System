@@ -6,7 +6,7 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const STORES = {
   event: "event",
@@ -21,16 +21,27 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const database = request.result;
+      const transaction = request.transaction;
 
       if (!database.objectStoreNames.contains(STORES.event)) {
-        database.createObjectStore(STORES.event, {keyPath: "eventId"});
+        database.createObjectStore(STORES.event, {keyPath: "event.eventId"});
+      } else {
+        const existingStore = transaction!.objectStore(STORES.event);
+
+        // Version 5までのevent Storeは「eventId」をトップ階層のキーとして
+        // 定義していましたが、LocalEventDataは「event.eventId」に
+        // イベントIDを持つため、ここで正しいkeyPathへ作り直します。
+        if (existingStore.keyPath !== "event.eventId") {
+          database.deleteObjectStore(STORES.event);
+          database.createObjectStore(STORES.event, {keyPath: "event.eventId"});
+        }
       }
 
       if (!database.objectStoreNames.contains(STORES.tickets)) {
         const store = database.createObjectStore(STORES.tickets, {keyPath: "ticketId"});
         store.createIndex("eventId", "eventId", {unique: false});
       } else {
-        const store = request.transaction!.objectStore(STORES.tickets);
+        const store = transaction!.objectStore(STORES.tickets);
         if (!store.indexNames.contains("eventId")) {
           store.createIndex("eventId", "eventId", {unique: false});
         }
