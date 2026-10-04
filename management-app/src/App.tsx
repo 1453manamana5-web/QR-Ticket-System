@@ -552,8 +552,27 @@ export default function App() {
         </div>
       </div>}
 
-      {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>\n        <div className="ticket-modal ticket-qr-modal" onMouseDown={e => e.stopPropagation()}>\n          <button className="ticket-modal-close" onClick={() => setTicketQrModalTicket(null)} aria-label="閉じる">×</button>\n          <div className="ticket-qr-modal-heading">\n            <div className="ticket-qr-modal-icon"><QrIcon /></div>\n            <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>\n          </div>\n          <div className="ticket-qr-large">\n            <QRCodeSVG value={ticketQrValue(event.eventId, ticketQrModalTicket)} size={280} includeMargin />\n          </div>\n          <strong className="ticket-qr-number">{ticketQrModalTicket.ticketId}</strong>\n          <div className={`ticket-qr-status ticket-qr-status-${ticketQrModalTicket.currentStatus}`}>\n            <span>●</span>{ticketQrModalTicket.currentStatus === "inside" ? "入場中" : ticketQrModalTicket.currentStatus === "exited" ? "使用済み" : "未使用"}\n          </div>\n          <p className="ticket-qr-help">このQRコードを入口・出口受付で読み取れます。</p>\n          <div className="ticket-modal-actions">\n            <button className="secondary ticket-qr-close-button" onClick={() => setTicketQrModalTicket(null)}>閉じる</button>\n          </div>\n        </div>\n      </div>
-    </>;
+      {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
+        <div className="ticket-modal ticket-qr-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="ticket-modal-close" onClick={() => setTicketQrModalTicket(null)} aria-label="閉じる">×</button>
+          <div className="ticket-qr-modal-heading">
+            <div className="ticket-qr-modal-icon"><QrIcon /></div>
+            <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>
+          </div>
+          <div className="ticket-qr-large">
+            <QRCodeSVG value={ticketQrValue(event.eventId, ticketQrModalTicket)} size={280} includeMargin />
+          </div>
+          <strong className="ticket-qr-number">{ticketQrModalTicket.ticketId}</strong>
+          <div className={`ticket-qr-status ticket-qr-status-${ticketQrModalTicket.currentStatus}`}>
+            <span>●</span>{ticketQrModalTicket.currentStatus === "inside" ? "入場中" : ticketQrModalTicket.currentStatus === "exited" ? "使用済み" : "未使用"}
+          </div>
+          <p className="ticket-qr-help">このQRコードを入口・出口受付で読み取れます。</p>
+          <div className="ticket-modal-actions">
+            <button className="secondary ticket-qr-close-button" onClick={() => setTicketQrModalTicket(null)}>閉じる</button>
+          </div>
+        </div>
+      </div>}
+
 
     if (page === "端末管理") return <section className="panel">
       <div className="panel-title"><div><small>TERMINAL MANAGEMENT</small><h2>端末管理</h2></div></div>
