@@ -736,11 +736,18 @@ export default function App() {
   };
 
 function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
-  const updateFromPointer = (clientX:number, element:HTMLDivElement) => {
+  const updateFromClientX = (clientX:number, element:HTMLDivElement) => {
     const rect = element.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const next = Math.round(min + ratio * (max - min));
     onChange(next);
+  };
+
+  const handleTouch = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (touch) updateFromClientX(touch.clientX, e.currentTarget);
   };
 
   return <label className="ticket-design-range">
@@ -755,13 +762,25 @@ function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:
       tabIndex={0}
       onPointerDown={e => {
         e.currentTarget.setPointerCapture(e.pointerId);
-        updateFromPointer(e.clientX, e.currentTarget);
+        updateFromClientX(e.clientX, e.currentTarget);
       }}
       onPointerMove={e => {
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          updateFromPointer(e.clientX, e.currentTarget);
+          updateFromClientX(e.clientX, e.currentTarget);
         }
       }}
+      onPointerUp={e => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      }}
+      onPointerCancel={e => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      }}
+      onTouchStart={handleTouch}
+      onTouchMove={handleTouch}
       onKeyDown={e => {
         if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
           e.preventDefault();
