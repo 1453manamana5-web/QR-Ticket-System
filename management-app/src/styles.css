@@ -113,7 +113,7 @@
 .ticket-tool-button b{display:block;font-size:17px}
 .ticket-tool-create{background:linear-gradient(135deg,#ffd768,#efaa14);color:#332600;box-shadow:0 9px 22px rgb(237 170 20/.18)}
 .ticket-tool-create .tool-icon{background:rgb(255 255 255/.3)}
-.ticket-tool-design{background:linear-gradient(135deg,#dce8ff,#cbdcff);color:#315d9e}
+.ticket-tool-design{background:linear-gradient(135deg,#dce8ff,#cbdcff);color:#172033}
 .ticket-tool-design .tool-icon{background:rgb(255 255 255/.45)}
 
 .ticket-status-card{padding:21px 20px 18px;flex:1}
@@ -128,7 +128,7 @@
 .ticket-status-box>em{position:absolute;right:14px;bottom:14px;transform:translateY(100%);font-style:normal;font-size:10px;font-weight:800}
 .ticket-status-box.unused{background:#e9edf2;color:#5c6878}
 .ticket-status-box.inside{background:#d9f3e4;color:#25834f}
-.ticket-status-box.used{background:#dbeafe;color:#2870bf}
+.ticket-status-box.used{background:#dbeafe;color:#172033}
 .ticket-status-box.invalid{background:#fbe0e0;color:#c54545}
 .ticket-sync-state{display:inline-flex;align-items:center;gap:9px;margin-top:16px;padding:7px 12px;border-radius:999px;background:#e8f6ed;color:#25804a;font-size:11px;font-weight:800}
 .ticket-sync-state i{width:9px;height:9px;box-shadow:none}
@@ -157,10 +157,10 @@
 .ticket-status-select{width:100%;border:1px solid transparent;border-radius:999px;padding:10px 13px;font-weight:800;color:#596575;outline:none;cursor:pointer}
 .ticket-status-select.status-unused{background:#e8ecf0}
 .ticket-status-select.status-inside{background:#d6f0e0;color:#27814e}
-.ticket-status-select.status-exited{background:#dbeafe;color:#286eb5}
+.ticket-status-select.status-exited{background:#dbeafe;color:#172033}
 .ticket-row-actions{display:flex;gap:8px;min-width:0}
 .ticket-row-actions button{border:0;border-radius:12px;padding:10px 14px;font-weight:800;font-size:11px;cursor:pointer;white-space:nowrap}
-.ticket-row-view{background:#dbeafe;color:#2d69ac;flex:1}
+.ticket-row-view{background:#dbeafe;color:#172033;flex:1}
 .ticket-row-disable{background:#fff0c7;color:#9b6d0c;flex:1}
 .ticket-row-delete{background:#f8dfe0;color:#c34d4d;flex:0 0 58px}
 .ticket-list-footer{text-align:center;color:#8791a0;font-size:11px;font-weight:700;padding:13px 0 1px}
@@ -1758,7 +1758,7 @@ body:has(.ticket-screen),
 }
 .ticket-qr-status-exited{
   background:#dbeafe;
-  color:#2c70b5;
+  color:#172033;
 }
 .ticket-qr-help{
   margin:11px 0 0!important;
@@ -2413,7 +2413,7 @@ body:has(.ticket-screen),
 .member-qr-button{
   border:1px solid #d7e1ec;
   background:#eef4fa;
-  color:#315d8b;
+  color:#172033;
 }
 .member-delete-button{
   border:1px solid #f0c5c0;
@@ -2478,7 +2478,7 @@ body:has(.ticket-screen),
   place-items:center;
   border-radius:13px;
   background:#eaf1fb;
-  color:#315d8b;
+  color:#172033;
 }
 .member-qr-icon svg{
   width:25px;
@@ -2692,7 +2692,7 @@ body:has(.ticket-screen),
 .member-registration-preview strong{
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:16px;
-  color:#315d8b;
+  color:#172033;
 }
 .member-registration-actions{
   display:flex;
@@ -2726,7 +2726,7 @@ body:has(.ticket-screen),
 .member-selection-bar span{margin-right:auto;font-size:12px;font-weight:800}
 .member-selection-bar button:not(.primary-action){border:0;background:none;color:#667487;font-weight:700;cursor:pointer}
 .member-check-cell{width:38px!important;min-width:38px!important;text-align:center}
-.member-check-cell input{width:17px;height:17px;margin:0;accent-color:#315d8b;cursor:pointer}
+.member-check-cell input{width:17px;height:17px;margin:0;accent-color:#172033;cursor:pointer}
 .member-bulk-info{padding:10px 13px;border-radius:10px;background:#f5f7f9;color:#536174;font-size:12px;font-weight:800}
 .member-bulk-textarea{display:block;width:100%;box-sizing:border-box;min-height:150px;margin-top:12px;padding:12px;border:1px solid #d5dce4;border-radius:12px;resize:vertical;font:inherit;line-height:1.7;outline:none}
 .member-bulk-textarea:focus{border-color:#7d9ab8;box-shadow:0 0 0 3px rgb(49 93 139/.10)}
