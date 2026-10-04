@@ -37,7 +37,7 @@ function createEventId() {
 function createTickets(eventId: string, count: number, startNumber = 1, prefix = "TKT"): Ticket[] {
   return Array.from({ length: count }, (_, index) => {
     const ticketNumber = startNumber + index;
-    const id = `${prefix}-${String(ticketNumber).padStart(5, "0")}`;
+    const id = `${prefix}${String(ticketNumber).padStart(6, "0")}`;
     return {
       ticketId: id,
       eventId,
@@ -495,7 +495,7 @@ export default function App() {
               <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
               {filteredTickets.map(ticket => (
                 <div className="ticket-screen-row" key={ticket.ticketId}>
-                  <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</strong></div>
+                  <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}</strong></div>
                   <select
                     className={`ticket-status-select status-${ticket.currentStatus}`}
                     value={ticket.currentStatus}
@@ -573,7 +573,7 @@ export default function App() {
           <button className="ticket-modal-close" onClick={() => setTicketQrModalTicket(null)}>×</button>
           <small>QR CODE</small><h2>QR表示</h2><p>{event.eventName}</p>
           <div className="ticket-qr-large"><QRCodeSVG value={ticketQrValue(event.eventId, ticketQrModalTicket)} size={280} includeMargin /></div>
-          <strong className="ticket-qr-number">TKT {String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(5, "0")}</strong>
+          <strong className="ticket-qr-number">{ticketQrModalTicket.ticketId}</strong>
           <div className="ticket-modal-actions"><button className="secondary" onClick={() => setTicketQrModalTicket(null)}>閉じる</button></div>
         </div>
       </div>}
