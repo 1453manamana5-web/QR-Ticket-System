@@ -370,7 +370,7 @@ export default function App(){
     </section></main>
   </div>;
 
-  if(screen==="ready"&&localEvent?.dataReady)return <div className="entry-reception-page waiting">
+  if(screen==="ready"&&localEvent?.dataReady)return <div className={`entry-reception-page waiting reception-mode-${mode}`}>
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
@@ -441,7 +441,7 @@ export default function App(){
   const eventName=localEvent?.event.eventName??"イベント";
   const receptionClass=result?.kind==="success"?"ticket-success":result?.kind==="error"?"error":"waiting";
 
-  return <div className={`entry-reception-page ${entry?receptionClass:receptionClass}`}>
+  return <div className={`entry-reception-page ${receptionClass} reception-mode-${mode}`}>
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
 
