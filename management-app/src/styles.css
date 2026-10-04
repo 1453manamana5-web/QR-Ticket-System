@@ -1802,8 +1802,8 @@ body:has(.ticket-screen),
 }
 .ticket-design-editor-header{
   flex:none;
-  min-height:148px;
-  padding:38px 42px 25px;
+  min-height:116px;
+  padding:27px 42px 18px;
   display:flex;
   align-items:flex-start;
   justify-content:space-between;
@@ -1834,7 +1834,7 @@ body:has(.ticket-screen),
   display:grid;
   grid-template-columns:minmax(0,1.38fr) minmax(430px,.92fr);
   gap:28px;
-  padding:30px 38px 22px;
+  padding:17px 38px 22px;
 }
 .ticket-design-preview-pane{
   min-width:0;
@@ -1987,7 +1987,7 @@ body:has(.ticket-screen),
 .ticket-design-range-control{
   position:relative;
   width:100%;
-  height:44px;
+  height:50px;
   display:flex;
   align-items:center;
   cursor:grab;
@@ -1997,6 +1997,14 @@ body:has(.ticket-screen),
   -webkit-tap-highlight-color:transparent;
 }
 .ticket-design-range-control:active{cursor:grabbing}
+.ticket-design-range-control,
+.ticket-design-range-control *{
+  -webkit-touch-callout:none;
+}
+.ticket-design-range-control:focus-visible{
+  outline:3px solid rgba(54,119,95,.24);
+  outline-offset:4px;
+}
 .ticket-design-range-track{
   position:relative;
   width:100%;
