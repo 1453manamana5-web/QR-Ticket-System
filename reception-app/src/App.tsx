@@ -41,10 +41,10 @@ function QrIcon({size=26}:{size?:number}){
   </svg>;
 }
 
-function EntryIcon({exit=false}:{exit?:boolean}){
+function EntryIcon(){
   return <svg className="entry-icon" width="48" height="48" viewBox="0 0 48 48" aria-hidden="true">
-    <path d={exit?"M30 8l12 16-12 16":"M18 8L6 24l12 16"} />
-    <path d={exit?"M42 24H8M16 16l-8 8 8 8":"M6 24h34"} />
+    <path d="M30 8l12 16-12 16" />
+    <path d="M42 24H8M16 16l-8 8 8 8" />
     <path d="M28 10v28" />
   </svg>;
 }
@@ -394,7 +394,7 @@ export default function App(){
             <span><small>ENTRY</small><strong>入口受付</strong></span>
           </span>
           <span className="entry-reception-mode-switch-face entry-reception-mode-switch-back">
-            <EntryIcon exit />
+            <EntryIcon />
             <span><small>EXIT</small><strong>出口受付</strong></span>
           </span>
         </button>
