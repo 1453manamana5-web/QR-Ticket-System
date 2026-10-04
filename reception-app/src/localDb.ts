@@ -6,7 +6,7 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const STORES = {
   event: "event",
@@ -119,14 +119,17 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
   const savedEvent = await loadLocalEvent();
   const savedTicketCount = await countTickets(event.event.eventId);
 
-  if (
-    !savedEvent ||
-    savedEvent.event.eventId !== event.event.eventId ||
-    !savedEvent.dataReady ||
-    savedTicketCount !== tickets.length
-  ) {
-    await clearLocalEvent();
-    throw new Error("ローカルイベントデータの検証に失敗しました");
+  if (!savedEvent) {
+    throw new Error("イベント本体をIndexedDBから再読み込みできませんでした");
+  }
+  if (savedEvent.event.eventId !== event.event.eventId) {
+    throw new Error("保存したイベントIDが一致しません");
+  }
+  if (!savedEvent.dataReady) {
+    throw new Error("保存したイベントが準備完了状態ではありません");
+  }
+  if (savedTicketCount !== tickets.length) {
+    throw new Error(`チケット保存件数が一致しません（${savedTicketCount}/${tickets.length}）`);
   }
 }
 
