@@ -1864,7 +1864,7 @@ body:has(.ticket-screen),
   min-height:0;
   display:grid;
   place-items:center;
-  padding:26px;
+  padding:18px;
   overflow:hidden;
   border:1px solid #d8dfe7;
   border-radius:22px;
@@ -1872,7 +1872,7 @@ body:has(.ticket-screen),
 }
 .ticket-design-ticket-preview{
   position:relative;
-  width:min(92%,680px);
+  width:min(96%,820px);
   max-height:100%;
   overflow:hidden;
   background:#fff;
@@ -1984,53 +1984,50 @@ body:has(.ticket-screen),
 }
 .ticket-design-range>span{font-size:17px;font-weight:800}
 .ticket-design-range>strong{text-align:right;font-size:18px}
-.ticket-design-range input[type="range"]{
+.ticket-design-range-control{
+  position:relative;
   width:100%;
-  height:34px;
-  margin:0;
-  padding:0;
-  appearance:none;
-  -webkit-appearance:none;
-  background:transparent;
-  accent-color:#36775f;
-  cursor:pointer;
-  touch-action:pan-x;
+  height:44px;
+  display:flex;
+  align-items:center;
+  cursor:grab;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
 }
-.ticket-design-range input[type="range"]::-webkit-slider-runnable-track{
+.ticket-design-range-control:active{cursor:grabbing}
+.ticket-design-range-track{
+  position:relative;
+  width:100%;
   height:10px;
   border-radius:999px;
   background:#d6dde4;
 }
-.ticket-design-range input[type="range"]::-webkit-slider-thumb{
-  appearance:none;
-  -webkit-appearance:none;
-  width:30px;
-  height:30px;
-  margin-top:-10px;
-  border:3px solid #fff;
-  border-radius:50%;
-  background:#36775f;
-  box-shadow:0 2px 8px rgba(23,32,51,.22);
-  cursor:grab;
-}
-.ticket-design-range input[type="range"]:active::-webkit-slider-thumb{
-  cursor:grabbing;
-  transform:scale(1.08);
-}
-.ticket-design-range input[type="range"]::-moz-range-track{
-  height:10px;
+.ticket-design-range-fill{
+  position:absolute;
+  left:0;
+  top:0;
+  height:100%;
   border-radius:999px;
-  background:#d6dde4;
+  background:#36775f;
 }
-.ticket-design-range input[type="range"]::-moz-range-thumb{
-  width:30px;
-  height:30px;
+.ticket-design-range-thumb{
+  position:absolute;
+  top:50%;
+  width:32px;
+  height:32px;
+  transform:translate(-50%,-50%);
   border:3px solid #fff;
   border-radius:50%;
   background:#36775f;
   box-shadow:0 2px 8px rgba(23,32,51,.22);
-  cursor:grab;
+  pointer-events:none;
 }
+.ticket-design-range-control:active .ticket-design-range-thumb{
+  transform:translate(-50%,-50%) scale(1.08);
+}
+
 .ticket-design-toggle{
   width:100%;
   height:62px;
