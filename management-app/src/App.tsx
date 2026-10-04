@@ -519,6 +519,20 @@ export default function App() {
         </div>
 
         <button className="ticket-back-button" onClick={() => setPage("ホーム")}><BackIcon />管理モードに戻る</button>
+
+        {tickets.length > 0 && <div className="ticket-print-area">
+          {tickets.map(ticket => (
+            <article className="print-ticket" key={`print-${ticket.ticketId}`}>
+              {ticketDesignImage && <img className="print-ticket-design" src={ticketDesignImage} alt="" />}
+              <div className="print-ticket-header"><strong>{event.eventName}</strong><span>{ticketTitle}</span></div>
+              <div className="print-ticket-content">
+                <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(5, "0")}</b><span>{ticket.ticketId}</span></div>
+                <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={118} includeMargin />
+              </div>
+              <div className="print-ticket-footer">このQRは入場・退場認証に使用します</div>
+            </article>
+          ))}
+        </div>}
       </div>
 
       {ticketCreateModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketCreateModalOpen(false)}>
