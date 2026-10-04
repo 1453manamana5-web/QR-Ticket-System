@@ -1131,3 +1131,45 @@ body:has(.ticket-screen),
     min-height:0;
   }
 }
+
+/* Definitive full-width ticket dashboard */
+@media(min-width:761px){
+  .ticket-screen{
+    width:100%;
+    min-width:0;
+    height:calc(100dvh - 86px);
+    min-height:0;
+    max-height:calc(100dvh - 86px);
+    margin:0;
+    padding:8px 18px 12px;
+    overflow:hidden;
+    background:#f5f7fa;
+  }
+  .ticket-screen > main.ticket-home-grid{
+    width:100%;
+    min-width:0;
+    max-width:none;
+    margin:0;
+    padding:0;
+    height:100%;
+    min-height:0;
+    max-height:none;
+    flex:1 1 auto;
+    display:grid;
+    grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);
+    grid-template-rows:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:"status operation" "status list";
+    gap:12px;
+  }
+  .ticket-home-card{
+    min-width:0;
+    min-height:0;
+    width:100%;
+    height:100%;
+    margin:0;
+    box-sizing:border-box;
+  }
+  .ticket-home-grid .ticket-status-card{grid-area:status}
+  .ticket-operation-card{grid-area:operation}
+  .ticket-list-launch{grid-area:list}
+}
