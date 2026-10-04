@@ -891,20 +891,65 @@ export default function App() {
       </div>}
     </>;
 
-    if (page === "分析") return <section className="panel">
-      <div className="panel-title"><div><small>ANALYSIS</small><h2>分析</h2></div></div>
-      <div className="metrics">
-        <Metric title="来場者数" value={String(ticketStats.inside + ticketStats.exited)} sub="人" />
-        <Metric title="現在の会場内" value={String(ticketStats.inside)} sub="人" />
-        <Metric title="退場者数" value={String(ticketStats.exited)} sub="人" />
-      </div>
-      <div className="actions">
-        <button className="secondary">時間帯別グラフ</button>
-        <button className="secondary">データを保存</button>
-        <button className="secondary">CSV出力</button>
-      </div>
-      <div className="chart">受付記録が蓄積されると、時間帯別の来場者数・会場内人数を表示します。</div>
-    </section>;
+    if (page === "分析") {
+      const analyzedTotal = ticketStats.inside + ticketStats.exited;
+      const utilization = ticketStats.total > 0 ? Math.round((analyzedTotal / ticketStats.total) * 100) : 0;
+      const insideRate = analyzedTotal > 0 ? Math.round((ticketStats.inside / analyzedTotal) * 100) : 0;
+      const exitedRate = analyzedTotal > 0 ? Math.round((ticketStats.exited / analyzedTotal) * 100) : 0;
+
+      return <div className="analysis-screen">
+        <section className="analysis-summary">
+          <div className="analysis-summary-heading">
+            <div><small>ANALYSIS OVERVIEW</small><h2>イベント分析</h2><p>{savedEventName} ・ {event.eventDate}</p></div>
+            <span className="analysis-live"><i />リアルタイム集計</span>
+          </div>
+          <div className="analysis-metrics">
+            <div className="analysis-metric primary"><small>来場者数</small><strong>{analyzedTotal}</strong><span>人</span><b>入場済み + 退場済み</b></div>
+            <div className="analysis-metric"><small>現在の会場内</small><strong>{ticketStats.inside}</strong><span>人</span><b>{insideRate}% が会場内</b></div>
+            <div className="analysis-metric"><small>退場者数</small><strong>{ticketStats.exited}</strong><span>人</span><b>{exitedRate}% が退場済み</b></div>
+            <div className="analysis-metric"><small>チケット利用率</small><strong>{utilization}</strong><span>%</span><b>{analyzedTotal} / {ticketStats.total} 枚</b></div>
+          </div>
+        </section>
+
+        <div className="analysis-grid">
+          <section className="analysis-card analysis-chart-card">
+            <div className="analysis-card-heading"><div><small>VISITOR FLOW</small><h3>時間帯別来場者数</h3></div><span>受付記録から集計</span></div>
+            <div className="analysis-empty-chart">
+              <div className="analysis-y-axis"><span>多</span><span>中</span><span>少</span></div>
+              <div className="analysis-chart-area">
+                <div className="analysis-grid-line" /><div className="analysis-grid-line" /><div className="analysis-grid-line" />
+                <div className="analysis-empty-message"><strong>時間帯別データを待っています</strong><span>受付端末から入場記録が同期されると、来場者数の推移がここに表示されます。</span></div>
+                <div className="analysis-x-axis"><span>10:00</span><span>11:00</span><span>12:00</span><span>13:00</span><span>14:00</span><span>15:00</span><span>16:00</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section className="analysis-card">
+            <div className="analysis-card-heading"><div><small>TICKET STATUS</small><h3>チケット利用状況</h3></div><span>{ticketStats.total}枚</span></div>
+            <div className="analysis-status-list">
+              <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{ticketStats.unused}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.unused / ticketStats.total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{ticketStats.inside}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.inside / ticketStats.total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{ticketStats.exited}</strong></div><div className="analysis-progress"><i style={{width: ticketStats.total ? `${(ticketStats.exited / ticketStats.total) * 100}%` : "0%"}} /></div></div>
+            </div>
+            <div className="analysis-total-box"><span>利用済み</span><strong>{analyzedTotal}枚</strong><small>全チケットの {utilization}%</small></div>
+          </section>
+
+          <section className="analysis-card analysis-chart-card">
+            <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {ticketStats.inside}人</span></div>
+            <div className="analysis-capacity-empty"><div><strong>まだ推移データがありません</strong><span>入退場記録が蓄積されると、会場内人数の変化を確認できます。</span></div></div>
+          </section>
+
+          <section className="analysis-card">
+            <div className="analysis-card-heading"><div><small>REPORT</small><h3>データ操作</h3></div></div>
+            <div className="analysis-actions">
+              <button className="secondary" disabled>データを保存</button>
+              <button className="secondary" disabled>CSV出力</button>
+            </div>
+            <p className="analysis-note">現在は画面上のイベントデータを基に集計しています。受付記録の保存・同期機能を接続すると、時間帯別の詳細分析とCSV出力が利用できます。</p>
+          </section>
+        </div>
+      </div>;
+    }
 
     if (page === "設定") return <section className="panel">
       <div className="panel-title"><div><small>SETTINGS</small><h2>設定</h2></div></div>
