@@ -758,7 +758,7 @@ export default function App() {
               <SearchIcon />
               <input placeholder="名前・部員番号を検索" value={memberQuery} onChange={e => setMemberQuery(e.target.value)} />
             </label>
-            <button className="secondary member-bulk-button" onClick={() => { setMemberBulkText(""); setMemberBulkModalOpen(true); }}>まとめて変更</button>
+            <button className="secondary member-bulk-button" disabled={!selectedMemberIds.length} onClick={() => { setMemberBulkText(""); setMemberBulkModalOpen(true); }}>まとめて変更</button>
           </div>
 
         </div>
