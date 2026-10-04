@@ -11,6 +11,14 @@ export type PublishedEventBundle = {
   publishedAt: string;
 };
 
+export async function saveEventMetadata(event: Event): Promise<void> {
+  const db = getFirebaseDb();
+  await setDoc(doc(db, "events", event.eventId), {
+    ...event,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export function createAuthToken(): string {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
