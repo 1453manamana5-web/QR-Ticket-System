@@ -1526,3 +1526,88 @@ body:has(.ticket-screen),
     height:44px;
   }
 }
+
+/* Ticket page: let the management shell own the viewport height.
+   The ticket dashboard only receives the space left after the page header. */
+@media(min-width:761px){
+  .management-main:has(.ticket-screen){
+    flex:1 1 auto;
+    width:auto;
+    max-width:none;
+    min-width:0;
+    height:100dvh;
+    min-height:0;
+    max-height:100dvh;
+    margin:0;
+    padding:24px 34px 18px;
+    box-sizing:border-box;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .management-main:has(.ticket-screen) .management-header{
+    flex:0 0 auto;
+    margin:0 0 18px;
+  }
+
+  .management-main:has(.ticket-screen) .ticket-screen{
+    flex:1 1 0;
+    width:100%;
+    height:auto;
+    min-width:0;
+    min-height:0;
+    max-height:none;
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    overflow:hidden;
+    display:block;
+  }
+
+  .management-main:has(.ticket-screen) .ticket-screen > main.ticket-home-grid{
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    max-width:none;
+    max-height:none;
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,.72fr);
+    grid-template-rows:minmax(0,145px) minmax(0,1fr);
+    grid-template-areas:
+      "operation operation"
+      "status list";
+    gap:10px;
+    overflow:hidden;
+  }
+
+  .management-main:has(.ticket-screen) .ticket-home-card{
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    max-height:none;
+    margin:0;
+    box-sizing:border-box;
+    overflow:hidden;
+  }
+}
+
+@media(max-width:1100px) and (min-width:761px){
+  .management-main:has(.ticket-screen){
+    padding:18px 20px 12px;
+  }
+
+  .management-main:has(.ticket-screen) .management-header{
+    margin-bottom:12px;
+  }
+
+  .management-main:has(.ticket-screen) .ticket-screen > main.ticket-home-grid{
+    grid-template-rows:minmax(0,128px) minmax(0,1fr);
+    gap:8px;
+  }
+}
