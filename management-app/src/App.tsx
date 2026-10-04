@@ -60,6 +60,8 @@ function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
 export default function App() {
   const [page, setPage] = useState("ホーム");
   const [event, setEvent] = useState<Event>(baseEvent);
+  const [eventHistory, setEventHistory] = useState<Event[]>([baseEvent]);
+  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState(baseEvent.eventId);
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -116,6 +118,8 @@ export default function App() {
     };
 
     setEvent(updatedEvent);
+    setEventHistory(current => current.map(item => item.eventId === event.eventId ? updatedEvent : item));
+    setSelectedHistoryEventId(updatedEvent.eventId);
     setSavedEventName(normalizedName);
     setError("");
 
@@ -139,6 +143,8 @@ export default function App() {
       dataVersion: 1,
     };
     setEvent(next);
+    setEventHistory(current => [next, ...current.filter(item => item.eventId !== next.eventId)]);
+    setSelectedHistoryEventId(next.eventId);
     setEventName(next.eventName);
     setEventDate(next.eventDate);
     setStartTime(next.startTime);
@@ -151,8 +157,43 @@ export default function App() {
   };
 
   const changeEventStatus = (status: Event["eventStatus"]) => {
-    setEvent(current => ({ ...current, eventStatus: status }));
+    const updated = { ...event, eventStatus: status };
+    setEvent(updated);
+    setEventHistory(current => current.map(item => item.eventId === updated.eventId ? updated : item));
+    setSelectedHistoryEventId(updated.eventId);
     setError("");
+    void saveEventMetadata(updated).catch(reason => {
+      console.error(reason);
+      setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+    });
+  };
+
+  const selectHistoryEvent = (selected: Event) => {
+    setEvent(selected);
+    setEventName(selected.eventName);
+    setEventDate(selected.eventDate);
+    setStartTime(selected.startTime);
+    setEndTime(selected.endTime);
+    setSavedEventName(selected.eventName);
+    setSelectedHistoryEventId(selected.eventId);
+    setBundle(null);
+    setTickets([]);
+    setError("");
+  };
+
+  const deleteHistoryEvent = (eventId: string) => {
+    const target = eventHistory.find(item => item.eventId === eventId);
+    if (!target) return;
+    if (!window.confirm("「" + target.eventName + "」をイベント履歴から削除しますか？")) return;
+
+    const remaining = eventHistory.filter(item => item.eventId !== eventId);
+    if (remaining.length === 0) {
+      setError("最後のイベントは削除できません。新しいイベントを作成してから削除してください。");
+      return;
+    }
+
+    setEventHistory(remaining);
+    selectHistoryEvent(remaining[0]);
   };
 
   const generateTickets = () => {
@@ -175,6 +216,8 @@ export default function App() {
     setPublishing(true);
     setError("");
     setEvent(readyEvent);
+    setEventHistory(current => current.map(item => item.eventId === readyEvent.eventId ? readyEvent : item));
+    setSelectedHistoryEventId(readyEvent.eventId);
     setSavedEventName(normalizedName);
     try {
       const result = await publishEventBundle(readyEvent, settings, preparedTickets);
@@ -256,6 +299,39 @@ export default function App() {
         </div>
         <div className="qr-box"><QRCodeSVG value={authQrValue} size={220} includeMargin /></div>
       </div>}
+
+      <div className="event-history">
+        <div className="event-history-header">
+          <div><small>EVENT HISTORY</small><h2>イベント履歴</h2></div>
+          <span>{eventHistory.length}件</span>
+        </div>
+        <div className="event-history-list">
+          {eventHistory.map(item => {
+            const selected = item.eventId === selectedHistoryEventId;
+            return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
+              <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
+                <div>
+                  <b>{item.eventName}</b>
+                  <small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small>
+                  <span>{item.eventId}</span>
+                </div>
+                <span className="pill">{statusLabel[item.eventStatus]}</span>
+              </button>
+              {selected && <div className="event-history-actions">
+                <span className="event-history-label">このイベントを操作</span>
+                <div>
+                  <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
+                  <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
+                  <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
+                  <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
+                  <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
+                  <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
+                </div>
+              </div>}
+            </div>;
+          })}
+        </div>
+      </div>
     </section>;
 
     if (page === "チケット管理") return <section className="panel">
