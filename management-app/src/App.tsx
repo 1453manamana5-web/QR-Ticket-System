@@ -13,7 +13,7 @@ const baseEvent: Event = {
   dataVersion: 1,
 };
 
-const pages = ["ホーム", "イベント管理", "チケット管理", "端末管理", "スタッフ管理", "分析", "設定"];
+const pages = ["ホーム", "イベント管理", "チケット管理", "端末管理", "部員管理", "分析", "設定"];
 
 const statusLabel: Record<Event["eventStatus"], string> = {
   preparing: "準備中",
@@ -112,8 +112,10 @@ export default function App() {
   const [ticketDesignModalOpen, setTicketDesignModalOpen] = useState(false);
   const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
   const [ticketListOpen, setTicketListOpen] = useState(false);
-  const [staffNames, setStaffNames] = useState<string[]>([]);
-  const [staffName, setStaffName] = useState("");
+  const [members, setMembers] = useState<Array<{ memberId: string; memberNumber: number; name: string }>>([]);
+  const [memberName, setMemberName] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberQrModal, setMemberQrModal] = useState<{ memberId: string; memberNumber: number; name: string } | null>(null);
 
   const eventStatus = event.eventStatus;
   const ticketStats = useMemo(() => ({
@@ -347,12 +349,38 @@ export default function App() {
     setSettings(current => ({ ...current, [key]: !current[key] }));
   };
 
-  const addStaff = () => {
-    const normalized = staffName.trim();
+  const addMember = () => {
+    const normalized = memberName.trim();
     if (!normalized) return;
-    setStaffNames(current => [...current, normalized]);
-    setStaffName("");
+    const nextNumber = members.reduce((max, member) => Math.max(max, member.memberNumber), 0) + 1;
+    const nextMember = {
+      memberId: `MBR-${String(nextNumber).padStart(4, "0")}`,
+      memberNumber: nextNumber,
+      name: normalized,
+    };
+    setMembers(current => [...current, nextMember]);
+    setMemberName("");
   };
+
+  const updateMemberName = (memberId: string, name: string) => {
+    setMembers(current => current.map(member => member.memberId === memberId ? { ...member, name } : member));
+  };
+
+  const deleteMember = (memberId: string) => {
+    const target = members.find(member => member.memberId === memberId);
+    if (!target || !window.confirm(`「${target.name}」を部員一覧から削除しますか？`)) return;
+    setMembers(current => current.filter(member => member.memberId !== memberId));
+  };
+
+  const filteredMembers = useMemo(() => {
+    const query = memberQuery.trim().toLowerCase();
+    return members.filter(member =>
+      !query ||
+      member.name.toLowerCase().includes(query) ||
+      member.memberId.toLowerCase().includes(query) ||
+      String(member.memberNumber).includes(query),
+    );
+  }, [members, memberQuery]);
 
   const pageContent = () => {
     if (page === "イベント管理") return <section className="panel">
@@ -670,16 +698,98 @@ export default function App() {
       <div className="notice">旧アプリの端末管理に合わせ、今後ここから受付状態・端末名・接続状態・リモート操作を追加します。</div>
     </section>;
 
-    if (page === "スタッフ管理") return <section className="panel">
-      <div className="panel-title"><div><small>STAFF MANAGEMENT</small><h2>スタッフ管理</h2></div></div>
-      <div className="staff-add">
-        <input placeholder="スタッフ名" value={staffName} onChange={e => setStaffName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addStaff(); }} />
-        <button className="primary-action" onClick={addStaff}>スタッフを追加</button>
-      </div>
-      {staffNames.length ? staffNames.map((name, index) => (
-        <div className="staff-row" key={`${name}-${index}`}><div><b>{name}</b><small>スタッフQR #${index + 1}</small></div><button className="secondary" onClick={() => setStaffNames(current => current.filter((_, i) => i !== index))}>削除</button></div>
-      )) : <div className="empty"><h3>スタッフを登録</h3><p>旧アプリと同じように、スタッフ名とスタッフ用QRをここで管理します。</p></div>}
-    </section>;
+    if (page === "部員管理") return <>
+      <section className="panel member-management-panel">
+        <div className="panel-title">
+          <div><small>MEMBER MANAGEMENT</small><h2>部員管理</h2><p>部員名と認証用の部員番号をまとめて管理します。</p></div>
+          <span className="pill">{members.length}人</span>
+        </div>
+
+        <div className="member-summary">
+          <div><small>REGISTERED MEMBERS</small><strong>{members.length}</strong><span>登録部員</span></div>
+          <div><small>AUTHENTICATION</small><strong>{members.length}</strong><span>認証QR発行可能</span></div>
+        </div>
+
+        <div className="member-add">
+          <input
+            placeholder="部員名を入力"
+            value={memberName}
+            onChange={e => setMemberName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") addMember(); }}
+          />
+          <button className="primary-action" onClick={addMember}>＋ 部員を追加</button>
+        </div>
+
+        <div className="member-toolbar">
+          <div>
+            <small>MEMBER LIST</small>
+            <h3>部員一覧</h3>
+          </div>
+          <label className="member-search">
+            <SearchIcon />
+            <input placeholder="名前・部員番号を検索" value={memberQuery} onChange={e => setMemberQuery(e.target.value)} />
+          </label>
+        </div>
+
+        {members.length ? (
+          <div className="member-table">
+            <div className="member-table-head"><span>部員番号</span><span>氏名</span><span>認証QR</span><span>操作</span></div>
+            {filteredMembers.map(member => (
+              <div className="member-row" key={member.memberId}>
+                <div>
+                  <strong>{member.memberId}</strong>
+                  <small>#{String(member.memberNumber).padStart(3, "0")}</small>
+                </div>
+                <input
+                  className="member-name-input"
+                  value={member.name}
+                  onChange={e => updateMemberName(member.memberId, e.target.value)}
+                  aria-label={`${member.memberId}の氏名`}
+                />
+                <button className="member-qr-button" onClick={() => setMemberQrModal(member)}>QR表示</button>
+                <button className="member-delete-button" onClick={() => deleteMember(member.memberId)}>削除</button>
+              </div>
+            ))}
+            {!filteredMembers.length && <div className="member-empty-filter">検索条件に一致する部員はいません。</div>}
+          </div>
+        ) : (
+          <div className="empty member-empty">
+            <h3>部員を登録してください</h3>
+            <p>部員名を入力して追加すると、部員番号と認証QRが自動で発行されます。</p>
+          </div>
+        )}
+      </section>
+
+      {memberQrModal && <div className="member-qr-backdrop" onMouseDown={() => setMemberQrModal(null)}>
+        <section className="member-qr-modal" onMouseDown={e => e.stopPropagation()}>
+          <button className="member-qr-close" onClick={() => setMemberQrModal(null)} aria-label="閉じる">×</button>
+          <div className="member-qr-heading">
+            <div className="member-qr-icon"><QrIcon /></div>
+            <div><small>MEMBER AUTHENTICATION</small><h2>部員認証QR</h2></div>
+          </div>
+          <div className="member-qr-code">
+            <QRCodeSVG
+              value={JSON.stringify({
+                type: "member-auth",
+                eventId: event.eventId,
+                memberId: memberQrModal.memberId,
+                memberNumber: memberQrModal.memberNumber,
+                name: memberQrModal.name,
+              })}
+              size={260}
+              includeMargin
+            />
+          </div>
+          <strong>{memberQrModal.name}</strong>
+          <span>{memberQrModal.memberId}</span>
+          <p>このQRを部員認証に使用できます。</p>
+          <div className="member-qr-actions">
+            <button className="secondary" onClick={() => window.print()}>印刷</button>
+            <button className="secondary" onClick={() => setMemberQrModal(null)}>閉じる</button>
+          </div>
+        </section>
+      </div>}
+    </>;
 
     if (page === "分析") return <section className="panel">
       <div className="panel-title"><div><small>ANALYSIS</small><h2>分析</h2></div></div>
