@@ -574,7 +574,7 @@ export default function App() {
                   {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <span className="ticket-design-empty">背景画像を選択して</span>}
                   <div className="ticket-design-qr-preview" style={{
                     left: `${ticketQrX}%`, top: `${ticketQrY}%`,
-                    width: `${ticketQrSize * 1.75}%`,
+                    width: `${ticketQrSize}%`,
                     transform: "translate(-50%, -50%)",
                   }}>
                     <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin />
