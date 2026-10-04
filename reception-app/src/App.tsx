@@ -236,7 +236,9 @@ export default function App(){
   const switchMode=()=>{
     setMode(current=>current==="entry"?"exit":"entry");
     setResult(null);
-    setScannerKey(value=>value+1);
+    // モード切替ではQRカメラを再生成しない。
+    // Safariではカメラ停止→再起動が競合して画面が白くなることがあるため、
+    // QrScannerはそのまま維持し、最新のmodeをhandleTicketScan側で参照する。
   };
 
   const handleModePointerDown=(event:React.PointerEvent<HTMLButtonElement>)=>{
@@ -532,14 +534,6 @@ export default function App(){
       )}
     </main>
 
-    <footer className="entry-reception-footer">
-      <button type="button" className="entry-admin-button">
-        <span className="entry-footer-button-icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.4 7 10 4.1-1.6 7-5.3 7-10V6z"/><path d="M9 11.5a3 3 0 1 1 6 0M8 17c.8-1.7 2.1-2.5 4-2.5s3.2.8 4 2.5"/></svg>
-        </span>
-        <span>管理モード</span>
-      </button>
-    </footer>
   </div>;
 }
 
