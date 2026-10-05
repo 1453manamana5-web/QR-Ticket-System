@@ -1,5 +1,6 @@
 import { deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
+import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
 
 
@@ -81,8 +82,11 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   await setDoc(doc(db, "events", record.eventId, "receptionRecords", record.recordId), record, { merge: true });
 }
 
-export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount = 0): Promise<void> {
+export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<void> {
   const db = getFirebaseDb();
+  const pendingCount = typeof syncPendingCount === "number"
+    ? syncPendingCount
+    : (await getPendingSyncItems()).length;
   const reference = doc(db, "terminals", terminalId);
   const existing = await getDoc(reference);
   const data = existing.exists() ? existing.data() : {};
@@ -96,7 +100,7 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     approved: data.managementApproved === true || data.receptionApproved === true || data.approved === true,
     managementApproved: data.managementApproved === true,
     receptionApproved: data.receptionApproved === true,
-    syncPendingCount,
+    syncPendingCount: pendingCount,
     lastSeen: new Date().toISOString(),
     networkMbps: typeof data.networkMbps === "number" ? data.networkMbps : null,
     battery: typeof data.battery === "number" ? data.battery : null,
