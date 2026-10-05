@@ -2,20 +2,12 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
-import {downloadEventData} from "./eventDownloader";
+import {downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
 type Result={kind:"success"|"error";title:string;detail:string};
-
-const DEMO_EVENT:EventAuthPayload={
-  type:"qr-ticket-event-auth",
-  eventId:"DEMO-2027",
-  eventName:"○○文化祭 2027",
-  dataVersion:1,
-  authToken:"demo-auth-token"
-};
 
 function parseAuthPayload(text:string):EventAuthPayload|null{
   try{
@@ -23,17 +15,6 @@ function parseAuthPayload(text:string):EventAuthPayload|null{
     if(value.type!=="qr-ticket-event-auth"||typeof value.eventId!=="string"||typeof value.eventName!=="string"||typeof value.dataVersion!=="number"||typeof value.authToken!=="string")return null;
     return value as EventAuthPayload;
   }catch{return null;}
-}
-
-function createDemoTickets(eventId:string):Ticket[]{
-  return Array.from({length:500},(_,index)=>({
-    ticketId:"DEMO-"+String(index+1).padStart(4,"0"),
-    eventId,
-    basicInfo:{ticketNumber:index+1},
-    currentStatus:"unused" as const,
-    valid:true,
-    updatedAt:new Date().toISOString()
-  }));
 }
 
 function QrIcon({size=26}:{size?:number}){
@@ -56,6 +37,8 @@ export default function App(){
   const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
+  const [authCode,setAuthCode]=useState("");
+  const [authCodeMode,setAuthCodeMode]=useState(false);
   const [localEvent,setLocalEvent]=useState<LocalEventData|null>(null);
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
@@ -225,39 +208,10 @@ export default function App(){
     setScreen("confirm");
   },[]);
 
-  const startDemoEvent=async()=>{
-    if(busy)return;
-    setAuthPayload(DEMO_EVENT);
-    setError("");
-    setBusy(true);
-    try{
-      const tickets=createDemoTickets(DEMO_EVENT.eventId);
-      const event:LocalEventData={
-        event:{eventId:DEMO_EVENT.eventId,eventName:DEMO_EVENT.eventName,eventStatus:"ready",dataVersion:DEMO_EVENT.dataVersion},
-        settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},
-        terminalId:getTerminalId(),
-        authenticatedAt:new Date().toISOString(),
-        dataReady:false,
-        ticketCount:0
-      };
-      event.dataReady=true;
-      event.ticketCount=tickets.length;
-      await prepareLocalEventData(event,tickets);
-      setLocalEvent(event);
-      setScreen("ready");
-      setResult(null);
-    }catch(error){
-      console.error("開発用イベントの端末保存に失敗しました",error);
-      const detail=error instanceof Error&&error.message?error.message:"原因不明の保存エラー";
-      setError(`開発用イベントデータを端末に保存できませんでした。(${detail})`);
-    }finally{setBusy(false);}
-  };
-
   const authenticateEvent=async()=>{
     if(!authPayload||busy)return;
     setBusy(true);
     setError("");
-    const isDemo=authPayload.eventId===DEMO_EVENT.eventId;
     const event:LocalEventData={
       event:{eventId:authPayload.eventId,eventName:authPayload.eventName,eventStatus:"ready",dataVersion:authPayload.dataVersion},
       settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},
@@ -267,27 +221,38 @@ export default function App(){
       ticketCount:0
     };
     try{
-      if(isDemo){
-        const tickets=createDemoTickets(authPayload.eventId);
-        event.dataReady=true;
-        event.ticketCount=tickets.length;
-        await prepareLocalEventData(event,tickets);
-      }else{
-        const downloaded=await downloadEventData(authPayload,event.terminalId);
-        event.dataVersion=downloaded.localEvent.event.dataVersion;
-        event.eventStatus=downloaded.localEvent.event.eventStatus;
-        event.settings=downloaded.localEvent.settings;
-        event.authenticatedAt=downloaded.localEvent.authenticatedAt;
-        event.ticketCount=downloaded.localEvent.ticketCount;
-        await prepareLocalEventData(event,downloaded.tickets);
-        event.dataReady=true;
-      }
+      const downloaded=await downloadEventData(authPayload,event.terminalId);
+      event.dataVersion=downloaded.localEvent.event.dataVersion;
+      event.eventStatus=downloaded.localEvent.event.eventStatus;
+      event.settings=downloaded.localEvent.settings;
+      event.authenticatedAt=downloaded.localEvent.authenticatedAt;
+      event.ticketCount=downloaded.localEvent.ticketCount;
+      await prepareLocalEventData(event,downloaded.tickets);
+      event.dataReady=true;
       setLocalEvent(event);
       setScreen("ready");
       setResult(null);
+      setAuthCode("");
+      setAuthCodeMode(false);
     }catch{
       setError("イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
+    }finally{setBusy(false);}
+  };
+
+  const handleAuthCodeSubmit=async()=>{
+    const token=authCode.trim();
+    if(!token||busy)return;
+    setBusy(true);
+    setError("");
+    try{
+      const payload=await getEventAuthPayloadByToken(token);
+      if(!payload)throw new Error("EVENT_DATA_NOT_FOUND");
+      setAuthPayload(payload);
+      setAuthCodeMode(false);
+      setScreen("confirm");
+    }catch{
+      setError("イベント連携コードが正しくないか、イベントデータが見つかりません。");
     }finally{setBusy(false);}
   };
 
@@ -462,15 +427,19 @@ export default function App(){
               <div className="reception-start-content">
                 <div className="entry-result-icon">✓</div>
                 <h2>イベント認証の準備完了</h2>
-                <p className="entry-result-primary">管理アプリのイベント認証QRを読み取ってください</p>
+                <p className="entry-result-primary">管理アプリのイベントデータQRを読み取るか、連携コードを入力してください</p>
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
-                <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベント認証を開始する</button>
+                <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
+                <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
+                {authCodeMode&&<div className="reception-auth-code-form">
+                  <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
+                  <button type="button" className="primary" disabled={busy||!authCode.trim()} onClick={()=>void handleAuthCodeSubmit()}>{busy?"確認中…":"コードで連携"}</button>
+                </div>}
               </div>
             </div>
           </div>
         </div>
         {error&&<div className="entry-auth-error">{error}</div>}
-        <button type="button" className="entry-auth-dev-button" disabled={busy} onClick={()=>void startDemoEvent()}>{busy?"開発用イベントを準備中…":"開発用イベントで試す"}</button>
       </section>
     </main>
   </div>;
