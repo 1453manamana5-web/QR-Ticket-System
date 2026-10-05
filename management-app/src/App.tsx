@@ -778,7 +778,7 @@ export default function App() {
       for (let x = 0; x < width; x += 2) {
         const index = (y * width + x) * 4;
         const r = pixels[index], g = pixels[index + 1], b = pixels[index + 2], a = pixels[index + 3];
-        if (a > 180 && r > 220 && b > 170 && g < 120 && r - g > 110 && b - g > 80) {
+        if (a > 160 && r > 200 && b > 135 && g < 150 && r - g > 70 && b - g > 45) {
           minX = Math.min(minX, x); minY = Math.min(minY, y);
           maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
           count++;
