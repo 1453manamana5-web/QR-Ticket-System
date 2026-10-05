@@ -3495,3 +3495,17 @@ body:has(.ticket-screen),
     flex:initial !important;
   }
 }
+
+
+/* Ticket operation buttons: keep both controls fully inside the card */
+@media(min-width:761px){
+  .ticket-operation-card{overflow:hidden;}
+  .ticket-operation-buttons{gap:10px !important;}
+  .ticket-operation-buttons .ticket-tool-button{
+    min-height:64px !important;
+    height:64px !important;
+    padding:8px 12px !important;
+    box-sizing:border-box !important;
+  }
+  .ticket-operation-buttons .tool-icon{width:34px;height:34px;}
+}
