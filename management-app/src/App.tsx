@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAppSettings, loadReceptionSettings, saveAnalysis, saveAppSettings, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -341,6 +341,8 @@ export default function App() {
     void loadReceptionSettings(event.eventId).then(remote => {
       if (remote) setSettings(remote);
     }).catch(reason => console.error("Firebase reception settings load failed", reason));
+    void loadMembers(event.eventId).then(remote => setMembers(remote)).catch(reason => console.error("Firebase member load failed", reason));
+    void loadAnalysis(event.eventId).then(remote => setAnalysisHistory(remote)).catch(reason => console.error("Firebase analysis load failed", reason));
   }, [event.eventId]);
 
   useEffect(() => {
@@ -500,6 +502,10 @@ export default function App() {
     setError("");
     setNewEventModalOpen(false);
     setPage("イベント管理");
+    void saveEvent(next).catch(reason => {
+      console.error(reason);
+      setError("新しいイベントをFirebaseへ保存できませんでした。");
+    });
   };
 
   const changeEventStatus = (status: Event["eventStatus"]) => {
@@ -542,6 +548,10 @@ export default function App() {
 
     setEventHistory(remaining);
     selectHistoryEvent(remaining[0]);
+    void deleteFirebaseEvent(eventId).catch(reason => {
+      console.error(reason);
+      setError("イベントをFirebaseから削除できませんでした。");
+    });
   };
 
   const generateTickets = async () => {
@@ -722,6 +732,7 @@ export default function App() {
     setMembers([]);
     setAppSettings(defaultAppSettings);
     setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+    void saveReceptionSettings(event.eventId, { entryEnabled: true, exitEnabled: true, reentryEnabled: true }).catch(reason => console.error(reason));
     setBundle(null);
     setSettingsNotice("ローカルデータを初期化しました。");
   };
