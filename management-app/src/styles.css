@@ -3162,9 +3162,13 @@ body:has(.ticket-screen),
 }
 .managed-terminal-title{
   min-width:0;
-  display:flex;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
   align-items:center;
   gap:10px;
+}
+.managed-terminal-role-row{
+  min-width:max-content;
 }
 .managed-terminal-title>div{min-width:0}
 .managed-terminal-title h4{
