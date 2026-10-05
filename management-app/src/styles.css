@@ -3478,3 +3478,20 @@ body:has(.ticket-screen),
   position:relative;
   z-index:2;
 }
+
+/* Ticket dashboard: force ticket creation/design tools side by side */
+@media(min-width:761px){
+  .ticket-operation-buttons{
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    flex-direction:initial !important;
+    width:100% !important;
+    gap:12px !important;
+  }
+
+  .ticket-operation-buttons .ticket-tool-button{
+    width:100% !important;
+    min-width:0 !important;
+    flex:initial !important;
+  }
+}
