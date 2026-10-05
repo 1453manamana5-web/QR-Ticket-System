@@ -3140,6 +3140,18 @@ body:has(.ticket-screen),
   background:#fff;
   overflow:hidden;
 }
+.managed-terminal-card.admin-terminal{
+  border-color:#d6ad52;
+  background:linear-gradient(135deg,#fffdf6 0%,#fff8e5 100%);
+  box-shadow:0 7px 22px rgb(171 125 24/.12);
+}
+.managed-terminal-card.admin-terminal .managed-terminal-icon{
+  background:#f4df9f;
+  color:#795710;
+}
+.managed-terminal-card.admin-terminal .managed-terminal-footer{
+  border-top-color:#ead9aa;
+}
 .managed-terminal-card.selected{
   border-color:#b9c1cc;
   box-shadow:0 7px 20px rgb(23 32 51/.07);
