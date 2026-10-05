@@ -824,6 +824,29 @@ export default function App() {
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
   };
 
+  const registerOwnTerminal = () => {
+    const existing = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (existing) {
+      setTerminalNotice("この端末はすでに登録申請されています。");
+      return;
+    }
+    const terminal: ManagedTerminal = {
+      terminalId: firebaseDeviceId,
+      name: appSettings.deviceName || "受付端末",
+      type: "Web / iPad",
+      mode: "停止",
+      status: "pending",
+      approved: false,
+      lastSeen: new Date().toISOString(),
+      networkMbps: null,
+      battery: null,
+    };
+    setTerminals(current => [...current, terminal]);
+    void saveTerminal(terminal).catch(reason => console.error("Firebase terminal registration failed", reason));
+    setSelectedTerminalId(terminal.terminalId);
+    setTerminalNotice("この端末の登録申請を送信しました。管理者の承認を待ってください。");
+  };
+
   const refreshTerminalState = () => {
     setTerminalNotice("端末状態を確認しました。未接続の端末は「見つかりません」と表示します。");
   };
