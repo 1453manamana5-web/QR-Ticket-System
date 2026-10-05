@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteTicket as deleteFirebaseTicket, saveTicket, saveTickets, subscribeEvents, subscribeTickets } from "./firebaseData";
+import { deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAppSettings, loadReceptionSettings, saveAnalysis, saveAppSettings, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -270,6 +270,14 @@ export default function App() {
   });
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
+  const [firebaseDeviceId] = useState(() => {
+    const key = "qr-ticket-device-id";
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    const created = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
+    localStorage.setItem(key, created);
+    return created;
+  });
   const firebaseEventHydratedRef = useRef(false);
   const firebaseTicketHydratedRef = useRef(false);
 
@@ -320,7 +328,32 @@ export default function App() {
   }, [analysisHistory]);
   useEffect(() => {
     localStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings));
-  }, [appSettings]);
+    void saveAppSettings(firebaseDeviceId, appSettings).catch(reason => console.error("Firebase app settings save failed", reason));
+  }, [appSettings, firebaseDeviceId]);
+
+  useEffect(() => {
+    void loadAppSettings(firebaseDeviceId).then(remote => {
+      if (remote) setAppSettings(current => ({ ...current, ...remote } as AppSettings));
+    }).catch(reason => console.error("Firebase app settings load failed", reason));
+  }, [firebaseDeviceId]);
+
+  useEffect(() => {
+    void loadReceptionSettings(event.eventId).then(remote => {
+      if (remote) setSettings(remote);
+    }).catch(reason => console.error("Firebase reception settings load failed", reason));
+  }, [event.eventId]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeTerminals(remote => {
+        if (remote.length) setTerminals(remote);
+      }, reason => console.error("Firebase terminal subscription failed", reason));
+    } catch (reason) {
+      console.error("Firebase terminal subscription failed", reason);
+    }
+    return () => unsubscribe?.();
+  }, []);
 
 
   const saveAnalysisSnapshot = (targetEvent: Event = event) => {
@@ -336,6 +369,7 @@ export default function App() {
     };
     setAnalysisHistory(current => [record, ...current.filter(item => item.eventId !== record.eventId)]);
     setSelectedAnalysisEventId(record.eventId);
+    void saveAnalysis(record).catch(reason => console.error("Firebase analysis save failed", reason));
   };
 
   const eventStatus = event.eventStatus;
@@ -702,17 +736,23 @@ export default function App() {
       name: normalized,
     };
     setMembers(current => [...current, nextMember]);
+    void saveMember(event.eventId, nextMember).catch(reason => { console.error(reason); setError("部員情報をFirebaseへ保存できませんでした。"); });
     setMemberName("");
   };
 
   const updateMemberName = (memberId: string, name: string) => {
-    setMembers(current => current.map(member => member.memberId === memberId ? { ...member, name } : member));
+    const target = members.find(member => member.memberId === memberId);
+    if (!target) return;
+    const nextMember = { ...target, name };
+    setMembers(current => current.map(member => member.memberId === memberId ? nextMember : member));
+    void saveMember(event.eventId, nextMember).catch(reason => { console.error(reason); setError("部員情報をFirebaseへ保存できませんでした。"); });
   };
 
   const deleteMember = (memberId: string) => {
     const target = members.find(member => member.memberId === memberId);
     if (!target || !window.confirm(`「${target.name}」を部員一覧から削除しますか？`)) return;
     setMembers(current => current.filter(member => member.memberId !== memberId));
+    void deleteFirebaseMember(event.eventId, memberId).catch(reason => { console.error(reason); setError("部員情報をFirebaseから削除できませんでした。"); });
   };
 
   const toggleMemberSelection = (memberId: string) => {
@@ -735,6 +775,11 @@ export default function App() {
       const index = orderedIds.indexOf(member.memberId);
       return index >= 0 ? { ...member, name: names[index] } : member;
     }));
+    const nextMembers = members.map(member => {
+      const index = orderedIds.indexOf(member.memberId);
+      return index >= 0 ? { ...member, name: names[index] } : member;
+    });
+    void Promise.all(nextMembers.filter(member => orderedIds.includes(member.memberId)).map(member => saveMember(event.eventId, member))).catch(reason => console.error("Firebase member bulk save failed", reason));
     setSelectedMemberIds([]);
     setMemberBulkText("");
     setMemberBulkModalOpen(false);
@@ -755,9 +800,11 @@ export default function App() {
   };
 
   const approveTerminal = (terminalId: string) => {
-    setTerminals(current => current.map(terminal =>
-      terminal.terminalId === terminalId ? { ...terminal, approved: true, status: "offline" } : terminal,
-    ));
+    const target = terminals.find(terminal => terminal.terminalId === terminalId);
+    if (!target) return;
+    const updatedTerminal = { ...target, approved: true, status: "offline" as TerminalStatus };
+    setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
+    void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
     setTerminalNotice("端末を承認しました。接続されると状態を確認できます。");
     setSelectedTerminalId(terminalId);
   };
@@ -768,9 +815,9 @@ export default function App() {
       setTerminalNotice("端末が見つからないため、リモート操作を実行できません。");
       return;
     }
-    setTerminals(current => current.map(terminal =>
-      terminal.terminalId === terminalId ? { ...terminal, mode } : terminal,
-    ));
+    const updatedTerminal = { ...target, mode };
+    setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
+    void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
   };
 
