@@ -1415,7 +1415,7 @@ export default function App() {
                     width: `${ticketQrSize}%`,
                     transform: "translate(-50%, -50%)",
                   }}>
-                    <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin />
+                    <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin={false} bgColor="#ffffff" />
                   </div>
                 </div>
               </div>
@@ -2235,7 +2235,7 @@ function NavIcon({type}:{type:string}){
                 aspectRatio: "1 / 1",
               }}
             >
-              <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} width="100%" height="100%" includeMargin />
+              <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} width="100%" height="100%" includeMargin={false} bgColor="#ffffff" />
             </div>
           </div>
         </article>
