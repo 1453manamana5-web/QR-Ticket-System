@@ -71,6 +71,12 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
   await Promise.all(members.map(member => setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true })));
 }
 
+export async function deleteTerminal(terminalId: string): Promise<void> {
+  const db = getFirebaseDb();
+  const { deleteDoc } = await import("firebase/firestore");
+  await deleteDoc(doc(db, "terminals", terminalId));
+}
+
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
