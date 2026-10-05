@@ -3,7 +3,7 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadEventData} from "./eventDownloader";
-import {syncReceptionRecord,saveTerminalHeartbeat} from "./receptionSync";
+import {saveTerminalHeartbeat,subscribeTerminalControl,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
@@ -134,10 +134,24 @@ export default function App(){
 
   useEffect(()=>{
     if(!localEvent?.dataReady)return;
+    let unsubscribe:(()=>void)|undefined;
+    try{
+      unsubscribe=subscribeTerminalControl(localEvent.terminalId,remoteMode=>{
+        const nextMode=remoteMode==="入口受付"?"entry":remoteMode==="出口受付"?"exit":mode;
+        if(remoteMode==="停止"){
+          setResult({kind:"error",title:"受付が停止されています",detail:"管理画面から受付停止の指示を受けています。"});
+          return;
+        }
+        setMode(nextMode);
+        setResult(null);
+      },reason=>console.error("端末リモート操作の購読に失敗しました",reason));
+    }catch(reason){
+      console.error("端末リモート操作の購読に失敗しました",reason);
+    }
     const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,mode).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
     heartbeat();
     const interval=window.setInterval(heartbeat,10000);
-    return()=>window.clearInterval(interval);
+    return()=>{unsubscribe?.();window.clearInterval(interval);};
   },[localEvent?.dataReady,localEvent?.terminalId,mode]);
 
   const handleAuthScan=useCallback((text:string)=>{
