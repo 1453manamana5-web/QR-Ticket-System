@@ -11,6 +11,30 @@ type EventBundle = {
   publishedAt: string;
 };
 
+export async function getEventAuthPayloadByToken(token: string): Promise<EventAuthPayload | null> {
+  const normalizedToken = token.trim();
+  if (!normalizedToken) return null;
+  const db = getFirebaseDb();
+  const snapshot = await getDoc(doc(db, "eventBundles", normalizedToken));
+  if (!snapshot.exists()) return null;
+  const bundle = snapshot.data() as Partial<EventBundle>;
+  if (
+    bundle.authToken !== normalizedToken ||
+    typeof bundle.event?.eventId !== "string" ||
+    typeof bundle.event?.eventName !== "string" ||
+    typeof bundle.event?.dataVersion !== "number"
+  ) {
+    return null;
+  }
+  return {
+    type: "qr-ticket-event-auth",
+    eventId: bundle.event.eventId,
+    eventName: bundle.event.eventName,
+    dataVersion: bundle.event.dataVersion,
+    authToken: normalizedToken,
+  };
+}
+
 export async function downloadEventData(
   payload: EventAuthPayload,
   terminalId: string,
