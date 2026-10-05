@@ -91,8 +91,14 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
   }
 
   const db = getFirebaseDb();
-  const { deleteDoc } = await import("firebase/firestore");
-  await deleteDoc(doc(db, "terminals", terminalId));
+  const { deleteDoc, getDoc } = await import("firebase/firestore");
+  const targetRef = doc(db, "terminals", terminalId);
+  const targetSnapshot = await getDoc(targetRef);
+  if (targetSnapshot.exists() && targetSnapshot.data().admin === true) {
+    throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
+  }
+
+  await deleteDoc(targetRef);
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
