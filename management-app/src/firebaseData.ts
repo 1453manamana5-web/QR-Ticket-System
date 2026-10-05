@@ -43,6 +43,15 @@ export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) 
   return onSnapshot(collection(db, "events", eventId, "tickets"), snapshot => onChange(snapshot.docs.map(item => item.data() as Ticket)), onError);
 }
 
+export function subscribeReceptionRecords(eventId: string, onChange: (records: Array<Record<string, unknown>>) => void, onError: (error: unknown) => void): () => void {
+  const db = getFirebaseDb();
+  return onSnapshot(
+    collection(db, "events", eventId, "receptionRecords"),
+    snapshot => onChange(snapshot.docs.map(item => item.data() as Record<string, unknown>)),
+    onError
+  );
+}
+
 export async function saveAnalysis(record: AnalysisRecord): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", record.eventId, "analysis", record.eventId), record, { merge: true });
