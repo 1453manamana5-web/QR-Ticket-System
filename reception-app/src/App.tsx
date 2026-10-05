@@ -406,7 +406,7 @@ export default function App(){
     </div>;
   }
 
-  if(screen==="auth")return <div className="entry-reception-page waiting">
+  if(screen==="auth")return <div className="entry-reception-page waiting event-auth-page">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
@@ -416,21 +416,23 @@ export default function App(){
       </div>
     </header>
     <main className="entry-reception-main">
-      <section className="entry-waiting-panel">
-        <div className="entry-scanner-card">
+      <section className="entry-waiting-panel event-auth-waiting-panel">
+        <div className="entry-scanner-card event-auth-card">
           <div className="entry-scanner-card-header">
             <div className="entry-scanner-heading"><span className="entry-scanner-heading-icon"><QrIcon size={30}/></span><span className="entry-scanner-heading-copy"><small>EVENT AUTHENTICATION</small><strong>イベント認証</strong></span></div>
             <div className="entry-scanner-ready"><span className="entry-scanner-ready-dot"/>待機中</div>
           </div>
-          <div className="entry-scanner-wrapper">
-            <div className="camera-qr-scanner reception-start-panel">
-              <div className="reception-start-content">
+          <div className="entry-scanner-wrapper event-auth-wrapper">
+            <div className="camera-qr-scanner reception-start-panel event-auth-viewport">
+              <div className="reception-start-content event-auth-content">
                 <div className="entry-result-icon">✓</div>
                 <h2>イベント認証の準備完了</h2>
                 <p className="entry-result-primary">管理アプリのイベントデータQRを読み取るか、連携コードを入力してください</p>
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
-                <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
-                <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
+                <div className="event-auth-actions">
+                  <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
+                  <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
+                </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
                   <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
                   <button type="button" className="primary" disabled={busy||!authCode.trim()} onClick={()=>void handleAuthCodeSubmit()}>{busy?"確認中…":"コードで連携"}</button>
