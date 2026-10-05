@@ -236,7 +236,7 @@ export default function App() {
     lastSeen: string | null;
     networkMbps: number | null;
     battery: number | null;
-    role?: "management" | "reception";
+    role?: "management" | "reception" | "both";
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -255,10 +255,14 @@ export default function App() {
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
   const [terminalDataHydrated, setTerminalDataHydrated] = useState(false);
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
-    const key = "qr-ticket-device-id";
-    const existing = localStorage.getItem(key);
-    if (existing) return existing;
-    const created = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
+    const key = "qr-ticket-terminal-id";
+    const legacyKey = "qr-ticket-device-id";
+    const existing = localStorage.getItem(key) || localStorage.getItem(legacyKey);
+    if (existing) {
+      localStorage.setItem(key, existing);
+      return existing;
+    }
+    const created = `T-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     localStorage.setItem(key, created);
     return created;
   });
@@ -900,13 +904,26 @@ export default function App() {
 
       const existing = remoteTerminals.find(terminal => terminal.terminalId === firebaseDeviceId);
       if (existing) {
+        const isSharedTerminal = existing.role === "reception" || existing.role === "both";
+        const updatedExisting: ManagedTerminal = {
+          ...existing,
+          name: appSettings.deviceName || existing.name || "管理端末",
+          role: isSharedTerminal ? "both" : (existing.role ?? "management"),
+          lastSeen: new Date().toISOString(),
+        };
+        await saveTerminal(updatedExisting);
+        setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? updatedExisting : terminal));
         setForceTerminalRegistration(false);
         setSelectedTerminalId(existing.terminalId);
-        setTerminalNotice(existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。");
+        setTerminalNotice(
+          isSharedTerminal
+            ? (existing.approved ? "この端末は管理・受付で共通登録されています。" : "この端末の管理・受付共通登録を申請しました。")
+            : (existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。")
+        );
         return;
       }
 
-      const managementTerminals = remoteTerminals.filter(terminal => terminal.role !== "reception");
+      const managementTerminals = remoteTerminals.filter(terminal => terminal.role === "management" || terminal.role === "both");
       const isFirstManagementTerminal = managementTerminals.length === 0;
       const terminal: ManagedTerminal = {
         terminalId: firebaseDeviceId,
@@ -938,13 +955,14 @@ export default function App() {
 
   const resetOwnTerminalRegistration = () => {
     const oldDeviceId = firebaseDeviceId;
-    const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
+    const nextDeviceId = `T-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
     // 画面側のリセットはFirebaseの応答を待たずに完了させる。
     setForceTerminalRegistration(true);
     setTerminals(current => current.filter(terminal => terminal.terminalId !== oldDeviceId));
     setSelectedTerminalId(null);
-    localStorage.setItem("qr-ticket-device-id", nextDeviceId);
+    localStorage.setItem("qr-ticket-terminal-id", nextDeviceId);
+    localStorage.removeItem("qr-ticket-device-id");
     setFirebaseDeviceId(nextDeviceId);
     setTerminalNotice("登録申請をリセットしました。新しい端末IDで再申請できます。");
 
@@ -1415,8 +1433,8 @@ export default function App() {
                         <span className="terminal-mono">{terminal.terminalId}</span>
                       </div>
                       <div className="managed-terminal-role-row" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                        <span className={terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
-                          {terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
+                        <span className={terminal.role === "both" ? "terminal-role-badge both" : terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
+                          {terminal.role === "both" ? "管理・受付" : terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
                         </span>
                         <span className={isOnline ? "terminal-state-badge online" : "terminal-state-badge offline"}>
                           {isOnline ? "接続中" : "見つかりません"}
@@ -1443,7 +1461,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="managed-terminal-actions">
-                      {terminal.role !== "management" && (
+                      {(terminal.role === "reception" || terminal.role === "both") && (
                         <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
                       )}
                       <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
@@ -1863,13 +1881,16 @@ function NavIcon({type}:{type:string}){
     </div>;
   }
 
-  const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId && terminal.role !== "reception");
+  const ownTerminal = terminals.find(terminal =>
+    terminal.terminalId === firebaseDeviceId &&
+    (terminal.role === "management" || terminal.role === "both")
+  );
   if (forceTerminalRegistration || !ownTerminal) {
     return <div className="terminal-registration-screen terminal-registration-fullscreen">
       <section className="terminal-registration-card">
         <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
         <h2>端末登録申請</h2>
-        <p>この端末を受付端末として使用するため、最初に登録申請を送信してください。</p>
+        <p>この端末を管理端末として使用するため、最初に登録申請を送信してください。受付アプリも同じ端末登録を共有できます。</p>
         <div className="terminal-registration-preview">
           <div><span>端末種別</span><strong>Web / iPad</strong></div>
           <div><span>端末ID</span><strong className="terminal-mono">{firebaseDeviceId}</strong></div>
