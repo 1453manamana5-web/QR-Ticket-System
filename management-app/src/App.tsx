@@ -166,6 +166,8 @@ export default function App() {
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
   const [ticketDesignImage, setTicketDesignImage] = useState("");
   const [ticketAspectRatio, setTicketAspectRatio] = useState("16:9");
+  const [ticketImageAspectRatio, setTicketImageAspectRatio] = useState("");
+  const [ticketAutoSize, setTicketAutoSize] = useState(true);
   const [ticketPrintWidth, setTicketPrintWidth] = useState(90);
   const [ticketQrX, setTicketQrX] = useState(76);
   const [ticketQrY, setTicketQrY] = useState(50);
@@ -661,7 +663,49 @@ export default function App() {
     });
   };
 
-  const ticketPrintHeight = Number((ticketPrintWidth / (Number(ticketAspectRatio.split(":")[0]) / Number(ticketAspectRatio.split(":")[1]))).toFixed(1));
+  const ticketEffectiveAspectRatio = ticketAutoSize && ticketImageAspectRatio ? ticketImageAspectRatio : ticketAspectRatio;
+  const ticketEffectiveRatioParts = ticketEffectiveAspectRatio.split(":").map(Number);
+  const ticketEffectiveRatio = ticketEffectiveRatioParts[0] > 0 && ticketEffectiveRatioParts[1] > 0
+    ? ticketEffectiveRatioParts[0] / ticketEffectiveRatioParts[1]
+    : 16 / 9;
+  const ticketPrintHeight = Number((ticketPrintWidth / ticketEffectiveRatio).toFixed(1));
+
+  const detectPinkQrMarker = (image: HTMLImageElement) => {
+    const maxSide = 360;
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    let minX = width, minY = height, maxX = -1, maxY = -1, count = 0;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const index = (y * width + x) * 4;
+        const r = pixels[index], g = pixels[index + 1], b = pixels[index + 2], a = pixels[index + 3];
+        if (a > 180 && r > 220 && b > 170 && g < 120 && r - g > 110 && b - g > 80) {
+          minX = Math.min(minX, x); minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+          count++;
+        }
+      }
+    }
+    if (count < 20 || maxX < minX || maxY < minY) return null;
+    const markerWidth = maxX - minX + 1;
+    const markerHeight = maxY - minY + 1;
+    const markerRatio = markerWidth / markerHeight;
+    if (markerRatio < 0.65 || markerRatio > 1.5) return null;
+    const size = Math.max(markerWidth, markerHeight);
+    return {
+      x: ((minX + maxX) / 2 / width) * 100,
+      y: ((minY + maxY) / 2 / height) * 100,
+      size: (size / Math.max(width, height)) * 100,
+    };
+  };
 
   const handleTicketDesignChange = (file?: File) => {
     if (!file) return;
@@ -670,7 +714,25 @@ export default function App() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setTicketDesignImage(typeof reader.result === "string" ? reader.result : "");
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      setTicketDesignImage(result);
+      const image = new Image();
+      image.onload = () => {
+        const imageRatio = image.naturalWidth / image.naturalHeight;
+        setTicketImageAspectRatio(image.naturalWidth + ":" + image.naturalHeight);
+        if (ticketAutoSize) {
+          setTicketAspectRatio(imageRatio >= 1.75 ? "16:9" : imageRatio >= 1.58 ? "3:2" : imageRatio >= 1.16 ? "4:3" : "1:1");
+        }
+        const marker = detectPinkQrMarker(image);
+        if (marker) {
+          setTicketQrX(Number(marker.x.toFixed(2)));
+          setTicketQrY(Number(marker.y.toFixed(2)));
+          setTicketQrSize(Number(marker.size.toFixed(2)));
+        }
+      };
+      image.src = result;
+    };
     reader.onerror = () => setError("チケットデザイン画像を読み込めませんでした。");
     reader.readAsDataURL(file);
   };
@@ -1212,7 +1274,7 @@ export default function App() {
               <div className="ticket-design-preview-stage">
                 <div
                   className="ticket-design-ticket-preview"
-                  style={{aspectRatio: ticketAspectRatio.replace(":", " / ")}}
+                  style={{aspectRatio: ticketEffectiveAspectRatio.replace(":", " / ")}}
                 >
                   {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <span className="ticket-design-empty">背景画像を選択して</span>}
                   <div className="ticket-design-qr-preview" style={{
@@ -1242,7 +1304,10 @@ export default function App() {
                 <h3>デザイン設定</h3>
                 <div className="ticket-design-control-block">
                   <h4>チケットサイズ</h4>
-                  <label>比率<select value={ticketAspectRatio} onChange={e => setTicketAspectRatio(e.target.value)}>
+                  <button type="button" className={"ticket-design-toggle " + (ticketAutoSize ? "active" : "")} onClick={() => setTicketAutoSize(current => !current)}>
+                    <span>画像に合わせて自動調整</span><b>✓</b>
+                  </button>
+                  <label>比率<select value={ticketAspectRatio} disabled={ticketAutoSize} onChange={e => setTicketAspectRatio(e.target.value)}>
                     <option value="16:9">16:9</option><option value="3:2">3:2</option><option value="4:3">4:3</option><option value="1:1">1:1</option>
                   </select></label>
                   <label className="mm-input-row">印刷時の横幅<input type="number" min="40" max="210" step="0.1" value={ticketPrintWidth} onChange={e => setTicketPrintWidth(Math.min(210, Math.max(40, Number(e.target.value) || 40)))} /><span>mm</span></label>
@@ -1272,7 +1337,7 @@ export default function App() {
             <button className="ticket-design-save" onClick={() => setTicketDesignModalOpen(false)}>デザインを保存</button>
             <button className="ticket-design-print" disabled={!tickets.length} onClick={() => window.print()}>選択した範囲を印刷</button>
             <button className="ticket-design-reset" onClick={() => {
-              setTicketAspectRatio("16:9"); setTicketPrintWidth(90); setTicketQrX(76); setTicketQrY(50); setTicketQrSize(29);
+              setTicketAspectRatio("16:9"); setTicketImageAspectRatio(""); setTicketAutoSize(true); setTicketPrintWidth(90); setTicketQrX(76); setTicketQrY(50); setTicketQrSize(29);
               setTicketNumberEnabled(true); setTicketNumberX(31); setTicketNumberY(72); setTicketNumberSize(18); setTicketColumns(2); setTicketGapMm(4);
             }}>初期状態に戻す</button>
             <button className="ticket-design-close" onClick={() => setTicketDesignModalOpen(false)}>閉じる</button>
