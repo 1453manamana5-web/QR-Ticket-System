@@ -461,6 +461,7 @@ export default function App() {
   }, [tickets, ticketQuery, ticketStatusFilter]);
 
   const saveEvent = async () => {
+    if (publishing) return;
     const normalizedName = eventName.trim();
     if (!event.eventId) {
       setError("先にイベントを作成してください。");
@@ -475,6 +476,10 @@ export default function App() {
       return;
     }
 
+    const preparedTickets = tickets.length === ticketCount
+      ? tickets
+      : createTickets(event.eventId, ticketCount, ticketStartNumber, ticketPrefix);
+
     const updatedEvent: Event = {
       ...event,
       eventName: normalizedName,
@@ -483,18 +488,22 @@ export default function App() {
       endTime,
     };
 
+    setPublishing(true);
     setEvent(updatedEvent);
     setEventHistory(current => current.map(item => item.eventId === event.eventId ? updatedEvent : item));
     setSelectedHistoryEventId(updatedEvent.eventId);
     setSavedEventName(normalizedName);
+    setTickets(preparedTickets);
     setError("");
 
     try {
-      await saveEventMetadata(updatedEvent);
-      setBundle(null);
+      const result = await publishEventBundle(updatedEvent, settings, preparedTickets);
+      setBundle(result);
     } catch (reason) {
       console.error(reason);
-      setError("イベント情報をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+      setError("イベント情報をFirebaseへ保存・公開できませんでした。Firebase設定とFirestoreの権限を確認してください。");
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -660,41 +669,6 @@ export default function App() {
     reader.onload = () => setTicketDesignImage(typeof reader.result === "string" ? reader.result : "");
     reader.onerror = () => setError("チケットデザイン画像を読み込めませんでした。");
     reader.readAsDataURL(file);
-  };
-
-  const publish = async () => {
-    if (publishing) return;
-    if (!event.eventId) {
-      setError("先にイベントを作成してください。");
-      return;
-    }
-    const normalizedName = eventName.trim();
-    const preparedTickets = tickets.length === ticketCount
-      ? tickets
-      : createTickets(event.eventId, ticketCount, ticketStartNumber, ticketPrefix);
-    const readyEvent: Event = {
-      ...event,
-      eventName: normalizedName,
-      eventDate,
-      startTime,
-      endTime,
-    };
-    setPublishing(true);
-    setError("");
-    setEvent(readyEvent);
-    setEventHistory(current => current.map(item => item.eventId === readyEvent.eventId ? readyEvent : item));
-    setSelectedHistoryEventId(readyEvent.eventId);
-    setSavedEventName(normalizedName);
-    try {
-      const result = await publishEventBundle(readyEvent, settings, preparedTickets);
-      setTickets(preparedTickets);
-      setBundle(result);
-    } catch (reason) {
-      console.error(reason);
-      setError("Firebaseへ公開できませんでした。Firebase設定とFirestoreの権限を確認してください。");
-    } finally {
-      setPublishing(false);
-    }
   };
 
   const authQrValue = bundle ? JSON.stringify({
@@ -981,11 +955,9 @@ export default function App() {
           <div><span>公開状態</span><strong className={bundle ? "event-published" : ""}>{bundle ? "Firebaseへ公開済み" : "未公開"}</strong></div>
         </div>
         <div className="event-primary-actions">
-          <button className="secondary" onClick={() => void saveEvent()}>イベント情報を保存</button>
-          <button className="secondary" onClick={() => changeEventStatus(nextStatus(eventStatus))} disabled={eventStatus === "finished"}>
-            {eventStatus === "preparing" ? "受付可能にする" : eventStatus === "ready" ? "開催を開始" : eventStatus === "active" ? "終了処理へ" : "イベントを終了"}
+          <button className="primary-action" disabled={publishing} onClick={() => void saveEvent()}>
+            {publishing ? "保存・公開中…" : "保存してFirebaseへ公開"}
           </button>
-          <button className="primary-action" disabled={publishing || eventStatus === "finished"} onClick={() => void publish()}>{publishing ? "公開中…" : "Firebaseへ公開"}</button>
         </div>
       </section>}
 
@@ -1000,13 +972,7 @@ export default function App() {
                   <div><b>{item.eventName}</b><small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small><span>{item.eventId}</span></div>
                 </button>
                 {selected && <div className="event-history-actions">
-                  <span className="event-history-label">イベント状態</span>
                   <div>
-                    <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
-                    <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
-                    <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
-                    <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
-                    <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
                     <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
                   </div>
                 </div>}
@@ -1026,7 +992,9 @@ export default function App() {
             <label>チケット枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
             <label>データバージョン<input value={event.dataVersion} disabled /></label>
           </div>
-          <button className="secondary event-save-button" onClick={() => void saveEvent()}>変更を保存</button>
+          <button className="primary-action event-save-button" disabled={publishing} onClick={() => void saveEvent()}>
+            {publishing ? "保存・公開中…" : "保存してFirebaseへ公開"}
+          </button>
         </section>}
       </div>
 
