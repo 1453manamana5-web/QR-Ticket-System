@@ -89,6 +89,22 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
+    let unsubscribe:(()=>void)|undefined;
+    const applyRegistration=(value:{approved:boolean;status:"online"|"offline"|"pending";name:string}|null)=>{
+      setTerminalRegistration(value);
+      if(value?.name) setTerminalRegistrationName(value.name);
+      if(value?.approved && screen==="registration") setScreen("auth");
+    };
+    void getTerminalRegistration().then(applyRegistration).catch(reason=>console.error("受付端末登録状態の取得に失敗しました",reason));
+    try{
+      unsubscribe=subscribeTerminalRegistration(applyRegistration,reason=>console.error("受付端末登録状態の購読に失敗しました",reason));
+    }catch(reason){
+      console.error("受付端末登録状態の購読開始に失敗しました",reason);
+    }
+    return()=>unsubscribe?.();
+  },[screen]);
+
+  useEffect(()=>{
     void syncPendingRecords();
     const interval=window.setInterval(()=>void syncPendingRecords(),10000);
     window.addEventListener("online",syncPendingRecords);
@@ -183,14 +199,21 @@ export default function App(){
   };
 
   const resetTerminalRegistration = async () => {
+    if(busy)return;
+    setBusy(true);
+    setError("");
     try {
-      await resetReceptionTerminalRegistration();
+      await resetReceptionTerminalRegistration().catch(reason=>console.error("Firebase上の受付端末登録削除に失敗しました",reason));
+      localStorage.removeItem("qr-ticket-terminal-id");
+      const nextId=getTerminalId();
+      console.info("受付端末登録をリセットしました",nextId);
       setTerminalRegistration(null);
       setScreen("registration");
-      setError("");
     } catch (reason) {
-      console.error("受付端末の登録申請リセットに失敗しました", reason);
+      console.error("受付端末登録のリセットに失敗しました", reason);
       setError("登録申請をリセットできませんでした。");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -389,7 +412,7 @@ export default function App(){
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
           <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
-          <button type="button" className="secondary" onClick={()=>void resetTerminalRegistration()}>申請をリセット</button>
+          <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
         </>}
         {error&&<p className="entry-result-secondary">{error}</p>}
       </section>
