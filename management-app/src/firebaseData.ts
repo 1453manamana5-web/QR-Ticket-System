@@ -1,5 +1,5 @@
 import { collection, doc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
-import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
+import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
@@ -43,11 +43,11 @@ export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) 
   return onSnapshot(collection(db, "events", eventId, "tickets"), snapshot => onChange(snapshot.docs.map(item => item.data() as Ticket)), onError);
 }
 
-export function subscribeReceptionRecords(eventId: string, onChange: (records: Array<Record<string, unknown>>) => void, onError: (error: unknown) => void): () => void {
+export function subscribeReceptionRecords(eventId: string, onChange: (records: ReceptionRecord[]) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
   return onSnapshot(
     collection(db, "events", eventId, "receptionRecords"),
-    snapshot => onChange(snapshot.docs.map(item => item.data() as Record<string, unknown>)),
+    snapshot => onChange(snapshot.docs.map(item => item.data() as ReceptionRecord)),
     onError
   );
 }
