@@ -2794,6 +2794,12 @@ body:has(.ticket-screen),
 .analysis-empty-message strong{display:block;color:#566273;font-size:13px}
 .analysis-empty-message span{display:block;margin-top:7px;color:#9099a6;font-size:11px;line-height:1.55}
 .analysis-x-axis{position:absolute;left:0;right:0;bottom:-25px;display:flex;justify-content:space-between;color:#9aa3af;font-size:9px}
+.analysis-live-bars{position:absolute;inset:12px 12px 29px 8px;display:flex;align-items:stretch;gap:8px}
+.analysis-live-bar-column{flex:1;min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px}
+.analysis-live-bar-track{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center}
+.analysis-live-bar{width:min(34px,70%);min-height:0;border-radius:7px 7px 2px 2px;background:#35a968}
+.analysis-live-bar-column span{color:#9aa3af;font-size:9px;white-space:nowrap}
+.analysis-live-bar-column b{color:#566273;font-size:9px}
 .analysis-status-list{display:grid;gap:17px;margin-top:8px}
 .analysis-status-row>div:first-child{display:grid;grid-template-columns:10px 1fr auto;align-items:center;gap:8px}
 .analysis-status-row b{font-size:12px}
