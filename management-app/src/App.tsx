@@ -240,6 +240,7 @@ export default function App() {
     battery: number | null;
     role?: "management" | "reception" | "both";
     admin?: boolean;
+    subAdmin?: boolean;
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -918,6 +919,8 @@ export default function App() {
   };
 
   const approveTerminal = async (terminalId: string) => {
+    const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (!operator?.admin && !operator?.subAdmin) { setTerminalNotice("端末の承認権限がありません。"); return; }
     try {
       const remoteTerminals = await loadTerminals();
       const target = remoteTerminals.find(terminal => terminal.terminalId === terminalId);
@@ -942,6 +945,8 @@ export default function App() {
   };
 
   const setTerminalMode = (terminalId: string, mode: TerminalMode) => {
+    const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (!operator?.admin && !operator?.subAdmin) { setTerminalNotice("端末の操作権限がありません。"); return; }
     const target = terminals.find(terminal => terminal.terminalId === terminalId);
     if (!target || target.status !== "online" || !target.approved) {
       setTerminalNotice("端末が見つからないため、リモート操作を実行できません。");
@@ -954,6 +959,8 @@ export default function App() {
   };
 
   const deleteManagedTerminal = async (terminalId: string) => {
+    const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (!operator?.admin && !operator?.subAdmin) { setTerminalNotice("端末の削除権限がありません。"); return; }
     if (terminalId === firebaseDeviceId) {
       setTerminalNotice("自分の端末は削除できません。");
       return;
@@ -985,6 +992,21 @@ export default function App() {
     }
   };
 
+  const setSubAdmin = async (terminalId: string, enabled: boolean) => {
+    const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (!operator?.admin) { setTerminalNotice("副管理者の設定は管理者のみ行えます。"); return; }
+    const target = terminals.find(terminal => terminal.terminalId === terminalId);
+    if (!target || target.admin || target.terminalId === firebaseDeviceId) return;
+    const updatedTerminal: ManagedTerminal = { ...target, subAdmin: enabled };
+    try {
+      await saveTerminal(updatedTerminal);
+      setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
+      setTerminalNotice(enabled ? `「${target.name}」を副管理者に設定しました。` : `「${target.name}」の副管理者設定を解除しました。`);
+    } catch (reason) {
+      console.error("Firebase sub-admin update failed", reason);
+      setTerminalNotice("副管理者の設定をFirebaseへ保存できませんでした。");
+    }
+  };
   const registerOwnTerminal = async () => {
     try {
       const remoteTerminals = await loadTerminals();
@@ -1516,8 +1538,8 @@ export default function App() {
                       )}
                     </div>
                     <div className="managed-terminal-actions">
-                      <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
-                      {terminal.terminalId !== firebaseDeviceId && !terminal.admin && (
+                      <button className="primary-action" disabled={!canManageTerminals} onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
+                      {canManageTerminals && terminal.terminalId !== firebaseDeviceId && !terminal.admin && (
                         <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
                       )}
                     </div>
@@ -1543,7 +1565,7 @@ export default function App() {
             <div className="terminal-list">
               {approvedTerminals.map(terminal => {
                 const isOnline = terminal.status === "online" && terminal.approved;
-                return <article className={(selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card") + (terminal.admin ? " admin-terminal" : "")} key={terminal.terminalId}>
+                return <article className={(selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card") + (terminal.admin ? " admin-terminal" : "") + (terminal.subAdmin ? " sub-admin-terminal" : "")} key={terminal.terminalId}>
                   <div className="managed-terminal-main">
                     <div className="managed-terminal-icon">iPad</div>
                     <div className="managed-terminal-title">
@@ -1553,6 +1575,7 @@ export default function App() {
                       </div>
                       <div className="managed-terminal-role-row" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
                         {terminal.admin && <span className="terminal-role-badge admin">管理者</span>}
+                        {!terminal.admin && terminal.subAdmin && <span className="terminal-role-badge sub-admin">副管理者</span>}
                         <span className={terminal.role === "both" ? "terminal-role-badge both" : terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
                           {terminal.role === "both" ? "管理・受付" : terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
                         </span>
@@ -1581,10 +1604,15 @@ export default function App() {
                       </div>
                     </div>
                     <div className="managed-terminal-actions">
-                      {(terminal.role === "reception" || terminal.role === "both") && (
+                      {(terminal.role === "reception" || terminal.role === "both") && canManageTerminals && (
                         <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
                       )}
-                      {terminal.terminalId !== firebaseDeviceId && (
+                      {canManageTerminals && ownTerminal?.admin && terminal.terminalId !== firebaseDeviceId && !terminal.admin && (
+                        <button className={terminal.subAdmin ? "secondary sub-admin-action" : "secondary"} onClick={() => void setSubAdmin(terminal.terminalId, !terminal.subAdmin)}>
+                          {terminal.subAdmin ? "副管理者を解除" : "副管理者に設定"}
+                        </button>
+                      )}
+                      {canManageTerminals && terminal.terminalId !== firebaseDeviceId && (
                         <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
                       )}
                     </div>
@@ -2007,6 +2035,7 @@ function NavIcon({type}:{type:string}){
     terminal.terminalId === firebaseDeviceId &&
     (terminal.role === "management" || terminal.role === "both")
   );
+  const canManageTerminals = Boolean(ownTerminal?.admin || ownTerminal?.subAdmin);
   if (forceTerminalRegistration || !ownTerminal) {
     return <div className="terminal-registration-screen terminal-registration-fullscreen">
       <section className="terminal-registration-card">
