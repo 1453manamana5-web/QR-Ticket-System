@@ -58,6 +58,7 @@ export default function App(){
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
   const [result,setResult]=useState<Result|null>(null);
+  const [remoteStopped,setRemoteStopped]=useState(false);
   const [scannerKey,setScannerKey]=useState(0);
   const [online,setOnline]=useState(()=>navigator.onLine);
   const modeSwipeStartX=useRef<number|null>(null);
@@ -136,12 +137,16 @@ export default function App(){
     if(!localEvent?.dataReady)return;
     let unsubscribe:(()=>void)|undefined;
     try{
-      unsubscribe=subscribeTerminalControl(localEvent.terminalId,remoteMode=>{
+      unsubscribe=subscribeTerminalControl(localEvent.terminalId,(remoteMode,updatedAt)=>{
+        const manualChangedAt=localStorage.getItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`);
+        if(updatedAt&&manualChangedAt&&new Date(updatedAt).getTime()<=new Date(manualChangedAt).getTime())return;
         const nextMode=remoteMode==="入口受付"?"entry":remoteMode==="出口受付"?"exit":mode;
         if(remoteMode==="停止"){
+          setRemoteStopped(true);
           setResult({kind:"error",title:"受付が停止されています",detail:"管理画面から受付停止の指示を受けています。"});
           return;
         }
+        setRemoteStopped(false);
         setMode(nextMode);
         setResult(null);
       },reason=>console.error("端末リモート操作の購読に失敗しました",reason));
@@ -294,6 +299,8 @@ export default function App(){
   },[localEvent,mode,busy]);
 
   const switchMode=()=>{
+    if(remoteStopped)return;
+    if(localEvent?.terminalId)localStorage.setItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`,new Date().toISOString());
     setMode(current=>current==="entry"?"exit":"entry");
     setResult(null);
     // モード切替ではQRカメラを再生成しない。
@@ -558,12 +565,12 @@ export default function App(){
             </div>
             <div className="entry-scanner-wrapper">
               <div className="camera-qr-scanner">
-                <QrScanner
+                {remoteStopped ? <div className="reception-start-content"><div className="entry-result-icon">×</div><h2>受付停止中</h2><p className="entry-result-primary">管理画面から受付停止の指示を受けています</p><p className="entry-result-secondary">管理画面から入口・出口受付へ戻すと再開します</p></div> : <QrScanner
                   key={scannerKey}
                   readerId="ticket-reader"
                   onResult={handleTicketScan}
                   onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}
-                />
+                />}
               </div>
             </div>
           </div>
