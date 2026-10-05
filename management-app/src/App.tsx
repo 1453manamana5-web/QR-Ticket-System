@@ -912,7 +912,7 @@ export default function App() {
         : undefined;
 
       // 旧管理アプリと受付アプリで別IDになっていた端末を、現在の共通IDへ統合する。
-      if (legacyExisting) {
+      if (legacyTerminalId && legacyExisting) {
         const base = existing ?? legacyExisting;
         const legacyHasReceptionRole = legacyExisting.role === "reception" || legacyExisting.role === "both";
         const existingHasReceptionRole = existing?.role === "reception" || existing?.role === "both";
