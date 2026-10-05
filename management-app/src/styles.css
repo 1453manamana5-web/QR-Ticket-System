@@ -2896,3 +2896,115 @@ body:has(.ticket-screen),
 .settings-toast{position:fixed;right:24px;bottom:24px;z-index:1500;padding:12px 15px;border-radius:12px;background:#172033;color:#fff;font-size:12px;font-weight:800;box-shadow:0 12px 30px rgb(23 32 51/.2)}
 @media(max-width:800px){.settings-info-grid{grid-template-columns:1fr 1fr}.settings-range{width:50%}}
 @media(max-width:560px){.settings-hero{flex-direction:column}.settings-row,.settings-input-row,.settings-linked,.settings-danger-row{align-items:flex-start;flex-direction:column}.settings-range,.settings-input-row input{width:100%;max-width:none}.settings-link-form{align-items:stretch;flex-direction:column}.settings-data-actions,.settings-actions{flex-direction:column}.settings-data-actions button,.settings-actions button,.danger-action{width:100%}}
+
+
+/* ===== Ticket management: align with management-app design system ===== */
+.ticket-screen{
+  min-height:0;
+  height:auto;
+  max-height:none;
+  overflow:visible;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  padding:0;
+  background:transparent;
+}
+.ticket-home-grid{
+  width:100%;
+  max-width:none;
+  margin:0;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-rows:minmax(0,1fr);
+  grid-template-areas:"operation list status";
+  gap:18px;
+}
+.ticket-home-card{
+  min-width:0;
+  min-height:0;
+  height:auto;
+  border:1px solid #e1e6ec;
+  border-radius:22px;
+  background:#fff;
+  box-shadow:0 10px 30px rgb(23 32 51/.05);
+}
+.ticket-operation-card,
+.ticket-list-launch,
+.ticket-home-grid .ticket-status-card{
+  padding:24px;
+}
+.ticket-home-label{
+  color:#7a8494;
+  letter-spacing:.08em;
+  font-size:11px;
+  font-weight:700;
+}
+.ticket-home-card h2{
+  color:#172033;
+  margin:7px 0 18px;
+  font-size:27px;
+  letter-spacing:0;
+}
+.ticket-operation-buttons{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.ticket-operation-buttons .ticket-tool-button{
+  min-height:82px;
+  border-radius:14px;
+}
+.ticket-list-launch{
+  position:relative;
+  background:#fff;
+  transition:box-shadow .16s ease,transform .16s ease;
+}
+.ticket-list-launch::after{
+  background:#f1f4f7;
+}
+.ticket-list-launch:hover{
+  box-shadow:0 14px 34px rgb(23 32 51/.09);
+}
+.ticket-launch-arrow{
+  background:#f1f4f7;
+  color:#172033;
+}
+.ticket-list-launch-bottom{
+  color:#788292;
+}
+.ticket-list-launch-bottom strong{
+  color:#172033;
+}
+.ticket-home-grid .ticket-status-heading h2{
+  margin-bottom:9px;
+}
+.ticket-home-grid .ticket-status-heading>strong{
+  color:#172033;
+}
+.ticket-home-grid .ticket-status-box{
+  border:1px solid #e1e6ec;
+  box-shadow:none;
+}
+.ticket-home-grid .ticket-sync-state{
+  color:#788292;
+}
+@media(max-width:1050px){
+  .ticket-home-grid{
+    grid-template-columns:1fr 1fr;
+    grid-template-areas:
+      "operation list"
+      "status status";
+  }
+}
+@media(max-width:760px){
+  .ticket-screen{
+    min-height:0;
+    height:auto;
+    overflow:visible;
+  }
+  .ticket-home-grid{
+    grid-template-columns:1fr;
+    grid-template-areas:"operation" "list" "status";
+  }
+}
