@@ -3186,6 +3186,7 @@ body:has(.ticket-screen),
 .terminal-role-badge.management{background:#e9eefb;color:#405a9b}
 .terminal-role-badge.reception{background:#e6f5ef;color:#287458}
 .terminal-role-badge.both{background:#f0e9fb;color:#68469a}
+.terminal-role-badge.admin{background:#fff0c7;color:#8a6200}
 .managed-terminal-title>div{min-width:0}
 .managed-terminal-title h4{
   margin:0 0 4px;
