@@ -27,6 +27,11 @@ export async function saveTicket(eventId: string, ticket: Ticket): Promise<void>
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
 }
+export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
+  const db = getFirebaseDb();
+  const { deleteDoc } = await import("firebase/firestore");
+  await deleteDoc(doc(db, "events", eventId, "tickets", ticketId));
+}
 
 export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
