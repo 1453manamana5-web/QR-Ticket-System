@@ -3509,3 +3509,46 @@ body:has(.ticket-screen),
   }
   .ticket-operation-buttons .tool-icon{width:34px;height:34px;}
 }
+
+
+/* Ticket operation: compact fit for the dashboard */
+@media(min-width:761px){
+  .ticket-operation-card{
+    padding:10px 18px !important;
+  }
+  .ticket-operation-card .ticket-home-label{
+    font-size:9px !important;
+    line-height:1.2 !important;
+  }
+  .ticket-operation-card h2{
+    margin:3px 0 6px !important;
+    font-size:18px !important;
+    line-height:1.2 !important;
+  }
+  .ticket-operation-buttons{
+    gap:8px !important;
+  }
+  .ticket-operation-buttons .ticket-tool-button{
+    height:52px !important;
+    min-height:52px !important;
+    padding:6px 10px !important;
+    gap:8px !important;
+  }
+  .ticket-operation-buttons .ticket-tool-button small{
+    font-size:8px !important;
+    line-height:1.1 !important;
+  }
+  .ticket-operation-buttons .ticket-tool-button b{
+    font-size:12px !important;
+    line-height:1.2 !important;
+  }
+  .ticket-operation-buttons .tool-icon{
+    width:28px !important;
+    height:28px !important;
+    flex:none !important;
+  }
+  .ticket-operation-buttons .tool-icon svg{
+    width:16px !important;
+    height:16px !important;
+  }
+}
