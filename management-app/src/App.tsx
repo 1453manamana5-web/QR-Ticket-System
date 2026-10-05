@@ -790,11 +790,15 @@ export default function App() {
     const markerHeight = maxY - minY + 1;
     const markerRatio = markerWidth / markerHeight;
     if (markerRatio < 0.65 || markerRatio > 1.5) return null;
+
+    // QRの配置位置は「画像全体」ではなく、実際に表示・印刷する
+    // チケット領域を基準にする。背景画像の余白があるデザインでも
+    // ピンクマーカーの中心にQRが重なるようにする。
     const size = Math.max(markerWidth, markerHeight);
     return {
       x: ((minX + maxX) / 2 / width) * 100,
       y: ((minY + maxY) / 2 / height) * 100,
-      size: (size / width) * 100,
+      size: (size / Math.min(width, height)) * 100,
     };
   };
 
