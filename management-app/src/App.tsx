@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "",
@@ -664,7 +664,11 @@ export default function App() {
 
   const publish = async () => {
     if (publishing) return;
-    const normalizedName = eventName.trim() || baseEvent.eventName;
+    if (!event.eventId) {
+      setError("先にイベントを作成してください。");
+      return;
+    }
+    const normalizedName = eventName.trim();
     const preparedTickets = tickets.length === ticketCount
       ? tickets
       : createTickets(event.eventId, ticketCount, ticketStartNumber, ticketPrefix);
@@ -769,15 +773,17 @@ export default function App() {
       "qr-ticket-app-settings",
     ].forEach(key => localStorage.removeItem(key));
     setEvent(baseEvent);
-    setEventHistory([baseEvent]);
+    setEventHistory([]);
     setAnalysisHistory([]);
-    setSelectedHistoryEventId(baseEvent.eventId);
-    setSelectedAnalysisEventId(baseEvent.eventId);
+    setSelectedHistoryEventId("");
+    setSelectedAnalysisEventId("");
     setTickets([]);
     setMembers([]);
     setAppSettings(defaultAppSettings);
     setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
-    void saveReceptionSettings(event.eventId, { entryEnabled: true, exitEnabled: true, reentryEnabled: true }).catch(reason => console.error(reason));
+    if (event.eventId) {
+      void saveReceptionSettings(event.eventId, { entryEnabled: true, exitEnabled: true, reentryEnabled: true }).catch(reason => console.error(reason));
+    }
     setBundle(null);
     setSettingsNotice("ローカルデータを初期化しました。");
   };
