@@ -10,7 +10,7 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   const data = snapshot.data();
   if (data.role !== "reception") return null;
   return {
-    role: data.role === "reception" ? "reception" : data.role,\n    approved: data.approved === true,
+    approved: data.approved === true,
     status: data.status === "online" || data.status === "offline" ? data.status : "pending",
     name: typeof data.name === "string" ? data.name : "受付端末",
   };
