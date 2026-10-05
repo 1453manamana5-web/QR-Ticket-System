@@ -1414,7 +1414,7 @@ export default function App() {
                         <h4>{terminal.name}</h4>
                         <span className="terminal-mono">{terminal.terminalId}</span>
                       </div>
-                      <div className="managed-terminal-role-row">
+                      <div className="managed-terminal-role-row" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
                         <span className={terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
                           {terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
                         </span>
