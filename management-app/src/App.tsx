@@ -5,11 +5,11 @@ import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
-  eventId: "DEMO-2027",
-  eventName: "○○文化祭 2027",
-  eventDate: "2027-10-01",
-  startTime: "10:00",
-  endTime: "16:00",
+  eventId: "",
+  eventName: "",
+  eventDate: "",
+  startTime: "",
+  endTime: "",
   eventStatus: "preparing",
   dataVersion: 1,
 };
@@ -138,14 +138,14 @@ export default function App() {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item: Event) => item?.eventId !== "DEMO-2027");
+      return parsed.filter((item: Event) => item?.eventId);
     } catch {
       return [];
     }
   });
-  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState(baseEvent.eventId);
+  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState("");
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(loadAnalysisHistory);
-  const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState(baseEvent.eventId);
+  const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState("");
   const [newEventModalOpen, setNewEventModalOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [newEventDate, setNewEventDate] = useState("");
@@ -156,10 +156,10 @@ export default function App() {
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
-  const [eventName, setEventName] = useState(baseEvent.eventName);
-  const [eventDate, setEventDate] = useState(baseEvent.eventDate);
-  const [startTime, setStartTime] = useState(baseEvent.startTime);
-  const [endTime, setEndTime] = useState(baseEvent.endTime);
+  const [eventName, setEventName] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [ticketCount, setTicketCount] = useState(500);
   const [ticketPrefix, setTicketPrefix] = useState("TKT");
   const [ticketStartNumber, setTicketStartNumber] = useState(1);
@@ -176,7 +176,7 @@ export default function App() {
   const [ticketNumberSize, setTicketNumberSize] = useState(18);
   const [ticketColumns, setTicketColumns] = useState(2);
   const [ticketGapMm, setTicketGapMm] = useState(4);
-  const [savedEventName, setSavedEventName] = useState(baseEvent.eventName);
+  const [savedEventName, setSavedEventName] = useState("");
   const [settings, setSettings] = useState<ReceptionSettings>({
     entryEnabled: true,
     exitEnabled: true,
@@ -273,12 +273,11 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeEvents(events => {
-        const realEvents = events.filter(item => item.eventId !== "DEMO-2027");
+        const realEvents = events.filter(item => item.eventId);
         firebaseEventHydratedRef.current = true;
         setEventHistory(realEvents);
         setEvent(current => {
-          if (realEvents.length === 0) return current;
-          return realEvents.find(item => item.eventId === current.eventId) ?? realEvents[0];
+          return realEvents.find(item => item.eventId === current.eventId) ?? realEvents[0] ?? baseEvent;
         });
       }, reason => console.error("Firebase event subscription failed", reason));
     } catch (reason) {
@@ -289,6 +288,10 @@ export default function App() {
 
   useEffect(() => {
     firebaseTicketHydratedRef.current = false;
+    if (!event.eventId) {
+      setTickets([]);
+      return;
+    }
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeTickets(event.eventId, remoteTickets => {
@@ -302,6 +305,10 @@ export default function App() {
   }, [event.eventId]);
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    if (!event.eventId) {
+      setReceptionRecords([]);
+      return;
+    }
     try {
       unsubscribe = subscribeReceptionRecords(event.eventId, records => {
         setReceptionRecords(records as ReceptionRecord[]);
@@ -313,24 +320,21 @@ export default function App() {
   }, [event.eventId]);
 
   useEffect(() => {
-    // 開発用の仮イベントを本番データから除去し、今後も自動生成しない。
     void deleteFirebaseEvent("DEMO-2027").catch(reason => {
-      console.error("Demo event cleanup failed", reason);
+      console.error("Legacy demo event cleanup failed", reason);
     });
-    setEventHistory(current => current.filter(item => item.eventId !== "DEMO-2027"));
+    setEventHistory(current => current.filter(item => item.eventId));
+    setAnalysisHistory(current => current.filter(item => item.eventId));
     try {
       const raw = localStorage.getItem("qr-ticket-event-history");
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          localStorage.setItem(
-            "qr-ticket-event-history",
-            JSON.stringify(parsed.filter((item: Event) => item?.eventId !== "DEMO-2027")),
-          );
+          localStorage.setItem("qr-ticket-event-history", JSON.stringify(parsed.filter((item: Event) => item?.eventId)));
         }
       }
     } catch (reason) {
-      console.error("Demo event local cleanup failed", reason);
+      console.error("Event history cleanup failed", reason);
     }
   }, []);
 
@@ -353,6 +357,12 @@ export default function App() {
   }, [firebaseDeviceId]);
 
   useEffect(() => {
+    if (!event.eventId) {
+      setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+      setMembers([]);
+      setAnalysisHistory([]);
+      return;
+    }
     void loadReceptionSettings(event.eventId).then(remote => {
       if (remote) setSettings(remote);
     }).catch(reason => console.error("Firebase reception settings load failed", reason));
@@ -451,7 +461,11 @@ export default function App() {
   }, [tickets, ticketQuery, ticketStatusFilter]);
 
   const saveEvent = async () => {
-    const normalizedName = eventName.trim() || baseEvent.eventName;
+    const normalizedName = eventName.trim();
+    if (!event.eventId) {
+      setError("先にイベントを作成してください。");
+      return;
+    }
     if (!eventDate || !startTime || !endTime) {
       setError("開催日・開始時刻・終了時刻を入力してください。");
       return;
@@ -533,7 +547,7 @@ export default function App() {
     setError("");
     setNewEventModalOpen(false);
     setPage("イベント管理");
-    void saveEvent(next).catch(reason => {
+    void saveEventMetadata(next).catch(reason => {
       console.error(reason);
       setError("新しいイベントをFirebaseへ保存できませんでした。");
     });
