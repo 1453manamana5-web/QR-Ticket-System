@@ -423,11 +423,11 @@ export default function App() {
 
   const eventStatus = event.eventStatus;
   const ticketStats = useMemo(() => ({
-    total: tickets.length || ticketCount,
+    total: tickets.length,
     unused: tickets.filter(ticket => ticket.currentStatus === "unused").length,
     inside: tickets.filter(ticket => ticket.currentStatus === "inside").length,
     exited: tickets.filter(ticket => ticket.currentStatus === "exited").length,
-  }), [tickets, ticketCount]);
+  }), [tickets]);
 
 
   useEffect(() => {
@@ -482,9 +482,9 @@ export default function App() {
       return;
     }
 
-    const preparedTickets = tickets.length === ticketCount
-      ? tickets
-      : createTickets(event.eventId, ticketCount, ticketStartNumber, ticketPrefix);
+    // チケットの発行・枚数管理は「チケット管理」に一本化する。
+    // イベント保存では既存のチケットをそのまま公開し、自動生成・再生成は行わない。
+    const preparedTickets = tickets;
 
     const updatedEvent: Event = {
       ...event,
@@ -1123,7 +1123,6 @@ export default function App() {
             <label>開始時刻<input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></label>
             <label>終了時刻<input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></label>
             <label>イベントID<input value={event.eventId} onChange={e => setEvent(current => ({ ...current, eventId: e.target.value }))} /></label>
-            <label>チケット枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
             <label>データバージョン<input value={event.dataVersion} disabled /></label>
           </div>
           <button className="primary-action event-save-button" disabled={publishing} onClick={() => void saveEvent()}>
