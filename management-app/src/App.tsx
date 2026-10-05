@@ -236,30 +236,8 @@ export default function App() {
     networkMbps: number | null;
     battery: number | null;
   };
-  const defaultTerminals: ManagedTerminal[] = [
-    {
-      terminalId: "TERM-0001",
-      name: "受付端末 01",
-      type: "Web / iPad",
-      mode: "入口受付",
-      status: "offline",
-      approved: true,
-      lastSeen: null,
-      networkMbps: null,
-      battery: null,
-    },
-    {
-      terminalId: "TERM-0002",
-      name: "受付端末 02",
-      type: "Web / iPad",
-      mode: "出口受付",
-      status: "offline",
-      approved: true,
-      lastSeen: null,
-      networkMbps: null,
-      battery: null,
-    },
-  ];
+  const defaultTerminals: ManagedTerminal[] = [];
+
   const [terminals, setTerminals] = useState<ManagedTerminal[]>(() => {
     try {
       const raw = localStorage.getItem("qr-ticket-managed-terminals");
