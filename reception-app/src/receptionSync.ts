@@ -10,7 +10,7 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   const data = snapshot.data();
   if (data.role !== "reception" && data.role !== "both") return null;
   return {
-    approved: data.approved === true,
+    approved: data.receptionApproved ?? data.approved === true,
     status: data.status === "online" || data.status === "offline" ? data.status : "pending",
     name: typeof data.name === "string" ? data.name : "受付端末",
   };
@@ -31,7 +31,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     ? data.role
     : "reception";
   const role = existingRole === "management" || existingRole === "both" ? "both" : "reception";
-  const approved = data.approved === true;
+  const receptionApproved = data.receptionApproved ?? (data.role === "reception" || data.role === "both" ? data.approved === true : false);
   const status = data.status === "online" || data.status === "offline" || data.status === "pending"
     ? data.status
     : "pending";
@@ -43,7 +43,9 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     role,
     mode: data.mode === "入口受付" || data.mode === "出口受付" || data.mode === "停止" ? data.mode : "停止",
     status,
-    approved,
+    approved: data.managementApproved === true || receptionApproved,
+    managementApproved: data.managementApproved === true,
+    receptionApproved,
     lastSeen: new Date().toISOString(),
     networkMbps: typeof data.networkMbps === "number" ? data.networkMbps : null,
     battery: typeof data.battery === "number" ? data.battery : null,
@@ -57,7 +59,7 @@ export function subscribeTerminalRegistration(onChange: (value: {approved:boolea
     if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
     const data = snapshot.data();
     onChange({
-      approved: data.approved === true,
+      approved: data.receptionApproved ?? data.approved === true,
       status: data.status === "online" || data.status === "offline" ? data.status : "pending",
       name: typeof data.name === "string" ? data.name : "受付端末",
     });
