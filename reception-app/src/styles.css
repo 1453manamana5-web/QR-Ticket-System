@@ -2995,3 +2995,31 @@ body {
 .reception-registration-field input{width:100%;box-sizing:border-box;border:1px solid #d9dee7;border-radius:12px;padding:14px 16px;font-size:16px;background:#fff;}
 .reception-registration-info{display:flex;justify-content:space-between;gap:20px;padding:14px 16px;border:1px solid #e3e7ed;border-radius:12px;margin:10px 0;text-align:left;background:#f8fafc;}
 .reception-registration-info strong{color:#172033;}
+
+
+/* Reception terminal registration: keep all text readable and neutral. */
+.reception-registration-page,
+.reception-registration-page .entry-result-panel,
+.reception-registration-page .entry-result-panel h2,
+.reception-registration-page .entry-result-panel p,
+.reception-registration-page .entry-result-panel strong,
+.reception-registration-page .entry-result-panel span,
+.reception-registration-page .entry-result-panel label {
+  color:#172033 !important;
+}
+.reception-registration-page .entry-result-eyebrow {
+  color:#172033 !important;
+}
+.reception-registration-page .reception-registration-info span,
+.reception-registration-page .reception-registration-info strong {
+  color:#172033 !important;
+}
+.reception-registration-page button {
+  color:#172033 !important;
+  pointer-events:auto;
+  position:relative;
+  z-index:10;
+}
+.reception-registration-page button.primary {
+  color:#fff !important;
+}
