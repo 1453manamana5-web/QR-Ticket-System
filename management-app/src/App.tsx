@@ -1175,6 +1175,7 @@ export default function App() {
           </div>
           <div className="terminal-hero-actions">
             <button className="secondary" onClick={refreshTerminalState}>状態を更新</button>
+            <button className="primary-action" onClick={registerOwnTerminal} disabled={terminals.some(terminal => terminal.terminalId === firebaseDeviceId && (terminal.approved || terminal.status === "pending"))}>＋ この端末を登録</button>
             <button className="secondary" onClick={() => setPage("イベント管理")}>イベント認証QR</button>
           </div>
         </section>
@@ -1188,8 +1189,8 @@ export default function App() {
 
         <section className="terminal-own-card">
           <div className="terminal-section-heading">
-            <div><small>MY TERMINAL</small><h3>自分の端末</h3><p>この管理画面を開いている端末です。端末名だけ変更できます。</p></div>
-            <span className="terminal-state-badge online">現在の端末</span>
+            <div><small>MY TERMINAL</small><h3>自分の端末</h3><p>この端末を受付端末として登録します。登録後、管理者の承認を受けて運用を開始します。</p></div>
+            <span className="terminal-state-badge pending">登録前</span>
           </div>
           <div className="terminal-own-grid">
             <label className="terminal-name-editor">
