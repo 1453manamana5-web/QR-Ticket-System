@@ -8,7 +8,7 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   const snapshot = await getDoc(doc(db, "terminals", getTerminalIdForRegistration()));
   if (!snapshot.exists()) return null;
   const data = snapshot.data();
-  if (data.role !== "reception") return null;
+  if (data.role !== "reception" && data.role !== "both") return null;
   return {
     approved: data.approved === true,
     status: data.status === "online" || data.status === "offline" ? data.status : "pending",
@@ -24,17 +24,29 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
 export async function registerReceptionTerminal(name: string): Promise<void> {
   const db = getFirebaseDb();
   const terminalId = getTerminalIdForRegistration();
-  await setDoc(doc(db, "terminals", terminalId), {
+  const reference = doc(db, "terminals", terminalId);
+  const existing = await getDoc(reference);
+  const data = existing.exists() ? existing.data() : {};
+  const existingRole = data.role === "management" || data.role === "reception" || data.role === "both"
+    ? data.role
+    : "reception";
+  const role = existingRole === "management" || existingRole === "both" ? "both" : "reception";
+  const approved = data.approved === true;
+  const status = data.status === "online" || data.status === "offline" || data.status === "pending"
+    ? data.status
+    : "pending";
+
+  await setDoc(reference, {
     terminalId,
-    name,
-    type: "Web / iPad",
-    role: "reception",
-    mode: "停止",
-    status: "pending",
-    approved: false,
+    name: name.trim() || (typeof data.name === "string" ? data.name : "受付端末"),
+    type: data.type === "Web / PC" ? "Web / PC" : "Web / iPad",
+    role,
+    mode: data.mode === "入口受付" || data.mode === "出口受付" || data.mode === "停止" ? data.mode : "停止",
+    status,
+    approved,
     lastSeen: new Date().toISOString(),
-    networkMbps: null,
-    battery: null,
+    networkMbps: typeof data.networkMbps === "number" ? data.networkMbps : null,
+    battery: typeof data.battery === "number" ? data.battery : null,
     updatedAt: new Date().toISOString(),
   }, { merge: true });
 }
@@ -42,7 +54,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
   return onSnapshot(doc(db, "terminals", getTerminalIdForRegistration()), snapshot => {
-    if (!snapshot.exists() || snapshot.data()?.role !== "reception") { onChange(null); return; }
+    if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
     const data = snapshot.data();
     onChange({
       approved: data.approved === true,
@@ -76,7 +88,7 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     terminalId,
     name: typeof data.name === "string" ? data.name : `受付端末 ${terminalId.slice(-4)}`,
     type: "Web / iPad",
-    role: "reception",
+    role: data.role === "management" || data.role === "both" ? data.role : "reception",
     mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
     status: "online",
     approved: data.approved === true,
