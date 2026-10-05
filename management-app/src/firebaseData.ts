@@ -23,6 +23,10 @@ export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<v
   const db = getFirebaseDb();
   await Promise.all(tickets.map(ticket => setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true })));
 }
+export async function saveTicket(eventId: string, ticket: Ticket): Promise<void> {
+  const db = getFirebaseDb();
+  await setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+}
 
 export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
