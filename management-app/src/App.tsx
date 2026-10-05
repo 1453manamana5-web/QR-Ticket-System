@@ -1387,9 +1387,7 @@ export default function App() {
                     <div className="managed-terminal-actions">
                       <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
                       {terminal.terminalId !== firebaseDeviceId && (
-                        {terminal.terminalId !== firebaseDeviceId && (
                         <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
-                      )}
                       )}
                     </div>
                   </div>
@@ -1454,7 +1452,9 @@ export default function App() {
                       {(terminal.role === "reception" || terminal.role === "both") && (
                         <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
                       )}
-                      <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
+                      {terminal.terminalId !== firebaseDeviceId && (
+                        <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
+                      )}
                     </div>
                   </div>
 
