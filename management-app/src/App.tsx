@@ -1543,7 +1543,7 @@ export default function App() {
             <div className="terminal-list">
               {approvedTerminals.map(terminal => {
                 const isOnline = terminal.status === "online" && terminal.approved;
-                return <article className={selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card"} key={terminal.terminalId}>
+                return <article className={(selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card") + (terminal.admin ? " admin-terminal" : "")} key={terminal.terminalId}>
                   <div className="managed-terminal-main">
                     <div className="managed-terminal-icon">iPad</div>
                     <div className="managed-terminal-title">
