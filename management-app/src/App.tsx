@@ -251,7 +251,7 @@ export default function App() {
   });
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
-  const [firebaseDeviceId] = useState(() => {
+  const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
     const key = "qr-ticket-device-id";
     const existing = localStorage.getItem(key);
     if (existing) return existing;
@@ -860,15 +860,19 @@ export default function App() {
   };
 
   const resetOwnTerminalRegistration = async () => {
+    const oldDeviceId = firebaseDeviceId;
     try {
-      await deleteTerminal(firebaseDeviceId);
-      setTerminals(current => current.filter(terminal => terminal.terminalId !== firebaseDeviceId));
-      setSelectedTerminalId(null);
-      setTerminalNotice("この端末の登録申請をリセットしました。もう一度申請できます。");
+      await deleteTerminal(oldDeviceId);
     } catch (reason) {
-      console.error("Terminal registration reset failed", reason);
-      setTerminalNotice("登録申請をリセットできませんでした。");
+      console.error("Terminal registration reset failed on Firebase", reason);
     }
+    setTerminals(current => current.filter(terminal => terminal.terminalId !== oldDeviceId));
+    setSelectedTerminalId(null);
+    localStorage.removeItem("qr-ticket-device-id");
+    const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
+    localStorage.setItem("qr-ticket-device-id", nextDeviceId);
+    setFirebaseDeviceId(nextDeviceId);
+    setTerminalNotice("この端末の登録申請をリセットしました。新しい端末IDで再申請できます。");
   };
 
   const refreshTerminalState = () => {
@@ -1810,7 +1814,8 @@ function NavIcon({type}:{type:string}){
           <div><b>✓</b><span>登録申請を送信</span></div>
           <div><b>3</b><span>管理者が承認</span></div>
         </div>
-        <p className="terminal-registration-waiting-note">承認されると、この画面が自動的に管理画面へ切り替わります。</p>\n        <button className="secondary terminal-registration-reset" onClick={() => void resetOwnTerminalRegistration()}>申請をリセット</button>
+        <p className="terminal-registration-waiting-note">承認されると、この画面が自動的に管理画面へ切り替わります。</p>
+        <button type="button" className="secondary terminal-registration-reset" onClick={() => void resetOwnTerminalRegistration()}>申請をリセット</button>
       </section>
     </div>;
   }
