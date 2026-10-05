@@ -239,6 +239,7 @@ export default function App() {
     networkMbps: number | null;
     battery: number | null;
     role?: "management" | "reception" | "both";
+    admin?: boolean;
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -1000,6 +1001,7 @@ export default function App() {
           terminalId: firebaseDeviceId,
           name: appSettings.deviceName || existing?.name || legacyExisting.name || "管理端末",
           role: mergedRole,
+          admin: Boolean(existing?.admin || legacyExisting.admin || (!remoteTerminals.some(terminal => terminal.admin === true))),
           approved: Boolean(existing?.approved || legacyExisting.approved),
           status: existing?.status ?? legacyExisting.status ?? "pending",
           lastSeen: new Date().toISOString(),
@@ -1024,10 +1026,12 @@ export default function App() {
 
       if (existing) {
         const isSharedTerminal = existing.role === "reception" || existing.role === "both";
+        const hasAdmin = remoteTerminals.some(terminal => terminal.admin === true);
         const updatedExisting: ManagedTerminal = {
           ...existing,
           name: appSettings.deviceName || existing.name || "管理端末",
           role: isSharedTerminal ? "both" : (existing.role ?? "management"),
+          admin: Boolean(existing.admin || (!hasAdmin && (existing.role === "management" || existing.role === "both"))),
           lastSeen: new Date().toISOString(),
         };
         await saveTerminal(updatedExisting);
@@ -1056,6 +1060,7 @@ export default function App() {
         networkMbps: null,
         battery: null,
         role: "management",
+        admin: isFirstManagementTerminal,
       };
 
       await saveTerminal(terminal);
@@ -1542,6 +1547,7 @@ export default function App() {
                         <span className="terminal-mono">{terminal.terminalId}</span>
                       </div>
                       <div className="managed-terminal-role-row" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                        {terminal.admin && <span className="terminal-role-badge admin">管理者</span>}
                         <span className={terminal.role === "both" ? "terminal-role-badge both" : terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
                           {terminal.role === "both" ? "管理・受付" : terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
                         </span>
