@@ -3365,7 +3365,11 @@ body:has(.ticket-screen),
 .event-current-info>div{min-width:0;padding:13px 14px;border-radius:13px;background:#f6f8fa}
 .event-current-info span{display:block;color:#7d8794;font-size:10px;font-weight:800}.event-current-info strong{display:block;margin-top:5px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.event-current-info .event-published{color:#277747}
 .event-primary-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px;padding-top:16px;border-top:1px solid #edf0f3}.event-primary-actions button{margin:0}
-.event-management-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);gap:16px}
+.event-management-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:16px}
+.event-details-panel{min-width:0;overflow:hidden}
+.event-details-panel .event-form-grid{min-width:0}
+.event-details-panel .event-form-grid label{min-width:0}
+.event-details-panel .event-form-grid input{width:100%;max-width:100%;box-sizing:border-box}
 .event-history-panel,.event-details-panel,.event-status-panel{padding:20px}
 .event-section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}
 .event-section-heading h3{margin:5px 0 0;font-size:19px}.event-section-heading>span{padding:6px 9px;border-radius:999px;background:#f1f4f7;color:#697383;font-size:10px;font-weight:800}
