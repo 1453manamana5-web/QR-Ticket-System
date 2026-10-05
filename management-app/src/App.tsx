@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -252,6 +252,7 @@ export default function App() {
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
+  const [terminalDataHydrated, setTerminalDataHydrated] = useState(false);
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
     const key = "qr-ticket-device-id";
     const existing = localStorage.getItem(key);
@@ -345,13 +346,29 @@ export default function App() {
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    setTerminalDataHydrated(false);
+
+    void loadTerminals().then(remote => {
+      setTerminals(remote);
+      setTerminalDataHydrated(true);
+    }).catch(reason => {
+      console.error("Firebase terminal load failed", reason);
+      setTerminalDataHydrated(true);
+    });
+
     try {
       unsubscribe = subscribeTerminals(remote => {
-        if (remote.length) setTerminals(remote);
-      }, reason => console.error("Firebase terminal subscription failed", reason));
+        setTerminals(remote);
+        setTerminalDataHydrated(true);
+      }, reason => {
+        console.error("Firebase terminal subscription failed", reason);
+        setTerminalDataHydrated(true);
+      });
     } catch (reason) {
       console.error("Firebase terminal subscription failed", reason);
+      setTerminalDataHydrated(true);
     }
+
     return () => unsubscribe?.();
   }, []);
 
@@ -808,14 +825,28 @@ export default function App() {
     updateAppSetting("deviceName", name);
   };
 
-  const approveTerminal = (terminalId: string) => {
-    const target = terminals.find(terminal => terminal.terminalId === terminalId);
-    if (!target) return;
-    const updatedTerminal = { ...target, approved: true, status: "offline" as TerminalStatus };
-    setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
-    void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
-    setTerminalNotice("端末を承認しました。接続されると状態を確認できます。");
-    setSelectedTerminalId(terminalId);
+  const approveTerminal = async (terminalId: string) => {
+    try {
+      const remoteTerminals = await loadTerminals();
+      const target = remoteTerminals.find(terminal => terminal.terminalId === terminalId);
+      if (!target) {
+        setTerminalNotice("承認対象の端末がFirebaseに見つかりません。");
+        return;
+      }
+
+      const updatedTerminal = {
+        ...target,
+        approved: true,
+        status: "offline" as TerminalStatus,
+      };
+      await saveTerminal(updatedTerminal);
+      setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
+      setTerminalNotice("端末を承認しました。受付端末側にも自動反映されます。");
+      setSelectedTerminalId(terminalId);
+    } catch (reason) {
+      console.error("Firebase terminal approval failed", reason);
+      setTerminalNotice("端末の承認に失敗しました。Firebaseへの接続を確認してください。");
+    }
   };
 
   const setTerminalMode = (terminalId: string, mode: TerminalMode) => {
@@ -830,35 +861,47 @@ export default function App() {
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
   };
 
-  const registerOwnTerminal = () => {
-    const existing = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
-    if (existing) {
-      setTerminalNotice(existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。");
-      return;
+  const registerOwnTerminal = async () => {
+    try {
+      const remoteTerminals = await loadTerminals();
+      setTerminals(remoteTerminals);
+
+      const existing = remoteTerminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+      if (existing) {
+        setForceTerminalRegistration(false);
+        setSelectedTerminalId(existing.terminalId);
+        setTerminalNotice(existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。");
+        return;
+      }
+
+      const managementTerminals = remoteTerminals.filter(terminal => terminal.role !== "reception");
+      const isFirstManagementTerminal = managementTerminals.length === 0;
+      const terminal: ManagedTerminal = {
+        terminalId: firebaseDeviceId,
+        name: appSettings.deviceName || "管理端末",
+        type: "Web / iPad",
+        mode: "停止",
+        status: isFirstManagementTerminal ? "online" : "pending",
+        approved: isFirstManagementTerminal,
+        lastSeen: new Date().toISOString(),
+        networkMbps: null,
+        battery: null,
+        role: "management",
+      };
+
+      await saveTerminal(terminal);
+      setTerminals(current => [...current.filter(item => item.terminalId !== firebaseDeviceId), terminal]);
+      setForceTerminalRegistration(false);
+      setSelectedTerminalId(terminal.terminalId);
+      setTerminalNotice(
+        isFirstManagementTerminal
+          ? "最初の管理端末として自動承認されました。"
+          : "この端末の登録申請を送信しました。管理者の承認を待ってください。"
+      );
+    } catch (reason) {
+      console.error("Firebase terminal registration failed", reason);
+      setTerminalNotice("端末の登録申請に失敗しました。Firebaseへの接続を確認してください。");
     }
-    const managementTerminals = terminals.filter(terminal => terminal.role !== "reception");
-    const isFirstManagementTerminal = managementTerminals.length === 0;
-    const terminal: ManagedTerminal = {
-      terminalId: firebaseDeviceId,
-      name: appSettings.deviceName || "管理端末",
-      type: "Web / iPad",
-      mode: "停止",
-      status: isFirstManagementTerminal ? "online" : "pending",
-      approved: isFirstManagementTerminal,
-      lastSeen: new Date().toISOString(),
-      networkMbps: null,
-      battery: null,
-      role: "management",
-    };
-    setTerminals(current => [...current.filter(item => item.terminalId !== firebaseDeviceId), terminal]);
-    setForceTerminalRegistration(false);
-    void saveTerminal(terminal).catch(reason => console.error("Firebase terminal registration failed", reason));
-    setSelectedTerminalId(terminal.terminalId);
-    setTerminalNotice(
-      isFirstManagementTerminal
-        ? "最初の管理端末として自動承認されました。"
-        : "この端末の登録申請を送信しました。管理者の承認を待ってください。"
-    );
   };
 
   const resetOwnTerminalRegistration = () => {
@@ -1775,6 +1818,16 @@ function NavIcon({type}:{type:string}){
   if(type==="analysis") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20V7"/><path d="M2 20h21"/></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1h-2.5V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1A1.7 1.7 0 0 0 8.1 15a1.7 1.7 0 0 0-1.6-1H6v-2.5h.5a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V5H15v.5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.5V14h-.5a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
 }
+
+  if (!terminalDataHydrated) {
+    return <div className="terminal-registration-screen terminal-registration-fullscreen">
+      <section className="terminal-registration-card">
+        <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
+        <h1>端末情報を確認しています</h1>
+        <p>Firebaseから端末の登録状態を確認しています。</p>
+      </section>
+    </div>;
+  }
 
   const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId && terminal.role !== "reception");
   if (forceTerminalRegistration || !ownTerminal) {
