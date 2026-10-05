@@ -444,18 +444,23 @@ export default function App() {
       if (next === "finished") {
         saveAnalysisSnapshot(event);
         const releaseTerminals = async () => {
-          const released = terminals.map(terminal => ({
-            ...terminal,
-            approved: false,
-            status: "pending" as TerminalStatus,
-            mode: "停止" as TerminalMode,
-            desiredMode: "停止" as TerminalMode,
-          }));
+          const released = terminals.map(terminal => {
+            // イベント終了時に解除するのは受付機能を持つ端末だけ。
+            // 管理専用端末（管理者・副管理者を含む）は認証状態を維持する。
+            if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
+            return {
+              ...terminal,
+              approved: false,
+              status: "pending" as TerminalStatus,
+              mode: "停止" as TerminalMode,
+              desiredMode: "停止" as TerminalMode,
+            };
+          });
           try {
             await Promise.all(released.map(terminal => saveTerminal(terminal)));
             setTerminals(released);
             setSelectedTerminalId(null);
-            setTerminalNotice("イベント終了に伴い、すべての端末の認証を解除しました。");
+            setTerminalNotice("イベント終了に伴い、受付端末の認証を解除しました。");
           } catch (reason) {
             console.error("Terminal release after event finished failed", reason);
             setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
