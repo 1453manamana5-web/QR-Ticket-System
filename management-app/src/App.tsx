@@ -1172,7 +1172,7 @@ export default function App() {
           <section className="terminal-registration-card">
             <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
             <h2>端末登録申請</h2>
-            <p>この端末を受付端末として使用するため、最初に登録申請を送信してください。</p>
+            <p>この端末を管理アプリとして使用するため、最初に登録申請を送信してください。</p>
 
             <div className="terminal-registration-preview">
               <div>
