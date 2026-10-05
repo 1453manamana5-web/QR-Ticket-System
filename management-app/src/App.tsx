@@ -251,6 +251,7 @@ export default function App() {
   });
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
+  const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
     const key = "qr-ticket-device-id";
     const existing = localStorage.getItem(key);
@@ -849,7 +850,8 @@ export default function App() {
       battery: null,
       role: "management",
     };
-    setTerminals(current => [...current, terminal]);
+    setTerminals(current => [...current.filter(item => item.terminalId !== firebaseDeviceId), terminal]);
+    setForceTerminalRegistration(false);
     void saveTerminal(terminal).catch(reason => console.error("Firebase terminal registration failed", reason));
     setSelectedTerminalId(terminal.terminalId);
     setTerminalNotice(
@@ -872,6 +874,7 @@ export default function App() {
     const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
     localStorage.setItem("qr-ticket-device-id", nextDeviceId);
     setFirebaseDeviceId(nextDeviceId);
+    setForceTerminalRegistration(true);
     setTerminalNotice("この端末の登録申請をリセットしました。新しい端末IDで再申請できます。");
   };
 
@@ -1773,7 +1776,7 @@ function NavIcon({type}:{type:string}){
 }
 
   const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId && terminal.role !== "reception");
-  if (!ownTerminal) {
+  if (forceTerminalRegistration || !ownTerminal) {
     return <div className="terminal-registration-screen terminal-registration-fullscreen">
       <section className="terminal-registration-card">
         <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
