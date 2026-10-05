@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -14,6 +14,11 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
     status: data.status === "online" || data.status === "offline" ? data.status : "pending",
     name: typeof data.name === "string" ? data.name : "受付端末",
   };
+}
+
+export async function resetReceptionTerminalRegistration(): Promise<void> {
+  const db = getFirebaseDb();
+  await deleteDoc(doc(db, "terminals", getTerminalIdForRegistration()));
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
