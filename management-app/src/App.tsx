@@ -876,6 +876,11 @@ export default function App() {
   };
 
   const deleteManagedTerminal = async (terminalId: string) => {
+    if (terminalId === firebaseDeviceId) {
+      setTerminalNotice("自分の端末は削除できません。");
+      return;
+    }
+
     const target = terminals.find(terminal => terminal.terminalId === terminalId);
     if (!target || !window.confirm(`「${target.name}」を端末一覧から削除しますか？`)) return;
 
@@ -1400,7 +1405,11 @@ export default function App() {
                     </div>
                     <div className="managed-terminal-actions">
                       <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
-                      <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
+                      {terminal.terminalId !== firebaseDeviceId && (
+                        {terminal.terminalId !== firebaseDeviceId && (
+                        <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
+                      )}
+                      )}
                     </div>
                   </div>
                 </article>
@@ -1927,7 +1936,7 @@ function NavIcon({type}:{type:string}){
           <div><b>3</b><span>管理者が承認</span></div>
         </div>
         <p className="terminal-registration-waiting-note">承認されると、この画面が自動的に管理画面へ切り替わります。</p>
-        <button type="button" className="secondary terminal-registration-reset" onClick={() => void resetOwnTerminalRegistration()}>申請をリセット</button>
+        <p className="terminal-registration-waiting-note">この端末の登録は自分では削除できません。必要な場合は管理画面から対応してください。</p>
       </section>
     </div>;
   }
