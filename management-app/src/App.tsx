@@ -851,88 +851,91 @@ export default function App() {
   };
 
   const pageContent = () => {
-    if (page === "イベント管理") return <section className="panel">
-      <div className="panel-title">
-        <div><small>EVENT MANAGEMENT</small><h2>イベント管理</h2></div>
-        <span className="pill">{statusLabel[eventStatus]}</span>
+    if (page === "イベント管理") return <section className="event-management-screen">
+      <div className="event-management-hero">
+        <div><small>EVENT MANAGEMENT</small><h2>イベント管理</h2><p>開催するイベントの情報・状態・公開設定をまとめて管理します。</p></div>
+        <button className="primary-action event-new-button" onClick={openNewEventModal}>＋ 新しいイベント</button>
       </div>
 
-      <div className="event-history">
-        <div className="event-history-header">
-          <div><small>EVENT HISTORY</small><h2>イベント履歴</h2></div>
-          <span>{eventHistory.length}件</span>
+      <section className="event-current-card">
+        <div className="event-current-heading">
+          <div><small>現在のイベント</small><h3>{event.eventName}</h3><span className="event-current-id">{event.eventId}</span></div>
+          <span className={"event-status-badge " + eventStatus}>{statusLabel[eventStatus]}</span>
         </div>
-        <div className="event-history-list">
-          {eventHistory.map(item => {
-            const selected = item.eventId === selectedHistoryEventId;
-            return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
-              <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
-                <div>
-                  <b>{item.eventName}</b>
-                  <small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small>
-                  <span>{item.eventId}</span>
-                </div>
-                <span className="pill">{statusLabel[item.eventStatus]}</span>
-              </button>
-              {selected && <div className="event-history-actions">
-                <span className="event-history-label">このイベントを操作</span>
-                <div>
-                  <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
-                  <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
-                  <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
-                  <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
-                  <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
-                  <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
-                </div>
-              </div>}
-            </div>;
-          })}
+        <div className="event-current-info">
+          <div><span>開催日</span><strong>{event.eventDate}</strong></div>
+          <div><span>受付時間</span><strong>{event.startTime} – {event.endTime}</strong></div>
+          <div><span>チケット</span><strong>{ticketStats.total}枚</strong></div>
+          <div><span>公開状態</span><strong className={bundle ? "event-published" : ""}>{bundle ? "Firebaseへ公開済み" : "未公開"}</strong></div>
         </div>
-      </div>
-
-      <div className="actions event-actions">
-        <button className="secondary" onClick={openNewEventModal}>＋ 新しいイベント</button>
-        <button className="secondary" onClick={() => void saveEvent()}>イベント情報を保存</button>
-        <button className="secondary" onClick={() => changeEventStatus(nextStatus(eventStatus))} disabled={eventStatus === "finished"}>
-          {eventStatus === "preparing" ? "受付可能にする" : eventStatus === "ready" ? "開催を開始" : eventStatus === "active" ? "終了処理へ" : "イベントを終了"}
-        </button>
-        <button className="primary-action" disabled={publishing || eventStatus === "finished"} onClick={() => void publish()}>
-          {publishing ? "公開中…" : "Firebaseへ公開"}
-        </button>
-      </div>
-
-      <div className="form-grid">
-        <label>イベント名<input value={eventName} onChange={e => setEventName(e.target.value)} /></label>
-        <label>開催日<input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} /></label>
-        <label>開始時刻<input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></label>
-        <label>終了時刻<input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></label>
-        <label>イベントID<input value={event.eventId} onChange={e => setEvent(current => ({ ...current, eventId: e.target.value }))} /></label>
-        <label>チケット枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
-        <label>データバージョン<input value={event.dataVersion} disabled /></label>
-      </div>
-
-      <div className="status-stepper">
-        {(["preparing", "ready", "active", "finalizing", "finished"] as Event["eventStatus"][]).map(status => (
-          <button key={status} className={eventStatus === status ? "status-step active" : "status-step"} onClick={() => changeEventStatus(status)}>
-            <b>{statusLabel[status]}</b><span>{status}</span>
+        <div className="event-primary-actions">
+          <button className="secondary" onClick={() => void saveEvent()}>イベント情報を保存</button>
+          <button className="secondary" onClick={() => changeEventStatus(nextStatus(eventStatus))} disabled={eventStatus === "finished"}>
+            {eventStatus === "preparing" ? "受付可能にする" : eventStatus === "ready" ? "開催を開始" : eventStatus === "active" ? "終了処理へ" : "イベントを終了"}
           </button>
-        ))}
+          <button className="primary-action" disabled={publishing || eventStatus === "finished"} onClick={() => void publish()}>{publishing ? "公開中…" : "Firebaseへ公開"}</button>
+        </div>
+      </section>
+
+      <div className="event-management-grid">
+        <section className="event-history-panel">
+          <div className="event-section-heading"><div><small>EVENT LIST</small><h3>イベント一覧</h3></div><span>{eventHistory.length}件</span></div>
+          <div className="event-history-list">
+            {eventHistory.map(item => {
+              const selected = item.eventId === selectedHistoryEventId;
+              return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
+                <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
+                  <div><b>{item.eventName}</b><small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small><span>{item.eventId}</span></div>
+                  <span className={"event-status-badge compact " + item.eventStatus}>{statusLabel[item.eventStatus]}</span>
+                </button>
+                {selected && <div className="event-history-actions">
+                  <span className="event-history-label">イベント状態</span>
+                  <div>
+                    <button className="secondary" onClick={() => changeEventStatus("preparing")}>準備中</button>
+                    <button className="secondary" onClick={() => changeEventStatus("ready")}>受付開始</button>
+                    <button className="secondary" onClick={() => changeEventStatus("active")}>開催中</button>
+                    <button className="secondary" onClick={() => changeEventStatus("finalizing")}>終了処理</button>
+                    <button className="secondary" onClick={() => changeEventStatus("finished")}>終了</button>
+                    <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
+                  </div>
+                </div>}
+              </div>;
+            })}
+          </div>
+        </section>
+
+        <section className="event-details-panel">
+          <div className="event-section-heading"><div><small>EVENT DETAILS</small><h3>イベント情報</h3></div><span>編集</span></div>
+          <div className="form-grid event-form-grid">
+            <label>イベント名<input value={eventName} onChange={e => setEventName(e.target.value)} /></label>
+            <label>開催日<input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} /></label>
+            <label>開始時刻<input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></label>
+            <label>終了時刻<input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></label>
+            <label>イベントID<input value={event.eventId} onChange={e => setEvent(current => ({ ...current, eventId: e.target.value }))} /></label>
+            <label>チケット枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
+            <label>データバージョン<input value={event.dataVersion} disabled /></label>
+          </div>
+          <button className="secondary event-save-button" onClick={() => void saveEvent()}>変更を保存</button>
+        </section>
       </div>
+
+      <section className="event-status-panel">
+        <div className="event-section-heading"><div><small>EVENT STATUS</small><h3>イベント状態</h3></div><span>現在：{statusLabel[eventStatus]}</span></div>
+        <div className="status-stepper">
+          {(["preparing", "ready", "active", "finalizing", "finished"] as Event["eventStatus"][]).map(status => (
+            <button key={status} className={eventStatus === status ? "status-step active" : "status-step"} onClick={() => changeEventStatus(status)}>
+              <b>{statusLabel[status]}</b><span>{status}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {error && <div className="notice error">{error}</div>}
       {bundle && <div className="notice success">イベントデータはFirebaseへ公開済みです。受付端末は下のQRで認証できます。</div>}
-
-      {bundle && <div className="auth-card">
-        <div>
-          <small>EVENT AUTHENTICATION</small>
-          <h2>受付端末用イベント認証QR</h2>
-          <p>受付アプリで読み取ると、チケット{bundle.tickets.length}枚を端末へ保存します。</p>
-          <p className="token">{bundle.authToken}</p>
-          <button className="secondary" onClick={() => window.print()}>認証QRを印刷</button>
-        </div>
+      {bundle && <section className="auth-card event-auth-card">
+        <div><small>EVENT AUTHENTICATION</small><h2>受付端末用イベント認証QR</h2><p>受付アプリで読み取ると、チケット{bundle.tickets.length}枚を端末へ保存します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => window.print()}>認証QRを印刷</button></div>
         <div className="qr-box"><QRCodeSVG value={authQrValue} size={220} includeMargin /></div>
-      </div>}
-
+      </section>}
     </section>;
 
     if (page === "チケット管理") return <>
