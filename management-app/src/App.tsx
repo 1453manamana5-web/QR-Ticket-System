@@ -871,6 +871,28 @@ export default function App() {
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
   };
 
+  const deleteManagedTerminal = async (terminalId: string) => {
+    const target = terminals.find(terminal => terminal.terminalId === terminalId);
+    if (!target || !window.confirm(`「${target.name}」を端末一覧から削除しますか？`)) return;
+
+    setTerminals(current => current.filter(terminal => terminal.terminalId !== terminalId));
+    if (selectedTerminalId === terminalId) setSelectedTerminalId(null);
+
+    try {
+      await deleteTerminal(terminalId);
+      setTerminalNotice(`「${target.name}」を削除しました。`);
+    } catch (reason) {
+      console.error("Firebase terminal deletion failed", reason);
+      setTerminalNotice("端末をFirebaseから削除できませんでした。");
+      try {
+        const remoteTerminals = await loadTerminals();
+        setTerminals(remoteTerminals);
+      } catch (reloadReason) {
+        console.error("Firebase terminal reload failed", reloadReason);
+      }
+    }
+  };
+
   const registerOwnTerminal = async () => {
     try {
       const remoteTerminals = await loadTerminals();
@@ -1360,6 +1382,7 @@ export default function App() {
                     </div>
                     <div className="managed-terminal-actions">
                       <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
+                      <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
                     </div>
                   </div>
                 </article>
@@ -1391,9 +1414,14 @@ export default function App() {
                         <h4>{terminal.name}</h4>
                         <span className="terminal-mono">{terminal.terminalId}</span>
                       </div>
-                      <span className={isOnline ? "terminal-state-badge online" : "terminal-state-badge offline"}>
-                        {isOnline ? "接続中" : "見つかりません"}
-                      </span>
+                      <div className="managed-terminal-role-row">
+                        <span className={terminal.role === "management" ? "terminal-role-badge management" : "terminal-role-badge reception"}>
+                          {terminal.role === "management" ? "管理アプリ" : "受付アプリ"}
+                        </span>
+                        <span className={isOnline ? "terminal-state-badge online" : "terminal-state-badge offline"}>
+                          {isOnline ? "接続中" : "見つかりません"}
+                        </span>
+                      </div>
                     </div>
                     <div className="managed-terminal-meta">
                       <div><span>端末種別</span><strong>{terminal.type}</strong></div>
@@ -1415,7 +1443,10 @@ export default function App() {
                       </div>
                     </div>
                     <div className="managed-terminal-actions">
-                      <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
+                      {terminal.role !== "management" && (
+                        <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
+                      )}
+                      <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
                     </div>
                   </div>
 
