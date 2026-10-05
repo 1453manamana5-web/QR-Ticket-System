@@ -118,12 +118,12 @@ function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
 }
 
 function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
-  const startAt = new Date(`${target.eventDate}T${target.startTime}:00`);
-  const endAt = new Date(`${target.eventDate}T${target.endTime}:00`);
+  const startAt = new Date(target.eventDate + "T" + target.startTime + ":00");
+  const endAt = new Date(target.eventDate + "T" + target.endTime + ":00");
   if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
 
   const now = new Date();
-  if (now >= endAt && target.eventStatus !== "finished") return "finished";
+  if (now >= endAt && target.eventStatus !== "finalizing" && target.eventStatus !== "finished") return "finalizing";
   if (now >= startAt && (target.eventStatus === "preparing" || target.eventStatus === "ready")) return "active";
   return null;
 }
@@ -243,6 +243,7 @@ export default function App() {
     subAdmin?: boolean;
     managementApproved?: boolean;
     receptionApproved?: boolean;
+    syncPendingCount?: number;
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -438,43 +439,83 @@ export default function App() {
   useEffect(() => {
     if (eventHistory[0]?.eventId !== event.eventId) return;
 
+    const finishEvent = async () => {
+      const receptionTerminals = terminals.filter(
+        terminal => terminal.role === "reception" || terminal.role === "both",
+      );
+      const allReceptionDataSynced = receptionTerminals.every(
+        terminal => terminal.syncPendingCount === 0,
+      );
+
+      if (!allReceptionDataSynced) {
+        setTerminalNotice("受付データを回収しています。すべての受付端末の同期が完了するまで終了処理中のまま待機します。");
+        return;
+      }
+
+      saveAnalysisSnapshot(event);
+      const released = terminals.map(terminal => {
+        if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
+        const managementApproved = terminal.role === "both"
+          ? Boolean(terminal.managementApproved ?? terminal.approved)
+          : false;
+        return {
+          ...terminal,
+          approved: managementApproved,
+          managementApproved,
+          receptionApproved: false,
+          syncPendingCount: 0,
+          status: managementApproved ? ("offline" as TerminalStatus) : ("pending" as TerminalStatus),
+          mode: "停止" as TerminalMode,
+          desiredMode: "停止" as TerminalMode,
+        };
+      });
+
+      try {
+        await Promise.all(released.map(terminal => saveTerminal(terminal)));
+        setTerminals(released);
+        setSelectedTerminalId(null);
+        setTerminalNotice("受付データの回収が完了しました。受付機能の認証を解除しました。");
+        const finished = { ...event, eventStatus: "finished" as const };
+        setEvent(finished);
+        setEventHistory(current =>
+          current.map(item => item.eventId === finished.eventId ? finished : item),
+        );
+        setSelectedHistoryEventId(finished.eventId);
+        await saveEventMetadata(finished);
+      } catch (reason) {
+        console.error("Terminal release after event finalization failed", reason);
+        setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
+      }
+    };
+
     const syncAutomaticStatus = () => {
       const next = getAutomaticEventStatus(event);
+
+      if (next === "finalizing") {
+        if (event.eventStatus !== "finalizing") {
+          const updated = { ...event, eventStatus: "finalizing" as const };
+          setEvent(updated);
+          setEventHistory(current =>
+            current.map(item => item.eventId === updated.eventId ? updated : item),
+          );
+          setSelectedHistoryEventId(updated.eventId);
+          setTerminalNotice("終了時刻になりました。受付端末からデータを回収しています。");
+          void saveEventMetadata(updated).catch(reason => {
+            console.error(reason);
+            setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+          });
+        }
+        return;
+      }
+
+      if (event.eventStatus === "finalizing") {
+        void finishEvent();
+        return;
+      }
+
       if (!next || next === event.eventStatus) return;
 
       const updated = { ...event, eventStatus: next };
-      if (next === "finished") {
-        saveAnalysisSnapshot(event);
-        const releaseTerminals = async () => {
-          const released = terminals.map(terminal => {
-            // イベント終了時は受付機能だけを解除する。
-            // 管理者・副管理者を含め、管理機能の認証は維持する。
-            if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
-            const managementApproved = terminal.role === "both"
-              ? Boolean(terminal.managementApproved ?? terminal.approved)
-              : false;
-            return {
-              ...terminal,
-              approved: managementApproved,
-              managementApproved,
-              receptionApproved: false,
-              status: managementApproved ? ("offline" as TerminalStatus) : ("pending" as TerminalStatus),
-              mode: "停止" as TerminalMode,
-              desiredMode: "停止" as TerminalMode,
-            };
-          });
-          try {
-            await Promise.all(released.map(terminal => saveTerminal(terminal)));
-            setTerminals(released);
-            setSelectedTerminalId(null);
-            setTerminalNotice("イベント終了に伴い、受付機能の認証だけを解除しました。");
-          } catch (reason) {
-            console.error("Terminal release after event finished failed", reason);
-            setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
-          }
-        };
-        void releaseTerminals();
-      }
       setEvent(updated);
       setEventHistory(current =>
         current.map(item => item.eventId === updated.eventId ? updated : item),
@@ -487,9 +528,9 @@ export default function App() {
     };
 
     syncAutomaticStatus();
-    const timer = window.setInterval(syncAutomaticStatus, 10000);
+    const timer = window.setInterval(syncAutomaticStatus, 5000);
     return () => window.clearInterval(timer);
-  }, [event, eventHistory, ticketStats]);
+  }, [event, eventHistory, ticketStats, terminals]);
 
   const filteredTickets = useMemo(() => {
     const query = ticketQuery.trim().toLowerCase();
