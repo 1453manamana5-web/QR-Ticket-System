@@ -3,10 +3,10 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadEventData} from "./eventDownloader";
-import {saveTerminalHeartbeat,subscribeTerminalControl,syncReceptionRecord} from "./receptionSync";
+import {getTerminalRegistration,registerReceptionTerminal,saveTerminalHeartbeat,subscribeTerminalControl,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
-type Screen="auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
+type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
 type Result={kind:"success"|"error";title:string;detail:string};
 
 const DEMO_EVENT:EventAuthPayload={
@@ -51,7 +51,9 @@ function EntryIcon(){
 }
 
 export default function App(){
-  const [screen,setScreen]=useState<Screen>("auth");
+  const [screen,setScreen]=useState<Screen>("registration");
+  const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
+  const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
   const [localEvent,setLocalEvent]=useState<LocalEventData|null>(null);
@@ -339,6 +341,26 @@ export default function App(){
       switchMode();
     }
   };
+
+  if(screen==="registration")return <div className="entry-reception-page waiting reception-registration-page">
+    <main className="entry-reception-main">
+      <section className="entry-result-panel reception-registration-panel">
+        <span className="entry-result-eyebrow">RECEPTION TERMINAL</span>
+        <h2>{terminalRegistration ? "受付端末の承認待ち" : "受付端末を登録"}</h2>
+        <p className="entry-result-primary">{terminalRegistration ? "この端末の登録申請を受け付けました。" : "このiPadを受付専用端末として使用するため、最初に登録申請してください。"}</p>
+        {!terminalRegistration ? <>
+          <label className="reception-registration-field"><span>端末名</span><input value={terminalRegistrationName} onChange={e=>setTerminalRegistrationName(e.target.value)} placeholder="例：入口受付 iPad"/></label>
+          <div className="reception-registration-info"><span>端末種別</span><strong>Web / iPad</strong></div>
+          <button type="button" className="primary" disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
+        </> : <>
+          <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
+          <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
+          <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
+        </>}
+        {error&&<p className="entry-result-secondary">{error}</p>}
+      </section>
+    </main>
+  </div>;
 
   if(screen==="auth")return <div className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
