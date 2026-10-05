@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -25,4 +25,12 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     battery: typeof data.battery === "number" ? data.battery : null,
     updatedAt: new Date().toISOString(),
   }, { merge: true });
+}
+
+export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止") => void, onError: (error: unknown) => void): () => void {
+  const db = getFirebaseDb();
+  return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
+    const value = snapshot.data()?.desiredMode;
+    if (value === "入口受付" || value === "出口受付" || value === "停止") onMode(value);
+  }, onError);
 }
