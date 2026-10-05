@@ -3466,3 +3466,5 @@ body:has(.ticket-screen),
   .terminal-registration-card{padding:24px}
   .terminal-registration-preview,.terminal-registration-flow{grid-template-columns:1fr}
 }
+
+.terminal-registration-fullscreen{position:fixed;inset:0;min-height:100vh;box-sizing:border-box;background:#f5f7f9;z-index:9999;}
