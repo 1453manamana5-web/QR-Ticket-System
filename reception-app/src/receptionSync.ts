@@ -76,6 +76,7 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     terminalId,
     name: typeof data.name === "string" ? data.name : `受付端末 ${terminalId.slice(-4)}`,
     type: "Web / iPad",
+    role: "reception",
     mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
     status: "online",
     approved: data.approved === true,
