@@ -969,7 +969,7 @@ export default function App() {
         <button className="primary-action event-new-button" onClick={openNewEventModal}>＋ 新しいイベント</button>
       </div>
 
-      <section className="event-current-card">
+      {selectedHistoryEventId && event.eventId && <section className="event-current-card">
         <div className="event-current-heading">
           <div><small>現在のイベント</small><h3>{event.eventName}</h3><span className="event-current-id">{event.eventId}</span></div>
           <span className={"event-status-badge " + eventStatus}>{statusLabel[eventStatus]}</span>
@@ -987,7 +987,7 @@ export default function App() {
           </button>
           <button className="primary-action" disabled={publishing || eventStatus === "finished"} onClick={() => void publish()}>{publishing ? "公開中…" : "Firebaseへ公開"}</button>
         </div>
-      </section>
+      </section>}
 
       <div className="event-management-grid">
         <section className="event-history-panel">
@@ -998,7 +998,6 @@ export default function App() {
               return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
                 <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
                   <div><b>{item.eventName}</b><small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small><span>{item.eventId}</span></div>
-                  <span className={"event-status-badge compact " + item.eventStatus}>{statusLabel[item.eventStatus]}</span>
                 </button>
                 {selected && <div className="event-history-actions">
                   <span className="event-history-label">イベント状態</span>
@@ -1016,7 +1015,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="event-details-panel">
+        {selectedHistoryEventId && event.eventId && <section className="event-details-panel">
           <div className="event-section-heading"><div><small>EVENT DETAILS</small><h3>イベント情報</h3></div><span>編集</span></div>
           <div className="form-grid event-form-grid">
             <label>イベント名<input value={eventName} onChange={e => setEventName(e.target.value)} /></label>
@@ -1028,7 +1027,7 @@ export default function App() {
             <label>データバージョン<input value={event.dataVersion} disabled /></label>
           </div>
           <button className="secondary event-save-button" onClick={() => void saveEvent()}>変更を保存</button>
-        </section>
+        </section>}
       </div>
 
       <section className="event-status-panel">
