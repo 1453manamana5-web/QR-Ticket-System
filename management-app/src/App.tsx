@@ -1030,9 +1030,10 @@ export default function App() {
 
     if (page === "端末管理") {
       const onlineCount = terminals.filter(terminal => terminal.status === "online" && terminal.approved).length;
-      const pendingCount = terminals.filter(terminal => !terminal.approved || terminal.status === "pending").length;
-      const notFoundCount = terminals.filter(terminal => terminal.approved && terminal.status !== "online").length;
-      const selectedTerminal = terminals.find(terminal => terminal.terminalId === selectedTerminalId) ?? null;
+      const pendingTerminals = terminals.filter(terminal => !terminal.approved || terminal.status === "pending");
+      const approvedTerminals = terminals.filter(terminal => terminal.approved && terminal.status !== "pending");
+      const pendingCount = pendingTerminals.length;
+      const notFoundCount = approvedTerminals.filter(terminal => terminal.status !== "online").length;
 
       return <div className="terminal-management-screen">
         <section className="terminal-hero">
@@ -1048,7 +1049,7 @@ export default function App() {
         </section>
 
         <section className="terminal-summary-grid">
-          <div className="terminal-summary-card"><small>REGISTERED</small><strong>{terminals.length}</strong><span>登録済み端末</span></div>
+          <div className="terminal-summary-card"><small>REGISTERED</small><strong>{approvedTerminals.length}</strong><span>登録済み端末</span></div>
           <div className="terminal-summary-card online"><small>ONLINE</small><strong>{onlineCount}</strong><span>接続中</span></div>
           <div className="terminal-summary-card pending"><small>APPROVAL</small><strong>{pendingCount}</strong><span>承認待ち</span></div>
           <div className="terminal-summary-card not-found"><small>NOT FOUND</small><strong>{notFoundCount}</strong><span>見つかりません</span></div>
@@ -1070,86 +1071,126 @@ export default function App() {
           </div>
         </section>
 
-        <section className="terminal-list-card">
+        <section className="terminal-list-card terminal-pending-card">
           <div className="terminal-section-heading">
-            <div><small>REGISTERED TERMINALS</small><h3>登録済み端末</h3><p>他端末の名前は管理画面から変更せず、端末側で設定します。</p></div>
-            <span className="terminal-section-count">{terminals.length}台</span>
+            <div><small>PENDING APPROVAL</small><h3>承認待ち端末</h3><p>新しく登録申請された端末は、ここで承認してから登録済み端末に移動します。</p></div>
+            <span className="terminal-section-count">{pendingCount}台</span>
           </div>
 
-          <div className="terminal-list">
-            {terminals.map(terminal => {
-              const isOnline = terminal.status === "online" && terminal.approved;
-              const isPending = !terminal.approved || terminal.status === "pending";
-              return <article className={selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card"} key={terminal.terminalId}>
-                <div className="managed-terminal-main">
-                  <div className="managed-terminal-icon">iPad</div>
-                  <div className="managed-terminal-title">
-                    <div>
-                      <h4>{terminal.name}</h4>
-                      <span className="terminal-mono">{terminal.terminalId}</span>
+          {pendingTerminals.length ? (
+            <div className="terminal-list">
+              {pendingTerminals.map(terminal => (
+                <article className="managed-terminal-card pending-card" key={terminal.terminalId}>
+                  <div className="managed-terminal-main">
+                    <div className="managed-terminal-icon">iPad</div>
+                    <div className="managed-terminal-title">
+                      <div>
+                        <h4>{terminal.name}</h4>
+                        <span className="terminal-mono">{terminal.terminalId}</span>
+                      </div>
+                      <span className="terminal-state-badge pending">承認待ち</span>
                     </div>
-                    <span className={isPending ? "terminal-state-badge pending" : isOnline ? "terminal-state-badge online" : "terminal-state-badge offline"}>
-                      {isPending ? "承認待ち" : isOnline ? "接続中" : "見つかりません"}
-                    </span>
+                    <div className="managed-terminal-meta">
+                      <div><span>端末種別</span><strong>{terminal.type}</strong></div>
+                      <div><span>受付状態</span><strong>{terminal.mode}</strong></div>
+                      <div><span>申請時接続</span><strong>{terminal.lastSeen ? terminal.lastSeen : "未接続"}</strong></div>
+                    </div>
                   </div>
-                  <div className="managed-terminal-meta">
-                    <div><span>端末種別</span><strong>{terminal.type}</strong></div>
-                    <div><span>受付状態</span><strong>{terminal.mode}</strong></div>
-                    <div><span>最終接続</span><strong>{terminal.lastSeen ? terminal.lastSeen : "未接続"}</strong></div>
-                  </div>
-                </div>
 
-                <div className="managed-terminal-footer">
-                  <div className="terminal-network">
-                    <span>通信速度</span>
-                    {terminal.networkMbps !== null ? (
-                      <strong>{terminal.networkMbps.toFixed(1)} Mbps</strong>
-                    ) : (
-                      <strong>—</strong>
-                    )}
-                    <div className="terminal-network-bars" aria-label="通信速度">
-                      {[1,2,3,4,5,6].map(level => <i key={level} className={terminal.networkMbps !== null && terminal.networkMbps >= level * 3 ? "active" : ""} />)}
+                  <div className="managed-terminal-footer">
+                    <div className="terminal-network">
+                      <span>通信速度</span>
+                      {terminal.networkMbps !== null ? (
+                        <strong>{terminal.networkMbps.toFixed(1)} Mbps</strong>
+                      ) : (
+                        <strong>—</strong>
+                      )}
                     </div>
-                  </div>
-                  <div className="managed-terminal-actions">
-                    {isPending ? (
+                    <div className="managed-terminal-actions">
                       <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
-                    ) : (
-                      <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
-                    )}
-                  </div>
-                </div>
-
-                {selectedTerminalId === terminal.terminalId && (
-                  <div className="terminal-control-panel">
-                    <div className="terminal-control-heading">
-                      <div><small>REMOTE CONTROL</small><h4>{terminal.name}を操作</h4></div>
-                      {!isOnline && <span>端末が見つからないため操作できません</span>}
                     </div>
-                    <div className="terminal-control-grid">
-                      <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "入口受付")}>入口受付</button>
-                      <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "出口受付")}>出口受付</button>
-                      <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "停止")}>受付停止</button>
-                      <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, terminal.mode)}>現在状態を再適用</button>
-                    </div>
-                    <div className="terminal-control-note">※ リモート操作は端末が実際に接続されたときだけ有効になります。未接続時は誤操作を防ぐため無効化しています。</div>
                   </div>
-                )}
-              </article>;
-            })}
-          </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="terminal-empty-state">
+              <strong>承認待ちの端末はありません</strong>
+              <span>端末から登録申請が届くと、ここに表示されます。</span>
+            </div>
+          )}
         </section>
 
-        <section className="terminal-lab-card">
+        <section className="terminal-list-card">
           <div className="terminal-section-heading">
-            <div><small>CONTROL LAB</small><h3>管制ラボ</h3><p>本番の端末操作とは分離した試験エリアです。</p></div>
-            <span className="terminal-lab-tag">TEST</span>
+            <div><small>REGISTERED TERMINALS</small><h3>登録済み端末</h3><p>承認済みの受付端末を管理します。他端末の名前は管理画面から変更せず、端末側で設定します。</p></div>
+            <span className="terminal-section-count">{approvedTerminals.length}台</span>
           </div>
-          <div className="terminal-lab-grid">
-            <div><strong>接続テスト</strong><span>端末が管理側から発見できるか確認</span><button className="secondary" onClick={refreshTerminalState}>テストする</button></div>
-            <div><strong>通信テスト</strong><span>接続後のMbps表示を確認</span><button className="secondary" disabled>接続待ち</button></div>
-            <div><strong>遠隔操作テスト</strong><span>受付状態の切り替えを確認</span><button className="secondary" disabled>接続待ち</button></div>
-          </div>
+
+          {approvedTerminals.length ? (
+            <div className="terminal-list">
+              {approvedTerminals.map(terminal => {
+                const isOnline = terminal.status === "online" && terminal.approved;
+                return <article className={selectedTerminalId === terminal.terminalId ? "managed-terminal-card selected" : "managed-terminal-card"} key={terminal.terminalId}>
+                  <div className="managed-terminal-main">
+                    <div className="managed-terminal-icon">iPad</div>
+                    <div className="managed-terminal-title">
+                      <div>
+                        <h4>{terminal.name}</h4>
+                        <span className="terminal-mono">{terminal.terminalId}</span>
+                      </div>
+                      <span className={isOnline ? "terminal-state-badge online" : "terminal-state-badge offline"}>
+                        {isOnline ? "接続中" : "見つかりません"}
+                      </span>
+                    </div>
+                    <div className="managed-terminal-meta">
+                      <div><span>端末種別</span><strong>{terminal.type}</strong></div>
+                      <div><span>受付状態</span><strong>{terminal.mode}</strong></div>
+                      <div><span>最終接続</span><strong>{terminal.lastSeen ? terminal.lastSeen : "未接続"}</strong></div>
+                    </div>
+                  </div>
+
+                  <div className="managed-terminal-footer">
+                    <div className="terminal-network">
+                      <span>通信速度</span>
+                      {terminal.networkMbps !== null ? (
+                        <strong>{terminal.networkMbps.toFixed(1)} Mbps</strong>
+                      ) : (
+                        <strong>—</strong>
+                      )}
+                      <div className="terminal-network-bars" aria-label="通信速度">
+                        {[1,2,3,4,5,6].map(level => <i key={level} className={terminal.networkMbps !== null && terminal.networkMbps >= level * 3 ? "active" : ""} />)}
+                      </div>
+                    </div>
+                    <div className="managed-terminal-actions">
+                      <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
+                    </div>
+                  </div>
+
+                  {selectedTerminalId === terminal.terminalId && (
+                    <div className="terminal-control-panel">
+                      <div className="terminal-control-heading">
+                        <div><small>REMOTE CONTROL</small><h4>{terminal.name}を操作</h4></div>
+                        {!isOnline && <span>端末が見つからないため操作できません</span>}
+                      </div>
+                      <div className="terminal-control-grid">
+                        <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "入口受付")}>入口受付</button>
+                        <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "出口受付")}>出口受付</button>
+                        <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, "停止")}>受付停止</button>
+                        <button disabled={!isOnline} onClick={() => setTerminalMode(terminal.terminalId, terminal.mode)}>現在状態を再適用</button>
+                      </div>
+                      <div className="terminal-control-note">※ リモート操作は端末が実際に接続されたときだけ有効になります。未接続時は誤操作を防ぐため無効化しています。</div>
+                    </div>
+                  )}
+                </article>;
+              })}
+            </div>
+          ) : (
+            <div className="terminal-empty-state">
+              <strong>登録済みの端末はありません</strong>
+              <span>承認した端末はここに表示されます。</span>
+            </div>
+          )}
         </section>
 
         {terminalNotice && <div className="notice success terminal-notice">{terminalNotice}</div>}
