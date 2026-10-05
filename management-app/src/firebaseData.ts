@@ -43,6 +43,15 @@ export async function saveAnalysis(record: AnalysisRecord): Promise<void> {
   await setDoc(doc(db, "events", record.eventId, "analysis", record.eventId), record, { merge: true });
 }
 
+export async function saveMember(eventId: string, member: MemberRecord): Promise<void> {
+  const db = getFirebaseDb();
+  await setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true });
+}
+export async function deleteMember(eventId: string, memberId: string): Promise<void> {
+  const db = getFirebaseDb();
+  const { deleteDoc } = await import("firebase/firestore");
+  await deleteDoc(doc(db, "events", eventId, "members", memberId));
+}
 export async function saveMembers(eventId: string, members: MemberRecord[]): Promise<void> {
   const db = getFirebaseDb();
   await Promise.all(members.map(member => setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true })));
@@ -53,6 +62,16 @@ export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
   await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
+export async function saveReceptionSettings(eventId: string, settings: ReceptionSettings): Promise<void> {
+  const db = getFirebaseDb();
+  await setDoc(doc(db, "events", eventId, "settings", "reception"), settings, { merge: true });
+}
+export async function loadAppSettings(deviceId: string): Promise<Record<string, unknown> | null> {
+  const db = getFirebaseDb();
+  const { getDoc } = await import("firebase/firestore");
+  const snapshot = await getDoc(doc(db, "devices", deviceId));
+  return snapshot.exists() ? snapshot.data() : null;
+}
 export async function saveAppSettings(deviceId: string, settings: Record<string, unknown>): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "devices", deviceId), { ...settings, updatedAt: new Date().toISOString() }, { merge: true });
@@ -72,6 +91,10 @@ export async function loadMembers(eventId: string): Promise<MemberRecord[]> {
   const db = getFirebaseDb();
   const snapshot = await getDocs(collection(db, "events", eventId, "members"));
   return snapshot.docs.map(item => item.data() as MemberRecord);
+}
+export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => void, onError: (error: unknown) => void): () => void {
+  const db = getFirebaseDb();
+  return onSnapshot(collection(db, "terminals"), snapshot => onChange(snapshot.docs.map(item => item.data() as TerminalRecord)), onError);
 }
 export async function loadTerminals(): Promise<TerminalRecord[]> {
   const db = getFirebaseDb();
