@@ -1164,6 +1164,48 @@ export default function App() {
     </>;
 
     if (page === "端末管理") {
+      const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+      if (!ownTerminal) {
+        return <div className="terminal-registration-screen">
+          <section className="terminal-registration-card">
+            <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
+            <h2>端末登録申請</h2>
+            <p>この端末を受付端末として使用するため、最初に登録申請を送信してください。</p>
+
+            <div className="terminal-registration-preview">
+              <div>
+                <span>端末種別</span>
+                <strong>Web / iPad</strong>
+              </div>
+              <div>
+                <span>端末ID</span>
+                <strong className="terminal-mono">{firebaseDeviceId}</strong>
+              </div>
+            </div>
+
+            <label className="terminal-registration-name">
+              <span>端末名</span>
+              <input
+                value={appSettings.deviceName}
+                onChange={e => updateOwnTerminalName(e.target.value)}
+                placeholder="例：入口受付 iPad"
+              />
+            </label>
+
+            <div className="terminal-registration-flow">
+              <div><b>1</b><span>端末情報を確認</span></div>
+              <div><b>2</b><span>登録申請を送信</span></div>
+              <div><b>3</b><span>管理者が承認</span></div>
+            </div>
+
+            <button className="primary-action terminal-registration-submit" onClick={registerOwnTerminal}>
+              この端末を登録申請
+            </button>
+            {terminalNotice && <div className="terminal-notice">{terminalNotice}</div>}
+          </section>
+        </div>;
+      }
+
       const onlineCount = terminals.filter(terminal => terminal.status === "online" && terminal.approved).length;
       const pendingTerminals = terminals.filter(terminal => !terminal.approved || terminal.status === "pending");
       const approvedTerminals = terminals.filter(terminal => terminal.approved && terminal.status !== "pending");
