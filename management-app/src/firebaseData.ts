@@ -6,6 +6,11 @@ export type MemberRecord = { memberId: string; memberNumber: number; name: strin
 export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; };
 export type AnalysisRecord = { eventId: string; eventName: string; eventDate: string; total: number; unused: number; inside: number; exited: number; savedAt: string; };
 
+export async function deleteEvent(eventId: string): Promise<void> {
+  const db = getFirebaseDb();
+  const { deleteDoc } = await import("firebase/firestore");
+  await deleteDoc(doc(db, "events", eventId));
+}
 export async function saveEvent(event: Event): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", event.eventId), { ...event, updatedAt: new Date().toISOString() }, { merge: true });
