@@ -861,22 +861,22 @@ export default function App() {
     );
   };
 
-  const resetOwnTerminalRegistration = async () => {
+  const resetOwnTerminalRegistration = () => {
     const oldDeviceId = firebaseDeviceId;
+    const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
+
+    // 画面側のリセットはFirebaseの応答を待たずに完了させる。
     setForceTerminalRegistration(true);
-    setTerminalNotice("登録申請をリセットしています…");
-    try {
-      await deleteTerminal(oldDeviceId);
-    } catch (reason) {
-      console.error("Terminal registration reset failed on Firebase", reason);
-    }
     setTerminals(current => current.filter(terminal => terminal.terminalId !== oldDeviceId));
     setSelectedTerminalId(null);
-    localStorage.removeItem("qr-ticket-device-id");
-    const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
     localStorage.setItem("qr-ticket-device-id", nextDeviceId);
     setFirebaseDeviceId(nextDeviceId);
-    setTerminalNotice("この端末の登録申請をリセットしました。新しい端末IDで再申請できます。");
+    setTerminalNotice("登録申請をリセットしました。新しい端末IDで再申請できます。");
+
+    // Firebase側の古い端末レコードは裏で削除する。
+    void deleteTerminal(oldDeviceId).catch(reason => {
+      console.error("Terminal registration cleanup failed on Firebase", reason);
+    });
   };
 
   const refreshTerminalState = () => {
