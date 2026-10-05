@@ -2075,7 +2075,7 @@ function NavIcon({type}:{type:string}){
           key={`print-${ticket.ticketId}`}
           style={{
             width: `${Math.max(20, Math.min(ticketPrintWidth, (190 - ticketGapMm * (ticketColumns - 1)) / ticketColumns)).toFixed(1)}mm`,
-            aspectRatio: ticketAspectRatio.replace(":", " / "),
+            aspectRatio: ticketEffectiveAspectRatio.replace(":", " / "),
           }}
         >
           <div
