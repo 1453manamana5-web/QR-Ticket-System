@@ -1,8 +1,9 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {countTickets,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
+import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadEventData} from "./eventDownloader";
+import {syncReceptionRecord,saveTerminalHeartbeat} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
@@ -62,6 +63,38 @@ export default function App(){
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
 
+  const syncPendingRecords=useCallback(async()=>{
+    if(!navigator.onLine)return;
+    try{
+      const items=await getPendingSyncItems();
+      for(const item of items){
+        try{
+          const record=await getReceptionRecord(item.recordId);
+          if(!record)continue;
+          const ticket=await getTicket(record.ticketId);
+          if(!ticket)continue;
+          await syncReceptionRecord(record,ticket);
+          await markSyncStatus(item.recordId,"synced",item.retryCount);
+        }catch(reason){
+          console.error("受付記録のFirebase同期に失敗しました",reason);
+          await markSyncStatus(item.recordId,"failed",item.retryCount+1).catch(()=>undefined);
+        }
+      }
+    }catch(reason){
+      console.error("同期キューの読み込みに失敗しました",reason);
+    }
+  },[]);
+
+  useEffect(()=>{
+    void syncPendingRecords();
+    const interval=window.setInterval(()=>void syncPendingRecords(),10000);
+    window.addEventListener("online",syncPendingRecords);
+    return()=>{
+      window.clearInterval(interval);
+      window.removeEventListener("online",syncPendingRecords);
+    };
+  },[syncPendingRecords]);
+
   useEffect(()=>{
     const update=()=>setOnline(navigator.onLine);
     window.addEventListener("online",update);
@@ -98,6 +131,14 @@ export default function App(){
       }
     })();
   },[]);
+
+  useEffect(()=>{
+    if(!localEvent?.dataReady)return;
+    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,mode).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
+    heartbeat();
+    const interval=window.setInterval(heartbeat,10000);
+    return()=>window.clearInterval(interval);
+  },[localEvent?.dataReady,localEvent?.terminalId,mode]);
 
   const handleAuthScan=useCallback((text:string)=>{
     const payload=parseAuthPayload(text);
@@ -214,6 +255,11 @@ export default function App(){
       };
 
       await saveReceptionTransaction(updatedTicket,record);
+      if(navigator.onLine){
+        void syncReceptionRecord(record,updatedTicket)
+          .then(()=>markSyncStatus(record.recordId,"synced",0))
+          .catch(reason=>console.error("受付記録の即時Firebase同期に失敗しました",reason));
+      }
       setResult({
         kind:"success",
         title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",
