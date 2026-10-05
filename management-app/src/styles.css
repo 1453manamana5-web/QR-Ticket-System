@@ -3170,6 +3170,22 @@ body:has(.ticket-screen),
 .managed-terminal-role-row{
   min-width:max-content;
 }
+.terminal-role-badge{
+  flex:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  padding:6px 9px;
+  font-size:10px;
+  font-weight:800;
+  white-space:nowrap;
+  background:#eef1f4;
+  color:#687383;
+}
+.terminal-role-badge.management{background:#e9eefb;color:#405a9b}
+.terminal-role-badge.reception{background:#e6f5ef;color:#287458}
+.terminal-role-badge.both{background:#f0e9fb;color:#68469a}
 .managed-terminal-title>div{min-width:0}
 .managed-terminal-title h4{
   margin:0 0 4px;
