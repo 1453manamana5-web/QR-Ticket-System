@@ -27,10 +27,10 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
   }, { merge: true });
 }
 
-export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止") => void, onError: (error: unknown) => void): () => void {
+export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
   return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
     const value = snapshot.data()?.desiredMode;
-    if (value === "入口受付" || value === "出口受付" || value === "停止") onMode(value);
+    if (value === "入口受付" || value === "出口受付" || value === "停止") { const updatedAt = snapshot.data()?.desiredModeUpdatedAt; onMode(value, typeof updatedAt === "string" ? updatedAt : null); }
   }, onError);
 }
