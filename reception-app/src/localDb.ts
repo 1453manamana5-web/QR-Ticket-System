@@ -232,6 +232,20 @@ export async function saveReceptionTransaction(
   database.close();
 }
 
+export async function getReceptionRecord(recordId: string): Promise<ReceptionRecord | null> {
+  const database = await openDatabase();
+  try {
+    const record = await new Promise<ReceptionRecord | undefined>((resolve, reject) => {
+      const request = database.transaction(STORES.receptionRecords, "readonly").objectStore(STORES.receptionRecords).get(recordId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error("受付記録を読み込めませんでした"));
+    });
+    return record ?? null;
+  } finally {
+    database.close();
+  }
+}
+
 export async function getPendingSyncItems(): Promise<SyncQueueItem[]> {
   const database = await openDatabase();
 
