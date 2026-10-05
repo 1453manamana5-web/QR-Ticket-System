@@ -616,16 +616,23 @@ export default function App() {
 
   const generateTickets = async () => {
     const count = Math.min(5000, Math.max(1, ticketCount));
-    const startNumber = Math.max(1, ticketStartNumber);
     const prefix = ticketPrefix.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "TKT";
     setTicketPrefix(prefix);
+
+    const existingMaxNumber = tickets.reduce((max, ticket) => {
+      const number = Number(ticket.basicInfo.ticketNumber);
+      return Number.isFinite(number) ? Math.max(max, number) : max;
+    }, 0);
+    const startNumber = Math.max(1, existingMaxNumber + 1);
     setTicketStartNumber(startNumber);
+
     const generated = createTickets(event.eventId, count, startNumber, prefix);
-    setTickets(generated);
+    const merged = [...tickets, ...generated];
+    setTickets(merged);
     setTicketStatusFilter("all");
     setError("");
     try {
-      await saveTickets(event.eventId, generated);
+      await saveTickets(event.eventId, merged);
     } catch (reason) {
       console.error(reason);
       setError("チケットをFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
@@ -1246,7 +1253,7 @@ export default function App() {
             <label>チケットタイトル<input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} /></label>
             <label>発行枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
-            <label>開始番号<input type="number" min="1" value={ticketStartNumber} onChange={e => setTicketStartNumber(Math.max(1, Number(e.target.value) || 1))} /></label>
+            <label>開始番号<input type="number" value={tickets.length ? Math.max(...tickets.map(ticket => Number(ticket.basicInfo.ticketNumber) || 0)) + 1 : 1} disabled /></label>
           </div>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
