@@ -9,6 +9,14 @@ export type AnalysisRecord = { eventId: string; eventName: string; eventDate: st
 export async function deleteEvent(eventId: string): Promise<void> {
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
+
+  // Firestoreでは親ドキュメントを削除してもサブコレクションは残るため、
+  // イベント配下の運用データもまとめて削除する。
+  const subcollections = ["tickets", "receptionRecords", "analysis", "members", "settings"] as const;
+  for (const subcollection of subcollections) {
+    const snapshot = await getDocs(collection(db, "events", eventId, subcollection));
+    await Promise.all(snapshot.docs.map(item => deleteDoc(item.ref)));
+  }
   await deleteDoc(doc(db, "events", eventId));
 }
 export async function saveEvent(event: Event): Promise<void> {
