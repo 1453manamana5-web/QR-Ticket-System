@@ -235,6 +235,7 @@ export default function App() {
     lastSeen: string | null;
     networkMbps: number | null;
     battery: number | null;
+    role?: "management" | "reception";
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -844,6 +845,7 @@ export default function App() {
       lastSeen: new Date().toISOString(),
       networkMbps: null,
       battery: null,
+      role: "management",
     };
     setTerminals(current => [...current, terminal]);
     void saveTerminal(terminal).catch(reason => console.error("Firebase terminal registration failed", reason));
@@ -1748,7 +1750,7 @@ function NavIcon({type}:{type:string}){
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1h-2.5V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1A1.7 1.7 0 0 0 8.1 15a1.7 1.7 0 0 0-1.6-1H6v-2.5h.5a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V5H15v.5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.5V14h-.5a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
 }
 
-  const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+  const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId && terminal.role !== "reception");
   if (!ownTerminal) {
     return <div className="terminal-registration-screen terminal-registration-fullscreen">
       <section className="terminal-registration-card">
@@ -1770,6 +1772,27 @@ function NavIcon({type}:{type:string}){
         </div>
         <button className="primary-action terminal-registration-submit" onClick={registerOwnTerminal}>この端末を登録申請</button>
         {terminalNotice && <div className="terminal-notice">{terminalNotice}</div>}
+      </section>
+    </div>;
+  }
+
+  if (!ownTerminal.approved || ownTerminal.status === "pending") {
+    return <div className="terminal-registration-screen terminal-registration-fullscreen">
+      <section className="terminal-registration-card">
+        <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
+        <h2>承認待ち</h2>
+        <p>端末登録申請を受け付けました。管理者の承認が完了するまで管理画面は利用できません。</p>
+        <div className="terminal-registration-preview">
+          <div><span>端末名</span><strong>{ownTerminal.name}</strong></div>
+          <div><span>端末ID</span><strong className="terminal-mono">{ownTerminal.terminalId}</strong></div>
+          <div><span>状態</span><strong>管理者の承認待ち</strong></div>
+        </div>
+        <div className="terminal-registration-flow">
+          <div><b>✓</b><span>端末情報を確認</span></div>
+          <div><b>✓</b><span>登録申請を送信</span></div>
+          <div><b>3</b><span>管理者が承認</span></div>
+        </div>
+        <p className="terminal-registration-waiting-note">承認されると、この画面が自動的に管理画面へ切り替わります。</p>
       </section>
     </div>;
   }
