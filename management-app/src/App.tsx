@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -240,7 +240,7 @@ export default function App() {
 
   const [terminals, setTerminals] = useState<ManagedTerminal[]>(() => {
     try {
-      const raw = localStorage.getItem("qr-ticket-managed-terminals");
+      const raw = localStorage.getItem("qr-ticket-managed-terminals-v2");
       if (!raw) return defaultTerminals;
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : defaultTerminals;
@@ -312,7 +312,11 @@ export default function App() {
   }, [event.eventId]);
 
   useEffect(() => {
-    localStorage.setItem("qr-ticket-managed-terminals", JSON.stringify(terminals));
+    void Promise.all(["TERM-0001", "TERM-0002"].map(id => deleteTerminal(id).catch(reason => console.error("Legacy terminal cleanup failed", reason))));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("qr-ticket-managed-terminals-v2", JSON.stringify(terminals));
   }, [terminals]);
 
   useEffect(() => {
