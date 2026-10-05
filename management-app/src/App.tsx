@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
+import { deleteTicket as deleteFirebaseTicket, saveTicket, saveTickets, subscribeEvents, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -269,10 +270,47 @@ export default function App() {
   });
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
+  const firebaseEventHydratedRef = useRef(false);
+  const firebaseTicketHydratedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory));
   }, [eventHistory]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeEvents(events => {
+        if (!events.length) {
+          if (!firebaseEventHydratedRef.current) {
+            firebaseEventHydratedRef.current = true;
+            void saveEventMetadata(baseEvent).catch(reason => console.error(reason));
+          }
+          return;
+        }
+        firebaseEventHydratedRef.current = true;
+        setEventHistory(events);
+        setEvent(current => events.find(item => item.eventId === current.eventId) ?? current);
+      }, reason => console.error("Firebase event subscription failed", reason));
+    } catch (reason) {
+      console.error("Firebase event subscription failed", reason);
+    }
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    firebaseTicketHydratedRef.current = false;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeTickets(event.eventId, remoteTickets => {
+        firebaseTicketHydratedRef.current = true;
+        setTickets(remoteTickets);
+      }, reason => console.error("Firebase ticket subscription failed", reason));
+    } catch (reason) {
+      console.error("Firebase ticket subscription failed", reason);
+    }
+    return () => unsubscribe?.();
+  }, [event.eventId]);
   useEffect(() => {
     localStorage.setItem("qr-ticket-managed-terminals", JSON.stringify(terminals));
   }, [terminals]);
@@ -472,36 +510,53 @@ export default function App() {
     selectHistoryEvent(remaining[0]);
   };
 
-  const generateTickets = () => {
+  const generateTickets = async () => {
     const count = Math.min(5000, Math.max(1, ticketCount));
     const startNumber = Math.max(1, ticketStartNumber);
     const prefix = ticketPrefix.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "TKT";
     setTicketPrefix(prefix);
     setTicketStartNumber(startNumber);
-    setTickets(createTickets(event.eventId, count, startNumber, prefix));
+    const generated = createTickets(event.eventId, count, startNumber, prefix);
+    setTickets(generated);
     setTicketStatusFilter("all");
     setError("");
+    try {
+      await saveTickets(event.eventId, generated);
+    } catch (reason) {
+      console.error(reason);
+      setError("チケットをFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+    }
   };
 
   const updateTicketStatus = (ticketId: string, status: Ticket["currentStatus"]) => {
-    setTickets(current => current.map(ticket =>
-      ticket.ticketId === ticketId
-        ? { ...ticket, currentStatus: status, updatedAt: new Date().toISOString() }
-        : ticket,
-    ));
+    const target = tickets.find(ticket => ticket.ticketId === ticketId);
+    if (!target) return;
+    const nextTicket = { ...target, currentStatus: status, updatedAt: new Date().toISOString() };
+    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
+    void saveTicket(event.eventId, nextTicket).catch(reason => {
+      console.error(reason);
+      setError("チケット状態をFirebaseへ保存できませんでした。");
+    });
   };
 
   const toggleTicketValidity = (ticketId: string) => {
-    setTickets(current => current.map(ticket =>
-      ticket.ticketId === ticketId
-        ? { ...ticket, valid: !ticket.valid, updatedAt: new Date().toISOString() }
-        : ticket,
-    ));
+    const target = tickets.find(ticket => ticket.ticketId === ticketId);
+    if (!target) return;
+    const nextTicket = { ...target, valid: !target.valid, updatedAt: new Date().toISOString() };
+    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
+    void saveTicket(event.eventId, nextTicket).catch(reason => {
+      console.error(reason);
+      setError("チケットの有効状態をFirebaseへ保存できませんでした。");
+    });
   };
 
   const deleteTicket = (ticketId: string) => {
     if (!window.confirm("このチケットを削除しますか？")) return;
     setTickets(current => current.filter(ticket => ticket.ticketId !== ticketId));
+    void deleteFirebaseTicket(event.eventId, ticketId).catch(reason => {
+      console.error(reason);
+      setError("チケットをFirebaseから削除できませんでした。");
+    });
   };
 
   const ticketPrintHeight = Number((ticketPrintWidth / (Number(ticketAspectRatio.split(":")[0]) / Number(ticketAspectRatio.split(":")[1]))).toFixed(1));
@@ -914,7 +969,7 @@ export default function App() {
           </div>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
-            <button className="ticket-modal-primary" onClick={() => { generateTickets(); setTicketCreateModalOpen(false); }}>QR・チケットを発行</button>
+            <button className="ticket-modal-primary" onClick={() => { void generateTickets(); setTicketCreateModalOpen(false); }}>QR・チケットを発行</button>
           </div>
         </div>
       </div>}
