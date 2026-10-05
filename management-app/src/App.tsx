@@ -270,6 +270,7 @@ export default function App() {
   });
   const firebaseEventHydratedRef = useRef(false);
   const firebaseTicketHydratedRef = useRef(false);
+  const deletedEventIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory));
@@ -279,7 +280,7 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeEvents(events => {
-        const realEvents = events.filter(item => item.eventId);
+        const realEvents = events.filter(item => item.eventId && !deletedEventIdsRef.current.has(item.eventId));
         firebaseEventHydratedRef.current = true;
         setEventHistory(realEvents);
         setEvent(current => {
@@ -595,7 +596,7 @@ export default function App() {
     setError("");
   };
 
-  const deleteHistoryEvent = (eventId: string) => {
+  const deleteHistoryEvent = async (eventId: string) => {
     const target = eventHistory.find(item => item.eventId === eventId);
     if (!target) return;
     if (!window.confirm("「" + target.eventName + "」をイベント履歴から削除しますか？")) return;
@@ -606,12 +607,19 @@ export default function App() {
       return;
     }
 
-    setEventHistory(remaining);
-    selectHistoryEvent(remaining[0]);
-    void deleteFirebaseEvent(eventId).catch(reason => {
+    setError("");
+    deletedEventIdsRef.current.add(eventId);
+    try {
+      // Firebase側の削除完了を待ってから画面側も更新する。
+      // onSnapshotの古いスナップショットで削除済みイベントが一瞬復活するのを防ぐ。
+      await deleteFirebaseEvent(eventId);
+      setEventHistory(remaining);
+      selectHistoryEvent(remaining[0]);
+    } catch (reason) {
+      deletedEventIdsRef.current.delete(eventId);
       console.error(reason);
-      setError("イベントをFirebaseから削除できませんでした。");
-    });
+      setError("イベントをFirebaseから削除できませんでした。権限・接続を確認してください。");
+    }
   };
 
   const generateTickets = async () => {
