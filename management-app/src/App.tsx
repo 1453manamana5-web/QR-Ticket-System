@@ -863,6 +863,8 @@ export default function App() {
 
   const resetOwnTerminalRegistration = async () => {
     const oldDeviceId = firebaseDeviceId;
+    setForceTerminalRegistration(true);
+    setTerminalNotice("登録申請をリセットしています…");
     try {
       await deleteTerminal(oldDeviceId);
     } catch (reason) {
@@ -874,7 +876,6 @@ export default function App() {
     const nextDeviceId = `DEV-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
     localStorage.setItem("qr-ticket-device-id", nextDeviceId);
     setFirebaseDeviceId(nextDeviceId);
-    setForceTerminalRegistration(true);
     setTerminalNotice("この端末の登録申請をリセットしました。新しい端末IDで再申請できます。");
   };
 
