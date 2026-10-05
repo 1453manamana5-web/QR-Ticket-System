@@ -827,7 +827,7 @@ export default function App() {
       setTerminalNotice("端末が見つからないため、リモート操作を実行できません。");
       return;
     }
-    const updatedTerminal = { ...target, mode, desiredMode: mode };
+    const updatedTerminal = { ...target, mode, desiredMode: mode, desiredModeUpdatedAt: new Date().toISOString() };
     setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
     void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
