@@ -441,7 +441,28 @@ export default function App() {
       if (!next || next === event.eventStatus) return;
 
       const updated = { ...event, eventStatus: next };
-      if (next === "finished") saveAnalysisSnapshot(event);
+      if (next === "finished") {
+        saveAnalysisSnapshot(event);
+        const releaseTerminals = async () => {
+          const released = terminals.map(terminal => ({
+            ...terminal,
+            approved: false,
+            status: "pending" as TerminalStatus,
+            mode: "停止" as TerminalMode,
+            desiredMode: "停止" as TerminalMode,
+          }));
+          try {
+            await Promise.all(released.map(terminal => saveTerminal(terminal)));
+            setTerminals(released);
+            setSelectedTerminalId(null);
+            setTerminalNotice("イベント終了に伴い、すべての端末の認証を解除しました。");
+          } catch (reason) {
+            console.error("Terminal release after event finished failed", reason);
+            setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
+          }
+        };
+        void releaseTerminals();
+      }
       setEvent(updated);
       setEventHistory(current =>
         current.map(item => item.eventId === updated.eventId ? updated : item),
