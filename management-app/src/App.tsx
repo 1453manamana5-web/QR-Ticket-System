@@ -905,9 +905,46 @@ export default function App() {
   const registerOwnTerminal = async () => {
     try {
       const remoteTerminals = await loadTerminals();
-      setTerminals(remoteTerminals);
-
+      const legacyTerminalId = localStorage.getItem("qr-ticket-device-id");
       const existing = remoteTerminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+      const legacyExisting = legacyTerminalId && legacyTerminalId !== firebaseDeviceId
+        ? remoteTerminals.find(terminal => terminal.terminalId === legacyTerminalId)
+        : undefined;
+
+      // 旧管理アプリと受付アプリで別IDになっていた端末を、現在の共通IDへ統合する。
+      if (legacyExisting) {
+        const base = existing ?? legacyExisting;
+        const legacyHasReceptionRole = legacyExisting.role === "reception" || legacyExisting.role === "both";
+        const existingHasReceptionRole = existing?.role === "reception" || existing?.role === "both";
+        const mergedRole: ManagedTerminal["role"] =
+          legacyHasReceptionRole || existingHasReceptionRole ? "both" : "management";
+        const merged: ManagedTerminal = {
+          ...base,
+          terminalId: firebaseDeviceId,
+          name: appSettings.deviceName || existing?.name || legacyExisting.name || "管理端末",
+          role: mergedRole,
+          approved: Boolean(existing?.approved || legacyExisting.approved),
+          status: existing?.status ?? legacyExisting.status ?? "pending",
+          lastSeen: new Date().toISOString(),
+          networkMbps: existing?.networkMbps ?? legacyExisting.networkMbps ?? null,
+          battery: existing?.battery ?? legacyExisting.battery ?? null,
+        };
+
+        await saveTerminal(merged);
+        await deleteTerminal(legacyTerminalId);
+        localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
+        localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
+
+        const mergedTerminals = remoteTerminals
+          .filter(terminal => terminal.terminalId !== legacyTerminalId && terminal.terminalId !== firebaseDeviceId)
+          .concat(merged);
+        setTerminals(mergedTerminals);
+        setForceTerminalRegistration(false);
+        setSelectedTerminalId(firebaseDeviceId);
+        setTerminalNotice("旧管理・受付の重複登録を統合し、この端末を1つの共通アカウントにしました。");
+        return;
+      }
+
       if (existing) {
         const isSharedTerminal = existing.role === "reception" || existing.role === "both";
         const updatedExisting: ManagedTerminal = {
@@ -917,6 +954,7 @@ export default function App() {
           lastSeen: new Date().toISOString(),
         };
         await saveTerminal(updatedExisting);
+        localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
         setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? updatedExisting : terminal));
         setForceTerminalRegistration(false);
         setSelectedTerminalId(existing.terminalId);
@@ -944,6 +982,7 @@ export default function App() {
       };
 
       await saveTerminal(terminal);
+      localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
       setTerminals(current => [...current.filter(item => item.terminalId !== firebaseDeviceId), terminal]);
       setForceTerminalRegistration(false);
       setSelectedTerminalId(terminal.terminalId);
@@ -954,7 +993,7 @@ export default function App() {
       );
     } catch (reason) {
       console.error("Firebase terminal registration failed", reason);
-      setTerminalNotice("端末の登録申請に失敗しました。Firebaseへの接続を確認してください。");
+      setTerminalNotice("Firebaseへの接続を確認してください。");
     }
   };
 
