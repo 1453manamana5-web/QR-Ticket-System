@@ -3375,11 +3375,14 @@ body:has(.ticket-screen),
 .event-section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}
 .event-section-heading h3{margin:5px 0 0;font-size:19px}.event-section-heading>span{padding:6px 9px;border-radius:999px;background:#f1f4f7;color:#697383;font-size:10px;font-weight:800}
 .event-history-list{display:grid;gap:8px}.event-history-card{border-radius:15px}.event-history-main{padding:14px}.event-history-main b{font-size:14px}.event-history-main small{font-size:11px}.event-history-actions{padding:10px 14px}.event-history-actions>div{gap:6px}.event-history-actions .secondary,.event-history-actions .danger-action{padding:8px 10px;font-size:11px}
-.event-details-panel .event-form-grid{grid-template-columns:1fr 1fr;gap:12px}.event-save-button{margin-top:14px;width:100%}
+.event-details-panel .event-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.event-details-panel .event-form-grid label{display:grid;grid-template-rows:auto 52px;gap:8px}
+.event-details-panel .event-form-grid input{height:52px;padding:0 14px;border-radius:14px}
+.event-save-button{margin-top:14px;width:100%;box-sizing:border-box}
 .event-status-panel{padding-bottom:18px}.event-status-panel .status-stepper{margin-top:0}.event-status-panel .status-step{padding:12px}
 .event-auth-card{margin:0!important}
-@media(max-width:1100px){.event-management-grid{grid-template-columns:1fr}.event-current-info{grid-template-columns:1fr 1fr}}
-@media(max-width:600px){.event-management-hero{align-items:flex-start;flex-direction:column}.event-new-button{width:100%}.event-current-heading{flex-direction:column}.event-primary-actions{display:grid;grid-template-columns:1fr}.event-primary-actions button{width:100%}.event-current-info{grid-template-columns:1fr 1fr}.event-details-panel .event-form-grid{grid-template-columns:1fr}.event-status-panel .status-stepper{grid-template-columns:1fr}}
+@media(max-width:1250px){.event-management-grid{grid-template-columns:1fr}.event-details-panel .event-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-current-info{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.event-management-hero{align-items:flex-start;flex-direction:column}.event-new-button{width:100%}.event-current-heading{flex-direction:column}.event-primary-actions{display:grid;grid-template-columns:1fr}.event-primary-actions button{width:100%}.event-current-info{grid-template-columns:1fr 1fr}.event-details-panel .event-form-grid{grid-template-columns:1fr}.event-status-panel .status-stepper{grid-template-columns:1fr}}
 
 /* ===== Terminal registration first screen ===== */
 .terminal-registration-screen{
