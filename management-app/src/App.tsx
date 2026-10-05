@@ -1251,7 +1251,10 @@ export default function App() {
           <small>CREATE TICKETS</small><h2>チケットを新規発行</h2><p>番号とQRコードをまとめて生成します。</p>
           <div className="ticket-modal-grid">
             <label>チケットタイトル<input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} /></label>
-            <label>発行枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => setTicketCount(Math.min(5000, Math.max(1, Number(e.target.value) || 1)))} /></label>
+            <label>発行枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => {
+              const value = e.target.value;
+              setTicketCount(value === "" ? 0 : Math.min(5000, Math.max(0, Number(value) || 0)));
+            }} /></label>
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
             <label>開始番号<input type="number" value={tickets.length ? Math.max(...tickets.map(ticket => Number(ticket.basicInfo.ticketNumber) || 0)) + 1 : 1} disabled /></label>
           </div>
