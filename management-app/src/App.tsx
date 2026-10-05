@@ -135,11 +135,12 @@ export default function App() {
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
     try {
       const raw = localStorage.getItem("qr-ticket-event-history");
-      if (!raw) return [baseEvent];
+      if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : [baseEvent];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((item: Event) => item?.eventId !== "DEMO-2027");
     } catch {
-      return [baseEvent];
+      return [];
     }
   });
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState(baseEvent.eventId);
@@ -272,16 +273,13 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeEvents(events => {
-        if (!events.length) {
-          if (!firebaseEventHydratedRef.current) {
-            firebaseEventHydratedRef.current = true;
-            void saveEventMetadata(baseEvent).catch(reason => console.error(reason));
-          }
-          return;
-        }
+        const realEvents = events.filter(item => item.eventId !== "DEMO-2027");
         firebaseEventHydratedRef.current = true;
-        setEventHistory(events);
-        setEvent(current => events.find(item => item.eventId === current.eventId) ?? current);
+        setEventHistory(realEvents);
+        setEvent(current => {
+          if (realEvents.length === 0) return current;
+          return realEvents.find(item => item.eventId === current.eventId) ?? realEvents[0];
+        });
       }, reason => console.error("Firebase event subscription failed", reason));
     } catch (reason) {
       console.error("Firebase event subscription failed", reason);
@@ -315,7 +313,25 @@ export default function App() {
   }, [event.eventId]);
 
   useEffect(() => {
-    void Promise.all(["TERM-0001", "TERM-0002"].map(id => deleteTerminal(id).catch(reason => console.error("Legacy terminal cleanup failed", reason))));
+    // 開発用の仮イベントを本番データから除去し、今後も自動生成しない。
+    void deleteFirebaseEvent("DEMO-2027").catch(reason => {
+      console.error("Demo event cleanup failed", reason);
+    });
+    setEventHistory(current => current.filter(item => item.eventId !== "DEMO-2027"));
+    try {
+      const raw = localStorage.getItem("qr-ticket-event-history");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          localStorage.setItem(
+            "qr-ticket-event-history",
+            JSON.stringify(parsed.filter((item: Event) => item?.eventId !== "DEMO-2027")),
+          );
+        }
+      }
+    } catch (reason) {
+      console.error("Demo event local cleanup failed", reason);
+    }
   }, []);
 
   useEffect(() => {
