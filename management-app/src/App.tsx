@@ -671,7 +671,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const authQrValue = bundle ? JSON.stringify({
+  const eventDataQrValue = bundle ? JSON.stringify({
     type: "qr-ticket-event-auth",
     eventId: bundle.event.eventId,
     eventName: bundle.event.eventName,
@@ -1034,8 +1034,8 @@ export default function App() {
       {error && <div className="notice error">{error}</div>}
       {bundle && <div className="notice success">イベントデータはFirebaseへ公開済みです。受付端末は下のQRで認証できます。</div>}
       {bundle && <section className="auth-card event-auth-card">
-        <div><small>EVENT AUTHENTICATION</small><h2>受付端末用イベント認証QR</h2><p>受付アプリで読み取ると、チケット{bundle.tickets.length}枚を端末へ保存します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => window.print()}>認証QRを印刷</button></div>
-        <div className="qr-box"><QRCodeSVG value={authQrValue} size={220} includeMargin /></div>
+        <div><small>EVENT AUTHENTICATION</small><h2>イベントデータQR</h2><p>受付アプリで読み取ると、このイベントのデータを受付端末へ準備します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => window.print()}>イベントデータQRを印刷</button></div>
+        <div className="qr-box"><QRCodeSVG value={eventDataQrValue} size={220} includeMargin /></div>
       </section>}
     </section>;
 
