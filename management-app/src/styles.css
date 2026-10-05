@@ -3355,3 +3355,114 @@ body:has(.ticket-screen),
 .event-auth-card{margin:0!important}
 @media(max-width:900px){.event-management-grid{grid-template-columns:1fr}.event-current-info{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.event-management-hero{align-items:flex-start;flex-direction:column}.event-new-button{width:100%}.event-current-heading{flex-direction:column}.event-primary-actions{display:grid;grid-template-columns:1fr}.event-primary-actions button{width:100%}.event-current-info{grid-template-columns:1fr 1fr}.event-details-panel .event-form-grid{grid-template-columns:1fr}.event-status-panel .status-stepper{grid-template-columns:1fr}}
+
+/* ===== Terminal registration first screen ===== */
+.terminal-registration-screen{
+  min-height:calc(100vh - 150px);
+  display:grid;
+  place-items:center;
+  padding:20px;
+}
+.terminal-registration-card{
+  width:min(620px,100%);
+  box-sizing:border-box;
+  padding:34px;
+  border:1px solid #e1e6ec;
+  border-radius:24px;
+  background:#fff;
+  box-shadow:0 16px 42px rgb(23 32 51/.08);
+}
+.terminal-registration-badge{
+  color:#7a8494;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.16em;
+}
+.terminal-registration-card h2{
+  margin:9px 0 7px;
+  font-size:30px;
+  letter-spacing:-.03em;
+}
+.terminal-registration-card>p{
+  margin:0;
+  color:#788292;
+  font-size:13px;
+  line-height:1.7;
+}
+.terminal-registration-preview{
+  display:grid;
+  grid-template-columns:1fr 1.4fr;
+  gap:10px;
+  margin-top:24px;
+}
+.terminal-registration-preview>div{
+  min-width:0;
+  padding:14px;
+  border-radius:13px;
+  background:#f6f8fa;
+}
+.terminal-registration-preview span,.terminal-registration-name>span{
+  display:block;
+  color:#7d8794;
+  font-size:10px;
+  font-weight:800;
+}
+.terminal-registration-preview strong{
+  display:block;
+  margin-top:5px;
+  font-size:13px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.terminal-registration-name{
+  display:grid;
+  gap:7px;
+  margin-top:12px;
+}
+.terminal-registration-name input{
+  box-sizing:border-box;
+  width:100%;
+  padding:12px 13px;
+  border:1px solid #d7dee6;
+  border-radius:10px;
+  color:#172033;
+  background:#fff;
+  font:inherit;
+}
+.terminal-registration-flow{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin-top:18px;
+}
+.terminal-registration-flow>div{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:11px 10px;
+  border:1px solid #e4e8ed;
+  border-radius:11px;
+  color:#687383;
+  font-size:10px;
+  font-weight:800;
+}
+.terminal-registration-flow b{
+  display:grid;
+  place-items:center;
+  width:22px;
+  height:22px;
+  flex:none;
+  border-radius:50%;
+  background:#eef1f4;
+  color:#4f5a6a;
+}
+.terminal-registration-submit{
+  width:100%;
+  margin-top:18px;
+  min-height:46px;
+}
+@media(max-width:620px){
+  .terminal-registration-card{padding:24px}
+  .terminal-registration-preview,.terminal-registration-flow{grid-template-columns:1fr}
+}
