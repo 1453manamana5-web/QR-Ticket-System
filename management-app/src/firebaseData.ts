@@ -80,6 +80,16 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
+  const ownTerminalId =
+    typeof window !== "undefined"
+      ? localStorage.getItem("qr-ticket-terminal-id") ??
+        localStorage.getItem("qr-ticket-device-id")
+      : null;
+
+  if (ownTerminalId !== null && terminalId === ownTerminalId) {
+    throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
+  }
+
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
   await deleteDoc(doc(db, "terminals", terminalId));
