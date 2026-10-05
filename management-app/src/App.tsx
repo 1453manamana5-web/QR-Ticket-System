@@ -703,7 +703,7 @@ export default function App() {
     return {
       x: ((minX + maxX) / 2 / width) * 100,
       y: ((minY + maxY) / 2 / height) * 100,
-      size: (size / Math.max(width, height)) * 100,
+      size: (size / width) * 100,
     };
   };
 
