@@ -3468,3 +3468,13 @@ body:has(.ticket-screen),
 }
 
 .terminal-registration-fullscreen{position:fixed;inset:0;min-height:100vh;box-sizing:border-box;background:#f5f7f9;z-index:9999;}
+
+
+/* Terminal registration waiting screen */
+.terminal-registration-reset{
+  margin-top:12px;
+  color:#172033 !important;
+  pointer-events:auto !important;
+  position:relative;
+  z-index:2;
+}
