@@ -1748,6 +1748,32 @@ function NavIcon({type}:{type:string}){
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1h-2.5V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1A1.7 1.7 0 0 0 8.1 15a1.7 1.7 0 0 0-1.6-1H6v-2.5h.5a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V5H15v.5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.5V14h-.5a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
 }
 
+  const ownTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+  if (!ownTerminal) {
+    return <div className="terminal-registration-screen terminal-registration-fullscreen">
+      <section className="terminal-registration-card">
+        <div className="terminal-registration-badge">TERMINAL REGISTRATION</div>
+        <h2>端末登録申請</h2>
+        <p>この端末を受付端末として使用するため、最初に登録申請を送信してください。</p>
+        <div className="terminal-registration-preview">
+          <div><span>端末種別</span><strong>Web / iPad</strong></div>
+          <div><span>端末ID</span><strong className="terminal-mono">{firebaseDeviceId}</strong></div>
+        </div>
+        <label className="terminal-registration-name">
+          <span>端末名</span>
+          <input value={appSettings.deviceName} onChange={e => updateOwnTerminalName(e.target.value)} placeholder="例：入口受付 iPad" />
+        </label>
+        <div className="terminal-registration-flow">
+          <div><b>1</b><span>端末情報を確認</span></div>
+          <div><b>2</b><span>登録申請を送信</span></div>
+          <div><b>3</b><span>管理者が承認</span></div>
+        </div>
+        <button className="primary-action terminal-registration-submit" onClick={registerOwnTerminal}>この端末を登録申請</button>
+        {terminalNotice && <div className="terminal-notice">{terminalNotice}</div>}
+      </section>
+    </div>;
+  }
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand">
