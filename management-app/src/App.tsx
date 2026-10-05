@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
+import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, saveAnalysis, saveAppSettings, saveEvent, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "DEMO-2027",
@@ -152,6 +152,7 @@ export default function App() {
   const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [eventName, setEventName] = useState(baseEvent.eventName);
@@ -320,6 +321,18 @@ export default function App() {
     }
     return () => unsubscribe?.();
   }, [event.eventId]);
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeReceptionRecords(event.eventId, records => {
+        setReceptionRecords(records as ReceptionRecord[]);
+      }, reason => console.error("Firebase reception record subscription failed", reason));
+    } catch (reason) {
+      console.error("Firebase reception record subscription failed", reason);
+    }
+    return () => unsubscribe?.();
+  }, [event.eventId]);
+
   useEffect(() => {
     localStorage.setItem("qr-ticket-managed-terminals", JSON.stringify(terminals));
   }, [terminals]);
@@ -1504,9 +1517,27 @@ export default function App() {
             <div className="analysis-empty-chart">
               <div className="analysis-y-axis"><span>多</span><span>中</span><span>少</span></div>
               <div className="analysis-chart-area">
-                <div className="analysis-grid-line" /><div className="analysis-grid-line" /><div className="analysis-grid-line" />
-                <div className="analysis-empty-message"><strong>時間帯別データを待っています</strong><span>受付端末から入場記録が同期されると、来場者数の推移がここに表示されます。</span></div>
-                <div className="analysis-x-axis"><span>10:00</span><span>11:00</span><span>12:00</span><span>13:00</span><span>14:00</span><span>15:00</span><span>16:00</span></div>
+                {(() => {
+                  const startHour = Number(event.startTime.slice(0, 2));
+                  const endHour = Number(event.endTime.slice(0, 2));
+                  const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
+                  const counts = hours.map(hour => receptionRecords.filter(record => {
+                    if (record.type !== "entry") return false;
+                    return new Date(record.timestamp).getHours() === hour;
+                  }).length);
+                  const max = Math.max(1, ...counts);
+                  return <>
+                    <div className="analysis-y-axis"><span>{max}</span><span>{Math.ceil(max / 2)}</span><span>0</span></div>
+                    <div className="analysis-live-bars">
+                      {hours.map((hour, index) => (
+                        <div className="analysis-live-bar-column" key={hour}>
+                          <div className="analysis-live-bar-track"><div className="analysis-live-bar" style={{ height: `${(counts[index] / max) * 100}%` }} /></div>
+                          <span>{String(hour).padStart(2, "0")}:00</span><b>{counts[index]}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </>;
+                })()}
               </div>
             </div>
           </section>
