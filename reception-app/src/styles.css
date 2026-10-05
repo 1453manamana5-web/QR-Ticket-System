@@ -3023,3 +3023,201 @@ body {
 .reception-registration-page button.primary {
   color:#fff !important;
 }
+
+
+/* Event authentication landing: compact layout for iPad landscape. */
+.event-auth-page .entry-reception-main{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+}
+
+.event-auth-page .event-auth-waiting-panel{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+}
+
+.event-auth-page .event-auth-card{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+}
+
+.event-auth-page .event-auth-card .entry-scanner-card-header{
+  flex:0 0 auto;
+}
+
+.event-auth-page .event-auth-wrapper{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+}
+
+.event-auth-page .event-auth-viewport{
+  min-height:0 !important;
+  height:100% !important;
+  flex:1 1 auto;
+  overflow:auto !important;
+  display:flex !important;
+  align-items:center;
+  justify-content:center;
+  padding:clamp(18px,2.5vh,30px) clamp(20px,3vw,42px) !important;
+}
+
+.event-auth-page .event-auth-content{
+  width:min(100%,900px);
+  min-height:0;
+  gap:0;
+}
+
+.event-auth-page .event-auth-content .entry-result-icon{
+  width:clamp(54px,6vw,76px);
+  height:clamp(54px,6vw,76px);
+  margin:0 auto clamp(8px,1.2vh,14px);
+  font-size:clamp(38px,4.5vw,54px);
+}
+
+.event-auth-page .event-auth-content h2{
+  margin:0;
+  font-size:clamp(28px,3.4vw,48px);
+  line-height:1.12;
+}
+
+.event-auth-page .event-auth-content .entry-result-primary{
+  max-width:760px;
+  margin:clamp(8px,1.2vh,14px) auto 0;
+  font-size:clamp(15px,1.55vw,21px);
+  line-height:1.4;
+}
+
+.event-auth-page .event-auth-content .entry-result-secondary{
+  margin:clamp(5px,0.8vh,9px) auto 0;
+  font-size:clamp(12px,1.15vw,16px);
+  line-height:1.35;
+}
+
+.event-auth-actions{
+  display:flex;
+  align-items:stretch;
+  justify-content:center;
+  gap:12px;
+  width:min(100%,720px);
+  margin:clamp(14px,2vh,22px) auto 0;
+}
+
+.event-auth-actions .primary,
+.event-auth-actions .secondary{
+  flex:1 1 0;
+  min-width:0;
+  min-height:clamp(52px,6.5vh,68px) !important;
+  margin-top:0 !important;
+  padding:10px 16px;
+  font-size:clamp(15px,1.55vw,20px);
+  line-height:1.2;
+}
+
+.event-auth-page .reception-auth-code-form{
+  width:min(100%,720px);
+  margin:12px auto 0;
+  padding:12px 14px;
+  border:1px solid rgba(20,120,237,.14);
+  border-radius:16px;
+  background:rgba(255,255,255,.62);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  align-items:end;
+  text-align:left;
+}
+
+.event-auth-page .reception-auth-code-form label{
+  display:grid;
+  gap:5px;
+  min-width:0;
+}
+
+.event-auth-page .reception-auth-code-form label span{
+  font-size:11px;
+  font-weight:800;
+  color:#667085;
+}
+
+.event-auth-page .reception-auth-code-form input{
+  width:100%;
+  min-height:50px;
+  padding:10px 13px;
+  border:1px solid #d9dee7;
+  border-radius:12px;
+  background:#fff;
+  color:#172033;
+  font:inherit;
+  font-size:16px;
+}
+
+.event-auth-page .reception-auth-code-form .primary{
+  min-width:150px;
+  min-height:50px !important;
+  margin:0 !important;
+  padding:10px 16px;
+  font-size:15px;
+}
+
+@media (max-width:760px), (orientation:portrait){
+  .event-auth-page .event-auth-viewport{
+    align-items:flex-start;
+    overflow:auto !important;
+  }
+
+  .event-auth-actions{
+    flex-direction:column;
+    width:100%;
+  }
+
+  .event-auth-actions .primary,
+  .event-auth-actions .secondary{
+    width:100%;
+  }
+
+  .event-auth-page .reception-auth-code-form{
+    grid-template-columns:1fr;
+  }
+
+  .event-auth-page .reception-auth-code-form .primary{
+    width:100%;
+  }
+}
+
+@media (orientation:landscape) and (max-height:760px){
+  .event-auth-page{
+    padding-top:14px;
+    padding-bottom:14px;
+  }
+
+  .event-auth-page .entry-reception-header h1{
+    font-size:clamp(25px,3vw,34px);
+  }
+
+  .event-auth-page .event-auth-content .entry-result-icon{
+    width:48px;
+    height:48px;
+    font-size:32px;
+    margin-bottom:6px;
+  }
+
+  .event-auth-page .event-auth-content h2{
+    font-size:clamp(25px,3vw,38px);
+  }
+
+  .event-auth-page .event-auth-content .entry-result-primary{
+    margin-top:6px;
+    font-size:15px;
+  }
+
+  .event-auth-page .event-auth-actions{
+    margin-top:10px;
+  }
+}
