@@ -153,11 +153,11 @@ export default function App(){
     }catch(reason){
       console.error("端末リモート操作の購読に失敗しました",reason);
     }
-    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,screen==="ready"?"stopped":mode).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
+    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen==="ready"?"stopped":mode).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
     heartbeat();
     const interval=window.setInterval(heartbeat,10000);
     return()=>{unsubscribe?.();window.clearInterval(interval);};
-  },[localEvent?.dataReady,localEvent?.terminalId,mode,screen]);
+  },[localEvent?.dataReady,localEvent?.terminalId,mode,remoteStopped,screen]);
 
   const handleAuthScan=useCallback((text:string)=>{
     const payload=parseAuthPayload(text);
