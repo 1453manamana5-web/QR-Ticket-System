@@ -832,16 +832,18 @@ export default function App() {
   const registerOwnTerminal = () => {
     const existing = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
     if (existing) {
-      setTerminalNotice("この端末はすでに登録申請されています。");
+      setTerminalNotice(existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。");
       return;
     }
+    const managementTerminals = terminals.filter(terminal => terminal.role !== "reception");
+    const isFirstManagementTerminal = managementTerminals.length === 0;
     const terminal: ManagedTerminal = {
       terminalId: firebaseDeviceId,
-      name: appSettings.deviceName || "受付端末",
+      name: appSettings.deviceName || "管理端末",
       type: "Web / iPad",
       mode: "停止",
-      status: "pending",
-      approved: false,
+      status: isFirstManagementTerminal ? "online" : "pending",
+      approved: isFirstManagementTerminal,
       lastSeen: new Date().toISOString(),
       networkMbps: null,
       battery: null,
@@ -850,7 +852,11 @@ export default function App() {
     setTerminals(current => [...current, terminal]);
     void saveTerminal(terminal).catch(reason => console.error("Firebase terminal registration failed", reason));
     setSelectedTerminalId(terminal.terminalId);
-    setTerminalNotice("この端末の登録申請を送信しました。管理者の承認を待ってください。");
+    setTerminalNotice(
+      isFirstManagementTerminal
+        ? "最初の管理端末として自動承認されました。"
+        : "この端末の登録申請を送信しました。管理者の承認を待ってください。"
+    );
   };
 
   const refreshTerminalState = () => {
