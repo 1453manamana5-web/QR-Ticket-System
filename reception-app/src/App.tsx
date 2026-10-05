@@ -3,7 +3,7 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadEventData} from "./eventDownloader";
-import {getTerminalRegistration,registerReceptionTerminal,saveTerminalHeartbeat,subscribeTerminalControl,syncReceptionRecord} from "./receptionSync";
+import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
@@ -160,6 +160,18 @@ export default function App(){
     const interval=window.setInterval(heartbeat,10000);
     return()=>{unsubscribe?.();window.clearInterval(interval);};
   },[localEvent?.dataReady,localEvent?.terminalId,mode,remoteStopped,screen]);
+
+  const resetTerminalRegistration = async () => {
+    try {
+      await resetReceptionTerminalRegistration();
+      setTerminalRegistration(null);
+      setScreen("registration");
+      setError("");
+    } catch (reason) {
+      console.error("受付端末の登録申請リセットに失敗しました", reason);
+      setError("登録申請をリセットできませんでした。");
+    }
+  };
 
   const handleAuthScan=useCallback((text:string)=>{
     const payload=parseAuthPayload(text);
@@ -355,7 +367,7 @@ export default function App(){
         </> : <>
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
-          <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
+          <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>\n          <button type="button" className="secondary" onClick={()=>void resetTerminalRegistration()}>申請をリセット</button>
         </>}
         {error&&<p className="entry-result-secondary">{error}</p>}
       </section>
