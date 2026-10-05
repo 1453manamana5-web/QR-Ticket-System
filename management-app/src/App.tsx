@@ -960,7 +960,12 @@ export default function App() {
     }
 
     const target = terminals.find(terminal => terminal.terminalId === terminalId);
-    if (!target || !window.confirm(`「${target.name}」を端末一覧から削除しますか？`)) return;
+    if (!target) return;
+    if (target.admin) {
+      setTerminalNotice("管理者端末は削除できません。");
+      return;
+    }
+    if (!window.confirm(`「${target.name}」を端末一覧から削除しますか？`)) return;
 
     setTerminals(current => current.filter(terminal => terminal.terminalId !== terminalId));
     if (selectedTerminalId === terminalId) setSelectedTerminalId(null);
@@ -1512,7 +1517,7 @@ export default function App() {
                     </div>
                     <div className="managed-terminal-actions">
                       <button className="primary-action" onClick={() => approveTerminal(terminal.terminalId)}>承認する</button>
-                      {terminal.terminalId !== firebaseDeviceId && (
+                      {terminal.terminalId !== firebaseDeviceId && !terminal.admin && (
                         <button className="danger-action" onClick={() => void deleteManagedTerminal(terminal.terminalId)}>削除</button>
                       )}
                     </div>
