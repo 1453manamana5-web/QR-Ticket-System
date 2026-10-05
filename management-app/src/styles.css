@@ -3572,3 +3572,12 @@ body:has(.ticket-screen),
     height:16px !important;
   }
 }
+
+
+/* Management terminals do not expose remote reception controls. */
+.managed-terminal-card:has(.terminal-role-badge.management) .managed-terminal-actions .primary-action{
+  display:none !important;
+}
+.managed-terminal-card:has(.terminal-role-badge.management) .terminal-control-panel{
+  display:none !important;
+}
