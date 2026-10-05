@@ -241,6 +241,8 @@ export default function App() {
     role?: "management" | "reception" | "both";
     admin?: boolean;
     subAdmin?: boolean;
+    managementApproved?: boolean;
+    receptionApproved?: boolean;
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -445,13 +447,18 @@ export default function App() {
         saveAnalysisSnapshot(event);
         const releaseTerminals = async () => {
           const released = terminals.map(terminal => {
-            // イベント終了時に解除するのは受付機能を持つ端末だけ。
-            // 管理専用端末（管理者・副管理者を含む）は認証状態を維持する。
+            // イベント終了時は受付機能だけを解除する。
+            // 管理者・副管理者を含め、管理機能の認証は維持する。
             if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
+            const managementApproved = terminal.role === "both"
+              ? Boolean(terminal.managementApproved ?? terminal.approved)
+              : false;
             return {
               ...terminal,
-              approved: false,
-              status: "pending" as TerminalStatus,
+              approved: managementApproved,
+              managementApproved,
+              receptionApproved: false,
+              status: managementApproved ? ("offline" as TerminalStatus) : ("pending" as TerminalStatus),
               mode: "停止" as TerminalMode,
               desiredMode: "停止" as TerminalMode,
             };
@@ -460,7 +467,7 @@ export default function App() {
             await Promise.all(released.map(terminal => saveTerminal(terminal)));
             setTerminals(released);
             setSelectedTerminalId(null);
-            setTerminalNotice("イベント終了に伴い、受付端末の認証を解除しました。");
+            setTerminalNotice("イベント終了に伴い、受付機能の認証だけを解除しました。");
           } catch (reason) {
             console.error("Terminal release after event finished failed", reason);
             setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
@@ -958,6 +965,7 @@ export default function App() {
       const updatedTerminal = {
         ...target,
         approved: true,
+        managementApproved: true,
         status: "offline" as TerminalStatus,
       };
       await saveTerminal(updatedTerminal);
@@ -1055,7 +1063,9 @@ export default function App() {
           name: appSettings.deviceName || existing?.name || legacyExisting.name || "管理端末",
           role: mergedRole,
           admin: Boolean(existing?.admin || legacyExisting.admin || (!remoteTerminals.some(terminal => terminal.admin === true))),
-          approved: Boolean(existing?.approved || legacyExisting.approved),
+          approved: Boolean(existing?.managementApproved ?? existing?.approved ?? legacyExisting.managementApproved ?? legacyExisting.approved),
+          managementApproved: Boolean(existing?.managementApproved ?? existing?.approved ?? legacyExisting.managementApproved ?? legacyExisting.approved),
+          receptionApproved: Boolean(existing?.receptionApproved ?? legacyExisting.receptionApproved ?? (legacyHasReceptionRole || existingHasReceptionRole ? (existing?.approved ?? legacyExisting.approved) : false)),
           status: existing?.status ?? legacyExisting.status ?? "pending",
           lastSeen: new Date().toISOString(),
           networkMbps: existing?.networkMbps ?? legacyExisting.networkMbps ?? null,
@@ -1085,6 +1095,8 @@ export default function App() {
           name: appSettings.deviceName || existing.name || "管理端末",
           role: isSharedTerminal ? "both" : (existing.role ?? "management"),
           admin: Boolean(existing.admin || (!hasAdmin && (existing.role === "management" || existing.role === "both"))),
+          managementApproved: Boolean(existing.managementApproved ?? existing.approved),
+          receptionApproved: Boolean(existing.receptionApproved ?? ((existing.role === "reception" || existing.role === "both") ? existing.approved : false)),
           lastSeen: new Date().toISOString(),
         };
         await saveTerminal(updatedExisting);
@@ -1109,6 +1121,8 @@ export default function App() {
         mode: "停止",
         status: isFirstManagementTerminal ? "online" : "pending",
         approved: isFirstManagementTerminal,
+        managementApproved: isFirstManagementTerminal,
+        receptionApproved: false,
         lastSeen: new Date().toISOString(),
         networkMbps: null,
         battery: null,
