@@ -454,14 +454,23 @@ export default function App(){
 
   if(screen==="test")return <div className={`entry-reception-page ticket-success reception-mode-${mode}`}>
     <main className="entry-reception-main">
-      <section className="entry-result-panel entry-ticket-result">
-        <div className="entry-result-icon">✓</div>
-        <span className="entry-result-eyebrow">ENTRY ACCEPTED</span>
-        <h2>受付完了</h2>
-        <p className="entry-result-primary">{mode==="entry"?"入場を確認しました":"退場を確認しました"}</p>
-        <p className="entry-result-number">TEST-0001</p>
-        <p className="entry-result-secondary">{mode==="entry"?"入場を確認しました":"退場を確認しました"}</p>
-        <button type="button" className="secondary" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
+      <section className={mode==="entry" ? "entry-result-panel entry-ticket-result" : "exit-result-panel exit-ticket-result"} role="status" aria-live="polite">
+        <div className={mode==="entry" ? "entry-result-icon entry-ticket-success-icon" : "exit-result-icon exit-ticket-success-icon"} aria-hidden="true">
+          <svg viewBox="0 0 120 120" focusable="false">
+            <circle className={mode==="entry" ? "entry-ticket-success-circle" : "exit-ticket-success-circle"} cx="60" cy="60" r="48"/>
+            <path className={mode==="entry" ? "entry-ticket-success-check" : "exit-ticket-success-check"} d="M35 61.5 52 78 86 42"/>
+          </svg>
+        </div>
+        <span className={mode==="entry" ? "entry-result-eyebrow" : "exit-result-eyebrow"}>{mode==="entry" ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}</span>
+        <h2 className={mode==="entry" ? "entry-ticket-success-title" : "exit-ticket-success-title"}>{mode==="entry" ? "入場OK" : "退出OK"}</h2>
+        {mode==="entry" ? <p className="entry-ticket-success-message">入場を確認しました</p> : <p className="exit-thank-you-message">御来場いただきありがとうございました</p>}
+        <p className={mode==="entry" ? "entry-result-number" : "exit-result-number"}><span>TICKET</span>TEST-0001</p>
+        {mode==="exit" && <p className="exit-result-secondary">退場を確認しました</p>}
+        <div className={mode==="entry" ? "entry-result-return" : "exit-result-return"} aria-hidden="true">
+          <span>次の読み取り画面へ戻ります</span>
+          <div className={mode==="entry" ? "entry-result-return-track" : "exit-result-return-track"}><span/></div>
+        </div>
+        <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
       </section>
     </main>
   </div>;
@@ -583,7 +592,7 @@ export default function App(){
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="primary" onClick={()=>{void unlockSuccessSound();setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
-                <button type="button" className="secondary" onClick={()=>{speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setResult({kind:"success",title:mode==="entry"?"入場を確認しました":"退場を確認しました",detail:"TEST-0001"});}}>受付結果を試験表示</button>
+                <button type="button" className="secondary" onClick={()=>{speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>
           </div>
