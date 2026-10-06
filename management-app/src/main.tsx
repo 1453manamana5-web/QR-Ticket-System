@@ -1,6 +1,7 @@
 import ReactDOM from "react-dom/client";
 
 import AppRoot from "./App";
+import "./styles.css";
 import "./legacy-ticket-design-overrides.css";
 
 const installAutomaticAppUpdate = () => {
