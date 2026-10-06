@@ -6,7 +6,7 @@ import {downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
-type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception";
+type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
 type Result={kind:"success"|"error";title:string;detail:string};
 
 function parseAuthPayload(text:string):EventAuthPayload|null{
@@ -431,7 +431,7 @@ export default function App(){
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
                   <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
-                  <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
+                  <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>\n                  <button type="button" className="secondary" onClick={()=>{setError("");setScreen("test");}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
                   <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
@@ -442,6 +442,20 @@ export default function App(){
           </div>
         </div>
         {error&&<div className="entry-auth-error">{error}</div>}
+      </section>
+    </main>
+  </div>;
+
+  if(screen==="test")return <div className={`entry-reception-page ticket-success reception-mode-${mode}`}>
+    <main className="entry-reception-main">
+      <section className="entry-result-panel entry-ticket-result">
+        <div className="entry-result-icon">✓</div>
+        <span className="entry-result-eyebrow">ENTRY ACCEPTED</span>
+        <h2>受付完了</h2>
+        <p className="entry-result-primary">{mode==="entry"?"入場を確認しました":"退場を確認しました"}</p>
+        <p className="entry-result-number">TEST-0001</p>
+        <p className="entry-result-secondary">{mode==="entry"?"入場を確認しました":"退場を確認しました"}</p>
+        <button type="button" className="secondary" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
       </section>
     </main>
   </div>;
