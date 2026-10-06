@@ -2,6 +2,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -162,6 +163,8 @@ function TicketDesigner({
     foundInitialIndex >= 0
       ? foundInitialIndex
       : 0;
+
+  const detectionId = useRef(0);
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
