@@ -989,10 +989,13 @@ export default function App() {
         return;
       }
 
+      const isReceptionRequest = target.role === "reception" || target.role === "both";
+      const isManagementRequest = target.role === "management" || target.role === "both";
       const updatedTerminal = {
         ...target,
         approved: true,
-        managementApproved: true,
+        managementApproved: isManagementRequest ? true : target.managementApproved === true,
+        receptionApproved: isReceptionRequest ? true : target.receptionApproved === true,
         status: "offline" as TerminalStatus,
       };
       await saveTerminal(updatedTerminal);
