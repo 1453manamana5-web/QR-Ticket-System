@@ -35,7 +35,11 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
   // 受付を使うたびに、現在の端末状態に関係なく新しい承認申請として扱う。
   // 同じ端末・同じFirebaseアカウントでも、受付権限を自動で引き継がない。
   const receptionApproved = false;
-  const status = "pending" as const;
+  // 受付の承認待ち状態は管理端末側の承認状態と分離する。
+  // 同じ端末が「管理＋受付」の両方を持つ場合、受付申請だけで管理画面を承認待ちにしない。
+  const status = data.managementApproved === true
+    ? (data.status === "online" || data.status === "offline" ? data.status : "offline")
+    : ("pending" as const);
 
   await setDoc(reference, {
     terminalId,
