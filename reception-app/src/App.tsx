@@ -563,6 +563,7 @@ export default function App(){
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+                <button type="button" className="secondary" onClick={()=>setResult({kind:"success",title:mode==="entry"?"入場を確認しました": "退場を確認しました",detail:"TEST-0001"})}>受付結果を試験表示</button>
               </div>
             </div>
           </div>
