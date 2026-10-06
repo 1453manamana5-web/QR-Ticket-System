@@ -5,7 +5,8 @@ import {
   useState,
 } from "react";
 
-import LazyQrCode from "./LazyQrCode";\nimport { analyzeTicketBackgroundFromDataUrl } from "./pinkQrMarkerDetection";
+import LazyQrCode from "./LazyQrCode";
+import { analyzeTicketBackgroundFromDataUrl } from "./pinkQrMarkerDetection";
 
 import "./TicketDesigner.css";
 
