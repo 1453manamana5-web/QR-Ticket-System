@@ -32,19 +32,19 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     ? data.role
     : "reception";
   const role = existingRole === "management" || existingRole === "both" ? "both" : "reception";
-  const receptionApproved = data.receptionApproved ?? (data.role === "reception" || data.role === "both" ? data.approved === true : false);
-  const status = data.status === "online" || data.status === "offline" || data.status === "pending"
-    ? data.status
-    : "pending";
+  // 受付を使うたびに、現在の端末状態に関係なく新しい承認申請として扱う。
+  // 同じ端末・同じFirebaseアカウントでも、受付権限を自動で引き継がない。
+  const receptionApproved = false;
+  const status = "pending" as const;
 
   await setDoc(reference, {
     terminalId,
     name: name.trim() || (typeof data.name === "string" ? data.name : "受付端末"),
     type: data.type === "Web / PC" ? "Web / PC" : "Web / iPad",
     role,
-    mode: data.mode === "入口受付" || data.mode === "出口受付" || data.mode === "停止" ? data.mode : "停止",
+    mode: "停止" as const,
     status,
-    approved: data.managementApproved === true || receptionApproved,
+    approved: data.managementApproved === true,
     managementApproved: data.managementApproved === true,
     receptionApproved,
     lastSeen: new Date().toISOString(),
