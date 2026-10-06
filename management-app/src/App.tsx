@@ -924,6 +924,29 @@ export default function App() {
 
   const updateOwnTerminalName = (name: string) => {
     updateAppSetting("deviceName", name);
+
+    const currentTerminal = terminals.find(terminal =>
+      terminal.terminalId === firebaseDeviceId &&
+      (terminal.role === "management" || terminal.role === "both")
+    );
+    if (!currentTerminal) return;
+
+    const normalizedName = name.trim() || "管理端末";
+    const updatedTerminal: ManagedTerminal = {
+      ...currentTerminal,
+      name: normalizedName,
+      lastSeen: new Date().toISOString(),
+    };
+
+    setTerminals(current =>
+      current.map(terminal =>
+        terminal.terminalId === firebaseDeviceId ? updatedTerminal : terminal
+      )
+    );
+    void saveTerminal(updatedTerminal).catch(reason => {
+      console.error("Firebase terminal name update failed", reason);
+      setTerminalNotice("端末名をFirebaseへ保存できませんでした。");
+    });
   };
 
   const approveTerminal = async (terminalId: string) => {
