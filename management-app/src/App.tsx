@@ -1318,6 +1318,7 @@ export default function App() {
           </div>
         </div>
       </div>}
+      </div>
     </>;
 
     if (page === "端末管理") {
