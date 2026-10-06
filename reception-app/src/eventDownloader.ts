@@ -1,4 +1,4 @@
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -10,6 +10,40 @@ type EventBundle = {
   authToken: string;
   publishedAt: string;
 };
+
+
+export async function downloadCurrentFirebaseEventData(
+  terminalId: string,
+): Promise<{ localEvent: LocalEventData; tickets: Ticket[] } | null> {
+  const db = getFirebaseDb();
+  const snapshot = await getDocs(collection(db, "events"));
+  const candidates = snapshot.docs
+    .map(item => item.data() as Event & { authToken?: unknown; updatedAt?: unknown })
+    .filter(item =>
+      (item.eventStatus === "active" || item.eventStatus === "ready") &&
+      typeof item.eventId === "string" &&
+      typeof item.authToken === "string" &&
+      item.authToken.length > 0
+    )
+    .sort((a, b) => {
+      const aTime = typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) : 0;
+      const bTime = typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) : 0;
+      return bTime - aTime;
+    });
+
+  const current = candidates[0];
+  if (!current || typeof current.authToken !== "string") return null;
+
+  const payload: EventAuthPayload = {
+    type: "qr-ticket-event-auth",
+    eventId: current.eventId,
+    eventName: current.eventName,
+    dataVersion: current.dataVersion,
+    authToken: current.authToken,
+  };
+
+  return downloadEventData(payload, terminalId);
+}
 
 export async function getEventAuthPayloadByToken(token: string): Promise<EventAuthPayload | null> {
   const normalizedToken = token.trim();
