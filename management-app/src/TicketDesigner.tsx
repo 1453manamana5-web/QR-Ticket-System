@@ -593,7 +593,7 @@ function TicketDesigner({
                     }}
                   >
                     <LazyQrCode
-                      value={createTicketQrValue(
+                      value={qrValue(
                         previewTicket
                       )}
                       size={500}
