@@ -1,6 +1,6 @@
 import ReactDOM from "react-dom/client";
 
-import AppRoot from "./AppRoot";
+import AppRoot from "./App";
 import {
   installIntentionalReceptionStopGuard,
 } from "./receptionIntentionalStopGuard";
@@ -78,12 +78,8 @@ try {
 }
 
 const installPrintSupport = () => {
-  void import(
-    "./manualPrintSupport"
-  )
-    .then(({
-      installManualPrintSupport,
-    }) => {
+  void import("./manualPrintSupport")
+    .then(({ installManualPrintSupport }) => {
       installManualPrintSupport();
     })
     .catch((error) => {
@@ -100,9 +96,7 @@ window.setTimeout(
 );
 
 const rootElement =
-  document.getElementById(
-    "root"
-  );
+  document.getElementById("root");
 
 if (rootElement === null) {
   throw new Error(
@@ -110,8 +104,6 @@ if (rootElement === null) {
   );
 }
 
-ReactDOM.createRoot(
-  rootElement
-).render(
+ReactDOM.createRoot(rootElement).render(
   <AppRoot />
 );
