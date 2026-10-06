@@ -77,7 +77,15 @@ export default function App(){
     const applyRegistration=(value:{approved:boolean;status:"online"|"offline"|"pending";name:string}|null)=>{
       setTerminalRegistration(value);
       if(value?.name) setTerminalRegistrationName(value.name);
-      if(value?.approved && screen==="registration") setScreen("auth");
+      if(value?.approved){
+        if(screen==="registration") setScreen("auth");
+      }else{
+        // Firebase側で受付承認が外れた場合は、以前のローカルイベントを使って受付画面へ進ませない。
+        setAuthPayload(null);
+        setLocalEvent(null);
+        setResult(null);
+        setScreen("registration");
+      }
     };
     void getTerminalRegistration().then(applyRegistration).catch(reason=>console.error("受付端末登録状態の取得に失敗しました",reason));
     try{
@@ -160,6 +168,7 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
+    if(!terminalRegistration?.approved)return;
     void (async()=>{
       try{
         const saved=await loadLocalEvent();
