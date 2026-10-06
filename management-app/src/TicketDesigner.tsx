@@ -102,6 +102,7 @@ function TicketDesigner({ tickets, eventName, initialTicketNumber, qrValue, onCl
     return printable.slice(s, e + 1);
   }, [printable, startIndex, endIndex]);
   const preview = selected[0] ?? printable[0] ?? null;
+  const previewTicket = preview ?? printable[0];
 
   const handleBackground = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -209,7 +210,7 @@ function TicketDesigner({ tickets, eventName, initialTicketNumber, qrValue, onCl
               <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                 <LazyQrCode value={preview ? qrValue(preview) : ""} size={500} level="M" marginSize={1} />
               </div>
-              {settings.showTicketNumber && <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{preview.qrNumber}</div>}
+              {settings.showTicketNumber && <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{previewTicket?.qrNumber}</div>}
             </div>
           </div>
           <section className="ticket-print-range"><h3>印刷する範囲</h3><div className="ticket-range-inputs">
