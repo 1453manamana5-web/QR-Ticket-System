@@ -1,10 +1,6 @@
 import ReactDOM from "react-dom/client";
 
 import AppRoot from "./App";
-import {
-  startOfflineDataPreparation,
-} from "./services/offlineDataPreparationStartup";
-
 import "./index.css";
 import "./moved-data-controls.css";
 import "./legacy-ticket-design-overrides.css";
@@ -51,15 +47,6 @@ const installAutomaticAppUpdate = () => {
 };
 
 installAutomaticAppUpdate();
-try {
-  startOfflineDataPreparation();
-} catch (error) {
-  console.warn(
-    "オフラインデータ準備の起動に失敗しました。",
-    error
-  );
-}
-
 const installPrintSupport = () => {
   void import("./manualPrintSupport")
     .then(({ installManualPrintSupport }) => {
