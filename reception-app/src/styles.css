@@ -3297,3 +3297,25 @@ body {
 @media (prefers-reduced-motion:reduce){
   .entry-ticket-result,.exit-ticket-result{animation-duration:1ms;animation-delay:0ms}
 }
+
+
+/* Exit result base: the old app used a separate ExitPage stylesheet. */
+.exit-result-panel{
+  display:flex;justify-content:center;align-items:center;flex-direction:column;
+  width:min(100%,850px);min-height:0;align-self:center;
+  padding:clamp(25px,4vh,48px) clamp(28px,4vw,55px);
+  border:1px solid rgba(255,255,255,.55);border-radius:clamp(28px,3.5vw,46px);
+  background:rgba(255,255,255,.82);
+  box-shadow:0 24px 60px rgba(36,49,70,.18);
+  text-align:center;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+}
+.exit-result-icon{
+  display:grid;width:clamp(92px,10vw,145px);height:clamp(92px,10vw,145px);
+  place-items:center;border-radius:50%;color:#fff;font-size:clamp(58px,6.5vw,93px);
+  font-weight:800;line-height:1;box-shadow:0 18px 38px rgba(27,45,62,.2);
+}
+.exit-result-eyebrow{margin-top:clamp(15px,2vh,22px);color:#707b8f;font-size:clamp(11px,1.1vw,15px);font-weight:850;letter-spacing:.17em;}
+.exit-result-panel h2{margin:clamp(7px,1vh,12px) 0 0;color:#111827;font-size:clamp(46px,6vw,82px);font-weight:850;line-height:1.02;letter-spacing:-.055em;}
+.exit-result-primary{margin:clamp(13px,2vh,21px) 0 0;color:#078da0;font-size:clamp(37px,5vw,70px);font-weight:850;line-height:1.06;letter-spacing:-.04em;}
+.exit-result-number{margin:clamp(13px,1.8vh,20px) 0 0;padding:7px 14px;border-radius:999px;background:rgba(17,24,39,.06);color:#5f6a7d;font-size:clamp(15px,1.6vw,22px);font-weight:750;}
+.exit-result-secondary{margin:clamp(9px,1.2vh,14px) 0 0;color:#687386;font-size:clamp(16px,1.8vw,25px);font-weight:650;}
