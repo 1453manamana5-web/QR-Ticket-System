@@ -1,0 +1,25 @@
+
+/* Old QR-Management-System ticket rendering compatibility */
+.ticket-design-ticket-preview > img {
+  object-fit: contain !important;
+}
+.ticket-design-qr-preview {
+  padding: 0.8% !important;
+  background: #fff !important;
+}
+.ticket-design-print-canvas {
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+}
+.ticket-design-print-qr {
+  padding: 0.8% !important;
+  box-sizing: border-box !important;
+  background: #fff !important;
+  aspect-ratio: 1 / 1;
+}
+.ticket-design-print-qr svg {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+}
