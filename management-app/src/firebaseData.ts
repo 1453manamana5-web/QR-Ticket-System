@@ -106,6 +106,93 @@ export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
   await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
+
+let managementNetworkSpeedCache: number | null = null;
+let managementNetworkSpeedMeasuredAt = 0;
+const MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
+const MANAGEMENT_NETWORK_PROBE_SIZE_BYTES = 32768;
+
+function getManagementBrowserDownlink(): number | null {
+  if (typeof navigator === "undefined") return null;
+  const connection = (navigator as Navigator & {
+    connection?: { downlink?: number };
+    mozConnection?: { downlink?: number };
+    webkitConnection?: { downlink?: number };
+  }).connection
+    ?? (navigator as Navigator & { mozConnection?: { downlink?: number } }).mozConnection
+    ?? (navigator as Navigator & { webkitConnection?: { downlink?: number } }).webkitConnection;
+  const downlink = connection?.downlink;
+  return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
+}
+
+function createManagementNetworkProbe(): string {
+  return "0123456789abcdef".repeat(MANAGEMENT_NETWORK_PROBE_SIZE_BYTES / 16);
+}
+
+async function measureManagementNetworkSpeed(
+  reference: ReturnType<typeof doc>,
+): Promise<number | null> {
+  const now = Date.now();
+  if (now - managementNetworkSpeedMeasuredAt < MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS) {
+    return managementNetworkSpeedCache;
+  }
+
+  const browserDownlink = getManagementBrowserDownlink();
+  if (browserDownlink !== null) {
+    managementNetworkSpeedCache = browserDownlink;
+    managementNetworkSpeedMeasuredAt = now;
+    return browserDownlink;
+  }
+
+  try {
+    const probe = createManagementNetworkProbe();
+    const startedAt = performance.now();
+    await setDoc(reference, {
+      networkProbe: probe,
+      networkProbeAt: new Date().toISOString(),
+    }, { merge: true });
+    const { getDocFromServer } = await import("firebase/firestore");
+    await getDocFromServer(reference);
+    const elapsedMs = Math.max(1, performance.now() - startedAt);
+    const roundTripBytes = probe.length * 2;
+    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
+    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
+    managementNetworkSpeedCache = normalized;
+    managementNetworkSpeedMeasuredAt = Date.now();
+    return normalized;
+  } catch (reason) {
+    console.warn("管理端末の通信速度測定に失敗しました", reason);
+    return managementNetworkSpeedCache;
+  }
+}
+
+export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
+  const db = getFirebaseDb();
+  const reference = doc(db, "terminals", terminalId);
+  const existing = await getDocs(collection(db, "terminals")).then(snapshot =>
+    snapshot.docs.find(item => item.id === terminalId)?.data() ?? {}
+  );
+  const networkMbps = await measureManagementNetworkSpeed(reference);
+
+  await setDoc(reference, {
+    terminalId,
+    name: typeof existing.name === "string" ? existing.name : "管理端末",
+    type: existing.type === "Web / PC" ? "Web / PC" : "Web / iPad",
+    role: existing.role === "both" || existing.role === "reception" ? existing.role : "management",
+    mode: existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止",
+    status: "online",
+    approved: existing.managementApproved === true || existing.approved === true,
+    managementApproved: existing.managementApproved === true || existing.approved === true,
+    receptionApproved: existing.receptionApproved === true,
+    lastSeen: new Date().toISOString(),
+    networkMbps: networkMbps ?? (typeof existing.networkMbps === "number" ? existing.networkMbps : null),
+    battery: typeof existing.battery === "number" ? existing.battery : null,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+
+  return networkMbps;
+}
+
 export async function saveReceptionSettings(eventId: string, settings: ReceptionSettings): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "settings", "reception"), settings, { merge: true });
