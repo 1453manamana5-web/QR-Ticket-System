@@ -1441,7 +1441,7 @@ export default function App() {
       }
 
       const onlineCount = terminals.filter(terminal => terminal.status === "online" && terminal.approved).length;
-      const pendingTerminals = terminals.filter(terminal => !terminal.approved || terminal.status === "pending");
+      const pendingTerminals = terminals.filter(terminal => !terminal.approved || terminal.status === "pending" || ((terminal.role === "reception" || terminal.role === "both") && terminal.receptionApproved !== true));
       const approvedTerminals = terminals.filter(terminal => terminal.approved && terminal.status !== "pending");
       const pendingCount = pendingTerminals.length;
       const notFoundCount = approvedTerminals.filter(terminal => terminal.status !== "online").length;
