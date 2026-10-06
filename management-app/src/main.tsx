@@ -2,9 +2,6 @@ import ReactDOM from "react-dom/client";
 
 import AppRoot from "./App";
 import {
-  installIntentionalReceptionStopGuard,
-} from "./receptionIntentionalStopGuard";
-import {
   startOfflineReceptionSync,
 } from "./offlineReceptionSync";
 import {
@@ -57,8 +54,6 @@ const installAutomaticAppUpdate = () => {
 };
 
 installAutomaticAppUpdate();
-installIntentionalReceptionStopGuard();
-
 try {
   startOfflineReceptionSync();
 } catch (error) {
