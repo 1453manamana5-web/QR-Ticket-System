@@ -2,9 +2,6 @@ import ReactDOM from "react-dom/client";
 
 import AppRoot from "./App";
 import {
-  startOfflineReceptionSync,
-} from "./offlineReceptionSync";
-import {
   startOfflineDataPreparation,
 } from "./services/offlineDataPreparationStartup";
 
@@ -54,15 +51,6 @@ const installAutomaticAppUpdate = () => {
 };
 
 installAutomaticAppUpdate();
-try {
-  startOfflineReceptionSync();
-} catch (error) {
-  console.warn(
-    "オフライン受付同期の起動に失敗しました。",
-    error
-  );
-}
-
 try {
   startOfflineDataPreparation();
 } catch (error) {
