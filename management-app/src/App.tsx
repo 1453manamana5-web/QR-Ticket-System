@@ -922,6 +922,35 @@ export default function App() {
     );
   }, [members, memberQuery]);
 
+  const releaseOwnReception = async () => {
+    const currentTerminal = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (!currentTerminal || currentTerminal.terminalId !== firebaseDeviceId) return;
+    if (currentTerminal.role !== "reception" && currentTerminal.role !== "both") return;
+
+    const updatedTerminal: ManagedTerminal = {
+      ...currentTerminal,
+      role: "management",
+      mode: "停止",
+      receptionApproved: false,
+      lastSeen: new Date().toISOString(),
+    };
+
+    setTerminals(current =>
+      current.map(terminal =>
+        terminal.terminalId === firebaseDeviceId ? updatedTerminal : terminal
+      )
+    );
+
+    try {
+      await saveTerminal(updatedTerminal);
+      setSelectedTerminalId(null);
+      setTerminalNotice("この端末の受付を解除しました。");
+    } catch (reason) {
+      console.error("受付解除に失敗しました", reason);
+      setTerminalNotice("受付解除を保存できませんでした。");
+    }
+  };
+
   const updateOwnTerminalName = (name: string) => {
     updateAppSetting("deviceName", name);
 
@@ -1555,6 +1584,9 @@ export default function App() {
                     <div className="managed-terminal-actions">
                       {(terminal.role === "reception" || terminal.role === "both") && canManageTerminals && (
                         <button className="secondary" onClick={() => setSelectedTerminalId(selectedTerminalId === terminal.terminalId ? null : terminal.terminalId)}>操作パネル</button>
+                      )}
+                      {terminal.terminalId === firebaseDeviceId && (terminal.role === "reception" || terminal.role === "both") && (
+                        <button className="danger-action" onClick={() => void releaseOwnReception()}>受付を解除</button>
                       )}
                       {canManageTerminals && ownTerminal?.admin && terminal.terminalId !== firebaseDeviceId && !terminal.admin && (
                         <button className={terminal.subAdmin ? "secondary sub-admin-action" : "secondary"} onClick={() => void setSubAdmin(terminal.terminalId, !terminal.subAdmin)}>
