@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -151,7 +151,6 @@ async function measureManagementNetworkSpeed(
       networkProbe: probe,
       networkProbeAt: new Date().toISOString(),
     }, { merge: true });
-    const { getDocFromServer } = await import("firebase/firestore");
     await getDocFromServer(reference);
     const elapsedMs = Math.max(1, performance.now() - startedAt);
     const roundTripBytes = probe.length * 2;
@@ -169,9 +168,8 @@ async function measureManagementNetworkSpeed(
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
   const db = getFirebaseDb();
   const reference = doc(db, "terminals", terminalId);
-  const existing = await getDocs(collection(db, "terminals")).then(snapshot =>
-    snapshot.docs.find(item => item.id === terminalId)?.data() ?? {}
-  );
+  const existingSnapshot = await getDoc(reference);
+  const existing = existingSnapshot.exists() ? existingSnapshot.data() : {};
   const networkMbps = await measureManagementNetworkSpeed(reference);
 
   await setDoc(reference, {
