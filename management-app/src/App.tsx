@@ -165,20 +165,6 @@ export default function App() {
   const [ticketPrefix, setTicketPrefix] = useState("TKT");
   const [ticketStartNumber, setTicketStartNumber] = useState(1);
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
-  const [ticketDesignImage, setTicketDesignImage] = useState("");
-  const [ticketAspectRatio, setTicketAspectRatio] = useState("16:9");
-  const [ticketImageAspectRatio, setTicketImageAspectRatio] = useState("");
-  const [ticketAutoSize, setTicketAutoSize] = useState(true);
-  const [ticketPrintWidth, setTicketPrintWidth] = useState(90);
-  const [ticketQrX, setTicketQrX] = useState(76);
-  const [ticketQrY, setTicketQrY] = useState(50);
-  const [ticketQrSize, setTicketQrSize] = useState(29);
-  const [ticketNumberEnabled, setTicketNumberEnabled] = useState(true);
-  const [ticketNumberX, setTicketNumberX] = useState(31);
-  const [ticketNumberY, setTicketNumberY] = useState(72);
-  const [ticketNumberSize, setTicketNumberSize] = useState(18);
-  const [ticketColumns, setTicketColumns] = useState(2);
-  const [ticketGapMm, setTicketGapMm] = useState(4);
   const [savedEventName, setSavedEventName] = useState("");
   const [settings, setSettings] = useState<ReceptionSettings>({
     entryEnabled: true,
@@ -755,83 +741,6 @@ export default function App() {
     });
   };
 
-  const ticketEffectiveAspectRatio = ticketAutoSize && ticketImageAspectRatio ? ticketImageAspectRatio : ticketAspectRatio;
-  const ticketEffectiveRatioParts = ticketEffectiveAspectRatio.split(":").map(Number);
-  const ticketEffectiveRatio = ticketEffectiveRatioParts[0] > 0 && ticketEffectiveRatioParts[1] > 0
-    ? ticketEffectiveRatioParts[0] / ticketEffectiveRatioParts[1]
-    : 16 / 9;
-  const ticketPrintHeight = Number((ticketPrintWidth / ticketEffectiveRatio).toFixed(1));
-
-  const detectPinkQrMarker = (image: HTMLImageElement) => {
-    const maxSide = 360;
-    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return null;
-    context.drawImage(image, 0, 0, width, height);
-    const pixels = context.getImageData(0, 0, width, height).data;
-    let minX = width, minY = height, maxX = -1, maxY = -1, count = 0;
-    for (let y = 0; y < height; y += 2) {
-      for (let x = 0; x < width; x += 2) {
-        const index = (y * width + x) * 4;
-        const r = pixels[index], g = pixels[index + 1], b = pixels[index + 2], a = pixels[index + 3];
-        if (a > 160 && r > 200 && b > 135 && g < 150 && r - g > 70 && b - g > 45) {
-          minX = Math.min(minX, x); minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-          count++;
-        }
-      }
-    }
-    if (count < 20 || maxX < minX || maxY < minY) return null;
-    const markerWidth = maxX - minX + 1;
-    const markerHeight = maxY - minY + 1;
-    const markerRatio = markerWidth / markerHeight;
-    if (markerRatio < 0.65 || markerRatio > 1.5) return null;
-
-    // QRの位置とサイズは、CSSの絶対配置と同じ「画像幅・画像高さ」を基準にする。
-    // size を短辺基準にすると、16:9など横長画像ではQRだけ過大になるため、
-    // 実際のQR幅に合わせて画像幅基準で百分率へ変換する。
-    return {
-      x: ((minX + maxX) / 2 / width) * 100,
-      y: ((minY + maxY) / 2 / height) * 100,
-      size: (markerWidth / width) * 100,
-    };
-  };
-
-  const handleTicketDesignChange = (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("チケットデザインには画像ファイルを選択してください。");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      setTicketDesignImage(result);
-      const image = new Image();
-      image.onload = () => {
-        const imageRatio = image.naturalWidth / image.naturalHeight;
-        setTicketImageAspectRatio(image.naturalWidth + ":" + image.naturalHeight);
-        if (ticketAutoSize) {
-          setTicketAspectRatio(imageRatio >= 1.75 ? "16:9" : imageRatio >= 1.58 ? "3:2" : imageRatio >= 1.16 ? "4:3" : "1:1");
-        }
-        const marker = detectPinkQrMarker(image);
-        if (marker) {
-          setTicketQrX(Number(marker.x.toFixed(2)));
-          setTicketQrY(Number(marker.y.toFixed(2)));
-          setTicketQrSize(Number(marker.size.toFixed(2)));
-        }
-      };
-      image.src = result;
-    };
-    reader.onerror = () => setError("チケットデザイン画像を読み込めませんでした。");
-    reader.readAsDataURL(file);
-  };
-
   const eventDataQrValue = bundle ? JSON.stringify({
     type: "qr-ticket-event-auth",
     eventId: bundle.event.eventId,
@@ -1322,22 +1231,7 @@ export default function App() {
           </section>
         </main>
 
-        {tickets.length > 0 && <div className="ticket-print-area">
-          {tickets.map(ticket => (
-            <article className="print-ticket" key={`print-${ticket.ticketId}`}>
-              {ticketDesignImage && <img className="print-ticket-design" src={ticketDesignImage} alt="" />}
-              <div className="print-ticket-header"><strong>{event.eventName}</strong><span>{ticketTitle}</span></div>
-              <div className="print-ticket-content">
-                <div className="print-ticket-number"><small>TICKET NO.</small><b>{String(ticket.basicInfo.ticketNumber).padStart(6, "0")}</b><span>{ticket.ticketId}</span></div>
-                <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} size={118} includeMargin />
-              </div>
-              <div className="print-ticket-footer">このQRは入場・退場認証に使用します</div>
-            </article>
-          ))}
-        </div>}
-      </div>
-
-      {ticketListOpen && <div className="ticket-list-overlay" onMouseDown={() => setTicketListOpen(false)}>
+        {ticketListOpen && <div className="ticket-list-overlay" onMouseDown={() => setTicketListOpen(false)}>
         <section className="ticket-list-fullscreen" onMouseDown={e => e.stopPropagation()}>
           <header className="ticket-list-fullscreen-header">
             <div><div className="ticket-home-label">ALL TICKETS</div><h2>チケット一覧</h2></div>
