@@ -5,7 +5,7 @@ import {
   useState,
 } from "react";
 
-import LazyQrCode from "./LazyQrCode";
+import LazyQrCode from "./LazyQrCode";\nimport { analyzeTicketBackgroundFromDataUrl } from "./pinkQrMarkerDetection";
 
 import "./TicketDesigner.css";
 
@@ -381,8 +381,9 @@ function TicketDesigner({
 
     const reader =
       new FileReader();
+    const id = ++detectionId.current;
 
-    reader.onload = () => {
+    reader.onload = async () => {
       if (
         typeof reader.result !==
         "string"
@@ -390,10 +391,84 @@ function TicketDesigner({
         return;
       }
 
+      const image = reader.result;
+
       updateSetting(
         "backgroundImage",
-        reader.result
+        image
       );
+
+      try {
+        const analysis =
+          await analyzeTicketBackgroundFromDataUrl(
+            image
+          );
+
+        if (detectionId.current !== id) {
+          return;
+        }
+
+        const marker = analysis.marker;
+
+        if (marker === null) {
+          setSettings(
+            currentSettings => ({
+              ...currentSettings,
+              backgroundImage: image,
+              cardRatio:
+                analysis.ratio.cardRatio,
+            })
+          );
+          return;
+        }
+
+        const round = (value: number) =>
+          Math.round(value * 10) / 10;
+        const clamp = (
+          value: number,
+          minimum: number,
+          maximum: number
+        ) =>
+          Math.min(
+            maximum,
+            Math.max(minimum, value)
+          );
+
+        setSettings(
+          currentSettings => ({
+            ...currentSettings,
+            backgroundImage: image,
+            cardRatio:
+              analysis.ratio.cardRatio,
+            qrX: round(
+              clamp(
+                marker.centerXPercent,
+                5,
+                95
+              )
+            ),
+            qrY: round(
+              clamp(
+                marker.centerYPercent,
+                5,
+                95
+              )
+            ),
+            qrSize: round(
+              clamp(
+                marker.sizePercent,
+                12,
+                55
+              )
+            ),
+          })
+        );
+      } catch (error) {
+        console.warn(
+          "チケット背景画像の自動解析に失敗しました。",
+          error
+        );
+      }
     };
 
     reader.onerror = () => {
@@ -445,6 +520,7 @@ function TicketDesigner({
     setSettings({
       ...defaultSettings,
     });
+    ++detectionId.current;
 
     try {
       localStorage.removeItem(
