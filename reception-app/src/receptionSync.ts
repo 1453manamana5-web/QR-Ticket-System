@@ -145,7 +145,7 @@ async function measureNetworkSpeed(
   }
 }
 
-export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<void> {
+export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
   const db = getFirebaseDb();
   const pendingCount = typeof syncPendingCount === "number"
     ? syncPendingCount
@@ -171,6 +171,7 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     battery: typeof data.battery === "number" ? data.battery : null,
     updatedAt: new Date().toISOString(),
   }, { merge: true });
+  return networkMbps;
 }
 
 export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
