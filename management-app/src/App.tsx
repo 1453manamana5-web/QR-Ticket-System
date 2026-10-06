@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "",
@@ -396,6 +396,27 @@ export default function App() {
 
     return () => unsubscribe?.();
   }, []);
+
+  const ownManagementTerminalApproved = terminals.some(
+    terminal =>
+      terminal.terminalId === firebaseDeviceId &&
+      (terminal.role === "management" || terminal.role === "both") &&
+      terminal.approved,
+  );
+
+  useEffect(() => {
+    if (!terminalDataHydrated || !ownManagementTerminalApproved) return;
+
+    const heartbeat = () => {
+      void saveManagementTerminalHeartbeat(firebaseDeviceId).catch(reason => {
+        console.error("管理端末ハートビートに失敗しました", reason);
+      });
+    };
+
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 10000);
+    return () => window.clearInterval(interval);
+  }, [terminalDataHydrated, firebaseDeviceId, ownManagementTerminalApproved]);
 
 
   const saveAnalysisSnapshot = (targetEvent: Event = event) => {
