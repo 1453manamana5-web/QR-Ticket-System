@@ -3319,3 +3319,6 @@ body {
 .exit-result-primary{margin:clamp(13px,2vh,21px) 0 0;color:#078da0;font-size:clamp(37px,5vw,70px);font-weight:850;line-height:1.06;letter-spacing:-.04em;}
 .exit-result-number{margin:clamp(13px,1.8vh,20px) 0 0;padding:7px 14px;border-radius:999px;background:rgba(17,24,39,.06);color:#5f6a7d;font-size:clamp(15px,1.6vw,22px);font-weight:750;}
 .exit-result-secondary{margin:clamp(9px,1.2vh,14px) 0 0;color:#687386;font-size:clamp(16px,1.8vw,25px);font-weight:650;}
+
+
+.entry-network-speed{font-size:0.82rem;font-weight:700;white-space:nowrap;opacity:.9;}
