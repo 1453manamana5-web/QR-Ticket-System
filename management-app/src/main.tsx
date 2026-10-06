@@ -1,8 +1,6 @@
 import ReactDOM from "react-dom/client";
 
 import AppRoot from "./App";
-import "./index.css";
-import "./moved-data-controls.css";
 import "./legacy-ticket-design-overrides.css";
 
 const installAutomaticAppUpdate = () => {
@@ -47,24 +45,6 @@ const installAutomaticAppUpdate = () => {
 };
 
 installAutomaticAppUpdate();
-const installPrintSupport = () => {
-  void import("./manualPrintSupport")
-    .then(({ installManualPrintSupport }) => {
-      installManualPrintSupport();
-    })
-    .catch((error) => {
-      console.warn(
-        "印刷サポートを読み込めませんでした。",
-        error
-      );
-    });
-};
-
-window.setTimeout(
-  installPrintSupport,
-  1000
-);
-
 const rootElement =
   document.getElementById("root");
 
