@@ -2023,45 +2023,6 @@ function NavIcon({type}:{type:string}){
       {pageContent()}
     </main>
 
-    {tickets.length > 0 && <div
-      className="ticket-print-area ticket-design-print-area"
-      style={{
-        gridTemplateColumns: `repeat(${ticketColumns}, ${Math.max(20, Math.min(ticketPrintWidth, (190 - ticketGapMm * (ticketColumns - 1)) / ticketColumns)).toFixed(1)}mm)`,
-        gap: `${ticketGapMm}mm`,
-      }}
-    >
-      {tickets.map(ticket => (
-        <article
-          className="print-ticket ticket-design-print-ticket"
-          key={`print-${ticket.ticketId}`}
-          style={{
-            width: `${Math.max(20, Math.min(ticketPrintWidth, (190 - ticketGapMm * (ticketColumns - 1)) / ticketColumns)).toFixed(1)}mm`,
-            aspectRatio: ticketEffectiveAspectRatio.replace(":", " / "),
-          }}
-        >
-          <div
-            className="ticket-design-print-canvas"
-            style={{
-              backgroundImage: ticketDesignImage ? `url("${ticketDesignImage}")` : "none",
-              backgroundColor: ticketDesignImage ? "transparent" : "#ffffff",
-            }}
-          >
-            <div
-              className="ticket-design-print-qr"
-              style={{
-                left: `${ticketQrX}%`,
-                top: `${ticketQrY}%`,
-                width: `${ticketQrSize}%`,
-                aspectRatio: "1 / 1",
-              }}
-            >
-              <QRCodeSVG value={ticketQrValue(event.eventId, ticket)} width="100%" height="100%" includeMargin={false} bgColor="#ffffff" />
-            </div>
-          </div>
-        </article>
-      ))}
-    </div>}
-
     {newEventModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={closeNewEventModal}>
       <div className="new-event-modal" role="dialog" aria-modal="true" aria-labelledby="new-event-title" onMouseDown={e => e.stopPropagation()}>
         <div className="new-event-modal-header">
