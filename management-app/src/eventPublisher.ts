@@ -43,6 +43,7 @@ export async function publishEventBundle(
 
   await setDoc(doc(db, "events", event.eventId), {
     ...event,
+    authToken,
     updatedAt: bundle.publishedAt,
   });
 
