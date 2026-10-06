@@ -101,7 +101,7 @@ function TicketDesigner({ tickets, eventName, initialTicketNumber, qrValue, onCl
     const e = Math.min(Math.max(endIndex, s), printable.length - 1);
     return printable.slice(s, e + 1);
   }, [printable, startIndex, endIndex]);
-  const preview = selected[0] ?? printable[0];
+  const preview = selected[0] ?? printable[0] ?? null;
 
   const handleBackground = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -207,7 +207,7 @@ function TicketDesigner({ tickets, eventName, initialTicketNumber, qrValue, onCl
             <div className="ticket-design-card" style={{ aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : undefined }}>
               {!settings.backgroundImage && <div className="ticket-no-background">背景画像を選択してください</div>}
               <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
-                <LazyQrCode value={qrValue(preview)} size={500} level="M" marginSize={1} />
+                <LazyQrCode value={preview ? qrValue(preview) : ""} size={500} level="M" marginSize={1} />
               </div>
               {settings.showTicketNumber && <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{preview.qrNumber}</div>}
             </div>
