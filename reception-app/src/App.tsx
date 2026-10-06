@@ -135,6 +135,12 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
+    if(!result)return;
+    const timer=window.setTimeout(()=>setResult(null),2500);
+    return()=>window.clearTimeout(timer);
+  },[result]);
+
+  useEffect(()=>{
     if(!localEvent?.dataReady)return;
     let unsubscribe:(()=>void)|undefined;
     try{
@@ -576,8 +582,8 @@ export default function App(){
                 <h2>受付準備完了</h2>
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
-                <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
-                <button type="button" className="secondary" onClick={()=>setResult({kind:"success",title:mode==="entry"?"入場を確認しました": "退場を確認しました",detail:"TEST-0001"})}>受付結果を試験表示</button>
+                <button type="button" className="primary" onClick={()=>{void unlockSuccessSound();setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+                <button type="button" className="secondary" onClick={()=>{speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setResult({kind:"success",title:mode==="entry"?"入場を確認しました":"退場を確認しました",detail:"TEST-0001"});}}>受付結果を試験表示</button>
               </div>
             </div>
           </div>
@@ -673,14 +679,45 @@ export default function App(){
       )}
 
       {result && (
-        <section className={`entry-result-panel ${result.kind==="success"?"entry-ticket-result":"entry-error-result"}`}>
-          <div className="entry-result-icon">{result.kind==="success"?"✓":"×"}</div>
-          <span className="entry-result-eyebrow">{result.kind==="success"?"ENTRY ACCEPTED":"RECEPTION ERROR"}</span>
-          <h2>{result.kind==="success"?"受付完了":"受付失敗"}</h2>
-          <p className="entry-result-primary">{result.title}</p>
-          <p className="entry-result-number">{result.detail}</p>
-          {result.kind==="success" && <p className="entry-result-secondary">{entry?"入場を確認しました":"退場を確認しました"}</p>}
-          {result.kind==="error" && <p className="entry-result-secondary">もう一度読み取ってください</p>}
+        <section
+          className={entry ? "entry-result-panel entry-ticket-result" : "exit-result-panel exit-ticket-result"}
+          role="status"
+          aria-live="polite"
+        >
+          {result.kind==="success" ? <>
+            <div className={entry ? "entry-result-icon entry-ticket-success-icon" : "exit-result-icon exit-ticket-success-icon"} aria-hidden="true">
+              <svg viewBox="0 0 120 120" focusable="false">
+                <circle className={entry ? "entry-ticket-success-circle" : "exit-ticket-success-circle"} cx="60" cy="60" r="48"/>
+                <path className={entry ? "entry-ticket-success-check" : "exit-ticket-success-check"} d="M35 61.5 52 78 86 42"/>
+              </svg>
+            </div>
+            <span className={entry ? "entry-result-eyebrow" : "exit-result-eyebrow"}>
+              {entry ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}
+            </span>
+            <h2 className={entry ? "entry-ticket-success-title" : "exit-ticket-success-title"}>
+              {entry ? (result.title.includes("再入場") ? "再入場OK" : "入場OK") : "退出OK"}
+            </h2>
+            {entry ? (
+              <p className="entry-ticket-success-message">{result.title}</p>
+            ) : (
+              <p className="exit-thank-you-message">御来場いただきありがとうございました</p>
+            )}
+            <p className={entry ? "entry-result-number" : "exit-result-number"}>
+              <span>TICKET</span>{result.detail}
+            </p>
+            {!entry && <p className="exit-result-secondary">{result.title}</p>}
+            <div className={entry ? "entry-result-return" : "exit-result-return"} aria-hidden="true">
+              <span>次の読み取り画面へ戻ります</span>
+              <div className={entry ? "entry-result-return-track" : "exit-result-return-track"}><span/></div>
+            </div>
+          </> : <>
+            <div className={entry ? "entry-result-icon" : "exit-result-icon"}>×</div>
+            <span className={entry ? "entry-result-eyebrow" : "exit-result-eyebrow"}>RECEPTION ERROR</span>
+            <h2>受付失敗</h2>
+            <p className={entry ? "entry-result-primary" : "exit-result-primary"}>{result.title}</p>
+            <p className={entry ? "entry-result-number" : "exit-result-number"}>{result.detail}</p>
+            <p className={entry ? "entry-result-secondary" : "exit-result-secondary"}>約2.5秒後に読み取り画面へ戻ります</p>
+          </>}
         </section>
       )}
     </main>
@@ -707,22 +744,44 @@ function speakReception(type:ReceptionType){
   window.speechSynthesis.speak(utterance);
 }
 
-function playSuccessSound(){
+let receptionSuccessAudio:HTMLAudioElement|null=null;
+
+function getReceptionSuccessAudio(){
+  if(typeof window==="undefined")return null;
+  if(!receptionSuccessAudio){
+    receptionSuccessAudio=new Audio(`${import.meta.env.BASE_URL}sounds/qr_result_chime.wav`);
+    receptionSuccessAudio.preload="auto";
+    receptionSuccessAudio.volume=1;
+  }
+  return receptionSuccessAudio;
+}
+
+async function unlockSuccessSound(){
+  const audio=getReceptionSuccessAudio();
+  if(!audio)return false;
   try{
-    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
-    const context=new AudioContextClass();
-    const oscillator=context.createOscillator();
-    const gain=context.createGain();
-    oscillator.type="sine";
-    oscillator.frequency.value=880;
-    gain.gain.setValueAtTime(0.0001,context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12,context.currentTime+0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.16);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime+0.17);
-    oscillator.onended=()=>void context.close();
+    audio.pause();
+    audio.currentTime=0;
+    audio.volume=0.01;
+    await audio.play();
+    audio.pause();
+    audio.currentTime=0;
+    audio.volume=1;
+    return true;
+  }catch{
+    audio.volume=1;
+    return false;
+  }
+}
+
+async function playSuccessSound(){
+  const audio=getReceptionSuccessAudio();
+  if(!audio)return;
+  try{
+    audio.pause();
+    audio.currentTime=0;
+    audio.volume=1;
+    await audio.play();
   }catch{}
 }
 
