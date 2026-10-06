@@ -593,9 +593,7 @@ function TicketDesigner({
                     }}
                   >
                     <LazyQrCode
-                      value={qrValue(
-                        previewTicket
-                      )}
+                      value={qrValue(previewTicket)}
                       size={500}
                       level="M"
                       marginSize={1}
@@ -983,4 +981,287 @@ function TicketDesigner({
                 </span>
               </label>
 
+              <label>                大きさ
+
+                <input
+                  type="range"
+                  min="12"
+                  max="55"
+                  value={
+                    settings.qrSize
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "qrSize",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                />
+
+                <span>
+                  {settings.qrSize}%
+                </span>
+              </label>
+            </div>
+
+            <div className="ticket-setting-group">
+              <h4>
+                チケット番号
+              </h4>
+
               <label>
+                横位置
+
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={
+                    settings.numberX
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "numberX",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                />
+
+                <span>
+                  {settings.numberX}%
+                </span>
+              </label>
+
+              <label>
+                縦位置
+
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={
+                    settings.numberY
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "numberY",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                />
+
+                <span>
+                  {settings.numberY}%
+                </span>
+              </label>
+
+              <label>
+                文字サイズ
+
+                <input
+                  type="range"
+                  min="10"
+                  max="60"
+                  value={
+                    settings.numberSize
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "numberSize",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                />
+
+                <span>
+                  {
+                    settings.numberSize
+                  }
+                  px
+                </span>
+              </label>
+            </div>
+
+            <div className="ticket-setting-group">
+              <h4>
+                まとめて印刷
+              </h4>
+
+              <label className="ticket-select-setting">
+                1行に並べる枚数
+
+                <select
+                  value={
+                    settings.cardsPerRow
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "cardsPerRow",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                >
+                  <option value={1}>
+                    1枚
+                  </option>
+
+                  <option value={2}>
+                    2枚
+                  </option>
+
+                  <option value={3}>
+                    3枚
+                  </option>
+
+                  <option value={4}>
+                    4枚
+                  </option>
+                </select>
+              </label>
+
+              <label className="ticket-number-setting">
+                チケット間の余白
+
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  step="1"
+                  value={
+                    settings.printGapMm
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    updateSetting(
+                      "printGapMm",
+                      Math.max(
+                        0,
+                        Number(
+                          event.target
+                            .value
+                        )
+                      )
+                    )
+                  }
+                />
+
+                <span>mm</span>
+              </label>
+            </div>
+          </section>
+        </main>
+
+        <footer className="ticket-designer-buttons">
+          <button
+            type="button"
+            className="ticket-design-save"
+            onClick={saveDesign}
+          >
+            デザインを保存
+          </button>
+
+          <button
+            type="button"
+            className="ticket-design-print"
+            onClick={printTickets}
+          >
+            選択した範囲を印刷
+          </button>
+
+          <button
+            type="button"
+            className="ticket-design-reset"
+            onClick={resetDesign}
+          >
+            初期状態に戻す
+          </button>
+
+          <button
+            type="button"
+            className="ticket-design-cancel"
+            onClick={onClose}
+          >
+            閉じる
+          </button>
+        </footer>
+      </section>
+
+      <div
+        className="ticket-print-sheet"
+        style={printSheetStyle}
+      >
+        {selectedTickets.map(
+          (ticket) => (
+            <div
+              key={ticket.id}
+              className="ticket-print-card"
+              style={{
+                backgroundImage:
+                  settings.backgroundImage ===
+                  ""
+                    ? undefined
+                    : `url("${settings.backgroundImage}")`,
+              }}
+            >
+              <div
+                className="ticket-design-qr"
+                style={{
+                  left: `${settings.qrX}%`,
+                  top: `${settings.qrY}%`,
+                  width: `${settings.qrSize}%`,
+                }}
+              >
+                <LazyQrCode
+                  value={qrValue(ticket)}
+                  size={500}
+                  level="M"
+                  marginSize={1}
+                />
+              </div>
+
+              <div
+                className="ticket-design-number"
+                style={{
+                  left: `${settings.numberX}%`,
+                  top: `${settings.numberY}%`,
+                  fontSize:
+                    `${settings.numberSize}px`,
+                }}
+              >
+                {ticket.qrNumber}
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default TicketDesigner;
