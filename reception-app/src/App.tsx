@@ -88,6 +88,11 @@ export default function App(){
   },[screen]);
 
   useEffect(()=>{
+    if(!terminalRegistration?.approved)return;
+    void saveTerminalHeartbeat(getTerminalId(), "stopped").catch(reason=>console.error("起動時の通信速度測定に失敗しました",reason));
+  },[terminalRegistration?.approved]);
+
+  useEffect(()=>{
     void syncPendingRecords();
     const interval=window.setInterval(()=>void syncPendingRecords(),10000);
     window.addEventListener("online",syncPendingRecords);
