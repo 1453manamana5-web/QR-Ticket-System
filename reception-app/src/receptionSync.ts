@@ -1,4 +1,4 @@
-import { deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
@@ -129,7 +129,7 @@ async function measureNetworkSpeed(
       networkProbe: probe,
       networkProbeAt: new Date().toISOString(),
     }, { merge: true });
-    await getDoc(reference);
+    await getDocFromServer(reference);
 
     const elapsedMs = Math.max(1, performance.now() - startedAt);
     const roundTripBytes = probe.length * 2;
