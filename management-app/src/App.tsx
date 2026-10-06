@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
+import TicketDesigner from "./TicketDesigner";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
@@ -1388,95 +1389,20 @@ export default function App() {
         </div>
       </div>}
 
-      {ticketDesignModalOpen && <div className="ticket-modal-backdrop ticket-design-backdrop" onMouseDown={() => setTicketDesignModalOpen(false)}>
-        <div className="ticket-design-editor" onMouseDown={e => e.stopPropagation()}>
-          <header className="ticket-design-editor-header">
-            <div>
-              <h2>チケットデザイン・印刷</h2>
-              <p>背景画像にQRコードとチケット番号を配置します</p>
-            </div>
-            <button className="ticket-design-editor-close" onClick={() => setTicketDesignModalOpen(false)}>×</button>
-          </header>
-
-          <div className="ticket-design-editor-body">
-            <section className="ticket-design-preview-pane">
-              <div className="ticket-design-preview-title">
-                <h3>印刷プレビュー</h3>
-                <strong>{ticketPrintWidth.toFixed(1)}mm × {ticketPrintHeight.toFixed(1)}mm</strong>
-              </div>
-              <div className="ticket-design-preview-stage">
-                <div
-                  className="ticket-design-ticket-preview"
-                  style={{aspectRatio: ticketEffectiveAspectRatio.replace(":", " / ")}}
-                >
-                  {ticketDesignImage ? <img src={ticketDesignImage} alt="" /> : <span className="ticket-design-empty">背景画像を選択して</span>}
-                  <div className="ticket-design-qr-preview" style={{
-                    left: `${ticketQrX}%`, top: `${ticketQrY}%`,
-                    width: `${ticketQrSize}%`,
-                    transform: "translate(-50%, -50%)",
-                  }}>
-                    <QRCodeSVG value={tickets[0] ? ticketQrValue(event.eventId, tickets[0]) : ticketQrValue(event.eventId, createTickets(event.eventId, 1)[0])} width="100%" height="100%" includeMargin={false} bgColor="#ffffff" />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <aside className="ticket-design-controls">
-              <section className="ticket-design-control-card">
-                <h3>背景画像</h3>
-                <strong className="ticket-design-format">PNG・JPEG画像</strong>
-                <label className="ticket-design-file">
-                  <span>ファイルを選択</span><input type="file" accept="image/png,image/jpeg" onChange={e => handleTicketDesignChange(e.target.files?.[0])} />
-                </label>
-                <p>KeynoteやPowerPointから書き出したPNG画像も使用できます。</p>
-                <p>画像の縦横比は、カスタムを除く最も近い比率へ自動設定します。</p>
-                <div className="ticket-design-marker-help"><i />QRを置きたい場所に、鮮やかなピンク（目安 #FF00FF）の塗りつぶし正方形を1つ置いてください。近いピンク色でも自動検出します。</div>
-              </section>
-
-              <section className="ticket-design-control-card">
-                <h3>デザイン設定</h3>
-                <div className="ticket-design-control-block">
-                  <h4>チケットサイズ</h4>
-                  <button type="button" className={"ticket-design-toggle " + (ticketAutoSize ? "active" : "")} onClick={() => setTicketAutoSize(current => !current)}>
-                    <span>画像に合わせて自動調整</span><b>✓</b>
-                  </button>
-                  <label>比率<select value={ticketAspectRatio} disabled={ticketAutoSize} onChange={e => setTicketAspectRatio(e.target.value)}>
-                    <option value="16:9">16:9</option><option value="3:2">3:2</option><option value="4:3">4:3</option><option value="1:1">1:1</option>
-                  </select></label>
-                  <label className="mm-input-row">印刷時の横幅<input type="number" min="40" max="210" step="0.1" value={ticketPrintWidth} onChange={e => setTicketPrintWidth(Math.min(210, Math.max(40, Number(e.target.value) || 40)))} /><span>mm</span></label>
-                </div>
-              </section>
-
-              <section className="ticket-design-control-card">
-                <h3>QRコード</h3>
-                <RangeSetting label="横位置" value={ticketQrX} suffix="%" min={0} max={100} onChange={setTicketQrX} />
-                <RangeSetting label="縦位置" value={ticketQrY} suffix="%" min={0} max={100} onChange={setTicketQrY} />
-                <RangeSetting label="大きさ" value={ticketQrSize} suffix="%" min={15} max={45} onChange={setTicketQrSize} />
-              </section>
-
-
-              <section className="ticket-design-control-card">
-                <h3>まとめて印刷</h3>
-                <label>1行に並べる枚数<select value={ticketColumns} onChange={e => setTicketColumns(Number(e.target.value))}>
-                  <option value={1}>1枚</option><option value={2}>2枚</option><option value={3}>3枚</option><option value={4}>4枚</option>
-                </select></label>
-                <label className="mm-input-row">チケット間の余白<input type="number" min="0" max="20" step="1" value={ticketGapMm} onChange={e => setTicketGapMm(Math.min(20, Math.max(0, Number(e.target.value) || 0)))} /><span>mm</span></label>
-              </section>
-
-            </aside>
-          </div>
-
-          <footer className="ticket-design-editor-footer">
-            <button className="ticket-design-save" onClick={() => setTicketDesignModalOpen(false)}>デザインを保存</button>
-            <button className="ticket-design-print" disabled={!tickets.length} onClick={() => window.print()}>選択した範囲を印刷</button>
-            <button className="ticket-design-reset" onClick={() => {
-              setTicketAspectRatio("16:9"); setTicketImageAspectRatio(""); setTicketAutoSize(true); setTicketPrintWidth(90); setTicketQrX(76); setTicketQrY(50); setTicketQrSize(29);
-              setTicketNumberEnabled(true); setTicketNumberX(31); setTicketNumberY(72); setTicketNumberSize(18); setTicketColumns(2); setTicketGapMm(4);
-            }}>初期状態に戻す</button>
-            <button className="ticket-design-close" onClick={() => setTicketDesignModalOpen(false)}>閉じる</button>
-          </footer>
-        </div>
-      </div>}
+      {ticketDesignModalOpen && <TicketDesigner
+        eventName={event.eventName}
+        tickets={tickets.map(ticket => ({
+          id: ticket.ticketId,
+          qrNumber: String(ticket.basicInfo.ticketNumber).padStart(6, "0"),
+          status: ticket.currentStatus,
+          valid: ticket.valid,
+        }))}
+        qrValue={ticket => {
+          const source = tickets.find(item => item.ticketId === ticket.id);
+          return source ? ticketQrValue(event.eventId, source) : "";
+        }}
+        onClose={() => setTicketDesignModalOpen(false)}
+      />}
 
       {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
         <div className="ticket-modal ticket-qr-modal" onMouseDown={e => e.stopPropagation()}>
