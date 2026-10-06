@@ -591,7 +591,7 @@ export default function App(){
                 <h2>受付準備完了</h2>
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
-                <button type="button" className="primary" onClick={()=>{void unlockSuccessSound();setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+                <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
                 <button type="button" className="secondary" onClick={()=>{speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>
@@ -753,44 +753,22 @@ function speakReception(type:ReceptionType){
   window.speechSynthesis.speak(utterance);
 }
 
-let receptionSuccessAudio:HTMLAudioElement|null=null;
-
-function getReceptionSuccessAudio(){
-  if(typeof window==="undefined")return null;
-  if(!receptionSuccessAudio){
-    receptionSuccessAudio=new Audio(`${import.meta.env.BASE_URL}sounds/qr_result_chime.wav`);
-    receptionSuccessAudio.preload="auto";
-    receptionSuccessAudio.volume=1;
-  }
-  return receptionSuccessAudio;
-}
-
-async function unlockSuccessSound(){
-  const audio=getReceptionSuccessAudio();
-  if(!audio)return false;
+function playSuccessSound(){
   try{
-    audio.pause();
-    audio.currentTime=0;
-    audio.volume=0.01;
-    await audio.play();
-    audio.pause();
-    audio.currentTime=0;
-    audio.volume=1;
-    return true;
-  }catch{
-    audio.volume=1;
-    return false;
-  }
-}
-
-async function playSuccessSound(){
-  const audio=getReceptionSuccessAudio();
-  if(!audio)return;
-  try{
-    audio.pause();
-    audio.currentTime=0;
-    audio.volume=1;
-    await audio.play();
+    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+    const context=new AudioContextClass();
+    const oscillator=context.createOscillator();
+    const gain=context.createGain();
+    oscillator.type="sine";
+    oscillator.frequency.value=880;
+    gain.gain.setValueAtTime(0.0001,context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12,context.currentTime+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.16);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime+0.17);
+    oscillator.onended=()=>void context.close();
   }catch{}
 }
 
