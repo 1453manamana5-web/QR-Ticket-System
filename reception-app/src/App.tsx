@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
-import {downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
+import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
 
 type Mode="entry"|"exit";
@@ -87,6 +87,55 @@ export default function App(){
     }
     return()=>unsubscribe?.();
   },[screen]);
+
+  useEffect(()=>{
+    if(!terminalRegistration?.approved)return;
+
+    let cancelled=false;
+    const loadCurrentFirebaseEvent=async()=>{
+      try{
+        const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
+        if(!downloaded || cancelled)return;
+
+        const existing=await loadLocalEvent();
+        if(
+          existing?.dataReady &&
+          existing.event.eventId===downloaded.localEvent.event.eventId &&
+          existing.event.dataVersion===downloaded.localEvent.event.dataVersion
+        ){
+          return;
+        }
+
+        const localEvent:LocalEventData={
+          ...downloaded.localEvent,
+          dataReady:false,
+        };
+        await prepareLocalEventData(localEvent,downloaded.tickets);
+        localEvent.dataReady=true;
+        if(cancelled)return;
+        setLocalEvent(localEvent);
+        setAuthPayload({
+          type:"qr-ticket-event-auth",
+          eventId:localEvent.event.eventId,
+          eventName:localEvent.event.eventName,
+          dataVersion:localEvent.event.dataVersion,
+          authToken:"firebase"
+        });
+        setError("");
+        setResult(null);
+        setScreen("ready");
+      }catch(reason){
+        console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
+      }
+    };
+
+    void loadCurrentFirebaseEvent();
+    const interval=window.setInterval(()=>void loadCurrentFirebaseEvent(),10000);
+    return()=>{
+      cancelled=true;
+      window.clearInterval(interval);
+    };
+  },[terminalRegistration?.approved]);
 
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
