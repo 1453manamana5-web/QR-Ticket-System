@@ -46,6 +46,7 @@ export default function App(){
   const [remoteStopped,setRemoteStopped]=useState(false);
   const [scannerKey,setScannerKey]=useState(0);
   const [online,setOnline]=useState(()=>navigator.onLine);
+  const [networkMbps,setNetworkMbps]=useState<number|null>(null);
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
 
@@ -89,7 +90,7 @@ export default function App(){
 
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
-    void saveTerminalHeartbeat(getTerminalId(), "stopped").catch(reason=>console.error("起動時の通信速度測定に失敗しました",reason));
+    void saveTerminalHeartbeat(getTerminalId(), "stopped").then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("起動時の通信速度測定に失敗しました",reason));
   },[terminalRegistration?.approved]);
 
   useEffect(()=>{
@@ -165,7 +166,7 @@ export default function App(){
     }catch(reason){
       console.error("端末リモート操作の購読に失敗しました",reason);
     }
-    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen==="ready"?"stopped":mode).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
+    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen==="ready"?"stopped":mode).then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
     heartbeat();
     const interval=window.setInterval(heartbeat,10000);
     return()=>{unsubscribe?.();window.clearInterval(interval);};
@@ -423,7 +424,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント未認証</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント未認証</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main">
@@ -486,7 +487,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント認証QR読み取り</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント認証QR読み取り</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main">
@@ -516,7 +517,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{authPayload.eventName}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{authPayload.eventName}</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
@@ -534,7 +535,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent?.event.eventName??authPayload?.eventName??"イベント未設定"}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent?.event.eventName??authPayload?.eventName??"イベント未設定"}</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-processing-result">
@@ -551,7 +552,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
         <button
           type="button"
           className={`entry-reception-mode-switch ${mode==="entry"?"is-entry":"is-exit"}`}
