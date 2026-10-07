@@ -866,46 +866,51 @@ function speakReception(type:ReceptionType){
 }
 
 function playSuccessSound(){
-  // 旧アプリの読み取り確認音を優先して再生する。
-  try{
-    const audio=new Audio(`${import.meta.env.BASE_URL}sounds/qr_scan_detected.wav`);
-    audio.preload="auto";
-    audio.volume=1;
-    const play=()=>{ void audio.play().catch(()=>{}); };
-    if(audio.readyState>=2){
-      play();
-    }else{
-      audio.addEventListener("canplaythrough",play,{once:true});
-      audio.load();
-    }
-  }catch{}
-
-  // 旧音源が端末上で再生できない場合のフォールバック。
+  // 旧アプリの qr_scan_detected.wav を分析した音色・長さに寄せた確認音。
+  // 約0.245秒、約890Hzを中心に、少量の倍音と自然な減衰を加える。
   try{
     const AudioContextClass=window.AudioContext||window.webkitAudioContext;
     const context=new AudioContextClass();
-    const playTone=(frequency:number,start:number,duration:number)=>{
+
+    const startSound=()=>{
+      const now=context.currentTime;
+      const duration=0.245;
       const oscillator=context.createOscillator();
       const gain=context.createGain();
+
       oscillator.type="sine";
-      oscillator.frequency.setValueAtTime(frequency,context.currentTime+start);
-      gain.gain.setValueAtTime(0.0001,context.currentTime+start);
-      gain.gain.exponentialRampToValueAtTime(0.18,context.currentTime+start+0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+start+duration);
+      oscillator.frequency.setValueAtTime(890,now);
+
+      // 旧音源に近い、短い「ピッ」という立ち上がりから滑らかに減衰する包絡。
+      gain.gain.setValueAtTime(0.0001,now);
+      gain.gain.exponentialRampToValueAtTime(0.105,now+0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+duration);
+
       oscillator.connect(gain);
       gain.connect(context.destination);
-      oscillator.start(context.currentTime+start);
-      oscillator.stop(context.currentTime+start+duration+0.01);
+      oscillator.start(now);
+      oscillator.stop(now+duration+0.01);
+
+      // 旧音源に含まれる倍音感を軽く再現。
+      const harmonic=context.createOscillator();
+      const harmonicGain=context.createGain();
+      harmonic.type="sine";
+      harmonic.frequency.setValueAtTime(1780,now);
+      harmonicGain.gain.setValueAtTime(0.0001,now);
+      harmonicGain.gain.exponentialRampToValueAtTime(0.028,now+0.012);
+      harmonicGain.gain.exponentialRampToValueAtTime(0.0001,now+duration);
+      harmonic.connect(harmonicGain);
+      harmonicGain.connect(context.destination);
+      harmonic.start(now);
+      harmonic.stop(now+duration+0.01);
+
+      window.setTimeout(()=>void context.close(),350);
     };
-    const startFallback=()=>{
-      playTone(880,0,0.13);
-      playTone(1175,0.15,0.18);
-      window.setTimeout(()=>void context.close(),450);
-    };
+
     if(context.state==="suspended"){
-      void context.resume().then(startFallback).catch(()=>{});
+      void context.resume().then(startSound).catch(()=>{});
     }else{
-      startFallback();
+      startSound();
     }
   }catch{}
 }
