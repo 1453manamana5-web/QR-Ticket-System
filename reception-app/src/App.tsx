@@ -869,18 +869,34 @@ function playSuccessSound(){
   try{
     const AudioContextClass=window.AudioContext||window.webkitAudioContext;
     const context=new AudioContextClass();
-    const oscillator=context.createOscillator();
-    const gain=context.createGain();
-    oscillator.type="sine";
-    oscillator.frequency.value=880;
-    gain.gain.setValueAtTime(0.0001,context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12,context.currentTime+0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.16);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime+0.17);
-    oscillator.onended=()=>void context.close();
+
+    const playTone=(frequency:number,start:number,duration:number)=>{
+      const oscillator=context.createOscillator();
+      const gain=context.createGain();
+      oscillator.type="sine";
+      oscillator.frequency.setValueAtTime(frequency,context.currentTime+start);
+      gain.gain.setValueAtTime(0.0001,context.currentTime+start);
+      gain.gain.exponentialRampToValueAtTime(0.18,context.currentTime+start+0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+start+duration);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(context.currentTime+start);
+      oscillator.stop(context.currentTime+start+duration+0.01);
+    };
+
+    // QR読み取り成功時の「ピッ、ピッ」という確認音。
+    // iPad/SafariでAudioContextがsuspendedになっていても、読み取り操作直後に再開を試みる。
+    const start=()=>{
+      playTone(880,0,0.13);
+      playTone(1175,0.15,0.18);
+      window.setTimeout(()=>void context.close(),450);
+    };
+
+    if(context.state==="suspended"){
+      void context.resume().then(start).catch(()=>{});
+    }else{
+      start();
+    }
   }catch{}
 }
 
