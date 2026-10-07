@@ -43,6 +43,7 @@ export default function App(){
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
   const [result,setResult]=useState<Result|null>(null);
+  const [testResultKind,setTestResultKind]=useState<"entry"|"exit"|"error">("entry");
   const [remoteStopped,setRemoteStopped]=useState(false);
   const [scannerKey,setScannerKey]=useState(0);
   const [online,setOnline]=useState(()=>navigator.onLine);
@@ -501,7 +502,7 @@ export default function App(){
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
                   <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
-                  <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>\n                  <button type="button" className="secondary" onClick={()=>{setError("");setScreen("test");speakReception(mode==="entry"?"entry":"exit");playSuccessSound();}}>受付結果を試験表示</button>
+                  <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>\n                  <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");speakReception(mode==="entry"?"entry":"exit");playSuccessSound();}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
                   <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
@@ -516,28 +517,48 @@ export default function App(){
     </main>
   </div>;
 
-  if(screen==="test")return <div className={`entry-reception-page ticket-success reception-mode-${mode}`}>
-    <main className="entry-reception-main">
-      <section className={mode==="entry" ? "entry-result-panel entry-ticket-result" : "exit-result-panel exit-ticket-result"} role="status" aria-live="polite">
-        <div className={mode==="entry" ? "entry-result-icon entry-ticket-success-icon" : "exit-result-icon exit-ticket-success-icon"} aria-hidden="true">
-          <svg viewBox="0 0 120 120" focusable="false">
-            <circle className={mode==="entry" ? "entry-ticket-success-circle" : "exit-ticket-success-circle"} cx="60" cy="60" r="48"/>
-            <path className={mode==="entry" ? "entry-ticket-success-check" : "exit-ticket-success-check"} d="M35 61.5 52 78 86 42"/>
-          </svg>
-        </div>
-        <span className={mode==="entry" ? "entry-result-eyebrow" : "exit-result-eyebrow"}>{mode==="entry" ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}</span>
-        <h2 className={mode==="entry" ? "entry-ticket-success-title" : "exit-ticket-success-title"}>{mode==="entry" ? "入場OK" : "退出OK"}</h2>
-        {mode==="entry" ? <p className="entry-ticket-success-message">入場を確認しました</p> : <p className="exit-thank-you-message">御来場いただきありがとうございました</p>}
-        <p className={mode==="entry" ? "entry-result-number" : "exit-result-number"}><span>TICKET</span>TEST-0001</p>
-        {mode==="exit" && <p className="exit-result-secondary">退場を確認しました</p>}
-        <div className={mode==="entry" ? "entry-result-return" : "exit-result-return"} aria-hidden="true">
-          <span>次の読み取り画面へ戻ります</span>
-          <div className={mode==="entry" ? "entry-result-return-track" : "exit-result-return-track"}><span/></div>
-        </div>
-        <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
-      </section>
-    </main>
-  </div>;
+  if(screen==="test"){
+    const testEntry=testResultKind==="entry";
+    const testExit=testResultKind==="exit";
+    return <div className={`entry-reception-page ${testResultKind==="error"?"error":"ticket-success"} reception-mode-${testEntry?"entry":"exit"}`}>
+      <main className="entry-reception-main">
+        <section className={testEntry||testResultKind==="error" ? "entry-result-panel entry-ticket-result" : "exit-result-panel exit-ticket-result"} role="status" aria-live="polite">
+          {testResultKind==="error" ? <>
+            <div className="entry-result-icon">×</div>
+            <span className="entry-result-eyebrow">RECEPTION ERROR</span>
+            <h2>受付失敗</h2>
+            <p className="entry-result-primary">受付できません</p>
+            <p className="entry-result-number">このチケットはすでに入場しています。</p>
+            <p className="entry-result-secondary">約2.5秒後に読み取り画面へ戻ります</p>
+          </> : <>
+            <div className={testEntry ? "entry-result-icon entry-ticket-success-icon" : "exit-result-icon exit-ticket-success-icon"} aria-hidden="true">
+              <svg viewBox="0 0 120 120" focusable="false">
+                <circle className={testEntry ? "entry-ticket-success-circle" : "exit-ticket-success-circle"} cx="60" cy="60" r="48"/>
+                <path className={testEntry ? "entry-ticket-success-check" : "exit-ticket-success-check"} d="M35 61.5 52 78 86 42"/>
+              </svg>
+            </div>
+            <span className={testEntry ? "entry-result-eyebrow" : "exit-result-eyebrow"}>{testEntry ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}</span>
+            <h2 className={testEntry ? "entry-ticket-success-title" : "exit-ticket-success-title"}>{testEntry ? "入場OK" : "退出OK"}</h2>
+            {testEntry
+              ? <p className="entry-ticket-success-message">入場を確認しました</p>
+              : <p className="exit-thank-you-message">御来場いただきありがとうございました</p>}
+            <p className={testEntry ? "entry-result-number" : "exit-result-number"}><span>TICKET</span>TEST-0001</p>
+            {testExit && <p className="exit-result-secondary">退場を確認しました</p>}
+            <div className={testEntry ? "entry-result-return" : "exit-result-return"} aria-hidden="true">
+              <span>次の読み取り画面へ戻ります</span>
+              <div className={testEntry ? "entry-result-return-track" : "exit-result-return-track"}><span/></div>
+            </div>
+          </>}
+          <div style={{display:"flex",gap:"10px",justifyContent:"center",flexWrap:"wrap",marginTop:"24px"}}>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");speakReception("entry");void playSuccessSound();}}>入口結果</button>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");speakReception("exit");void playSuccessSound();}}>出口結果</button>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");window.speechSynthesis?.cancel();}}>エラー結果</button>
+          </div>
+          <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
+        </section>
+      </main>
+    </div>;
+  }
 
   if(screen==="authScan")return <div className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
@@ -811,28 +832,37 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
 function speakReception(type:ReceptionType){
   if(!("speechSynthesis" in window))return;
 
-  window.speechSynthesis.cancel();
+  const synth=window.speechSynthesis;
+  synth.cancel();
 
-  // 受付種別に応じて、実際の案内として自然な文章にする。
-  // 再入場も入口側の案内なので「ご来場ありがとうございます」を使用する。
   const message=type==="exit"
-    ?"ご来場ありがとうございました"
-    :"ご来場ありがとうございます";
+    ?"ご来場、ありがとうございました。"
+    :"ご来場、ありがとうございます。";
 
   const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang="ja-JP";
-  utterance.rate=0.9;
+  utterance.rate=0.86;
   utterance.pitch=1.0;
   utterance.volume=1.0;
 
-  // iPad/Safariでは利用できる音声が端末によって異なるため、
-  // 日本語音声を優先し、特定の音声名には依存しない。
-  const voices=window.speechSynthesis.getVoices();
-  const japaneseVoice=voices.find(voice=>voice.lang.toLowerCase().startsWith("ja-jp"))
-    ??voices.find(voice=>voice.lang.toLowerCase().startsWith("ja"));
-  if(japaneseVoice)utterance.voice=japaneseVoice;
+  const speakWithJapaneseVoice=()=>{
+    const voices=synth.getVoices();
+    const japaneseVoice=voices.find(voice=>voice.lang.toLowerCase()==="ja-jp")
+      ??voices.find(voice=>voice.lang.toLowerCase().startsWith("ja"));
+    if(japaneseVoice)utterance.voice=japaneseVoice;
+    synth.speak(utterance);
+  };
 
-  window.speechSynthesis.speak(utterance);
+  const voices=synth.getVoices();
+  if(voices.length){
+    speakWithJapaneseVoice();
+  }else{
+    synth.addEventListener("voiceschanged",speakWithJapaneseVoice,{once:true});
+    window.setTimeout(()=>{
+      synth.removeEventListener("voiceschanged",speakWithJapaneseVoice);
+      if(!utterance.voice)synth.speak(utterance);
+    },500);
+  }
 }
 
 function playSuccessSound(){
