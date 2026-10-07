@@ -836,13 +836,13 @@ function speakReception(type:ReceptionType){
   synth.cancel();
 
   const message=type==="exit"
-    ?"ご来場、ありがとうございました。"
-    :"ご来場、ありがとうございます。";
+    ?"ご来場ありがとうございました。"
+    :"ご来場ありがとうございます。";
 
   const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang="ja-JP";
-  utterance.rate=0.86;
-  utterance.pitch=1.0;
+  utterance.rate=0.9;
+  utterance.pitch=0.96;
   utterance.volume=1.0;
 
   const speakWithJapaneseVoice=()=>{
