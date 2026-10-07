@@ -866,10 +866,24 @@ function speakReception(type:ReceptionType){
 }
 
 function playSuccessSound(){
+  // 旧アプリの読み取り確認音を優先して再生する。
+  try{
+    const audio=new Audio(`${import.meta.env.BASE_URL}sounds/qr_scan_detected.wav`);
+    audio.preload="auto";
+    audio.volume=1;
+    const play=()=>{ void audio.play().catch(()=>{}); };
+    if(audio.readyState>=2){
+      play();
+    }else{
+      audio.addEventListener("canplaythrough",play,{once:true});
+      audio.load();
+    }
+  }catch{}
+
+  // 旧音源が端末上で再生できない場合のフォールバック。
   try{
     const AudioContextClass=window.AudioContext||window.webkitAudioContext;
     const context=new AudioContextClass();
-
     const playTone=(frequency:number,start:number,duration:number)=>{
       const oscillator=context.createOscillator();
       const gain=context.createGain();
@@ -883,23 +897,18 @@ function playSuccessSound(){
       oscillator.start(context.currentTime+start);
       oscillator.stop(context.currentTime+start+duration+0.01);
     };
-
-    // QR読み取り成功時の「ピッ、ピッ」という確認音。
-    // iPad/SafariでAudioContextがsuspendedになっていても、読み取り操作直後に再開を試みる。
-    const start=()=>{
+    const startFallback=()=>{
       playTone(880,0,0.13);
       playTone(1175,0.15,0.18);
       window.setTimeout(()=>void context.close(),450);
     };
-
     if(context.state==="suspended"){
-      void context.resume().then(start).catch(()=>{});
+      void context.resume().then(startFallback).catch(()=>{});
     }else{
-      start();
+      startFallback();
     }
   }catch{}
 }
-
 function getTerminalId():string{
   const key="qr-ticket-terminal-id";
   const existing=localStorage.getItem(key);
