@@ -810,10 +810,28 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
 
 function speakReception(type:ReceptionType){
   if(!("speechSynthesis" in window))return;
+
   window.speechSynthesis.cancel();
-  const utterance=new SpeechSynthesisUtterance(type==="entry"?"入場を確認しました":type==="reentry"?"再入場を確認しました":"退場を確認しました");
+
+  // 受付種別に応じて、実際の案内として自然な文章にする。
+  // 再入場も入口側の案内なので「ご来場ありがとうございます」を使用する。
+  const message=type==="exit"
+    ?"ご来場ありがとうございました"
+    :"ご来場ありがとうございます";
+
+  const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang="ja-JP";
-  utterance.rate=1.05;
+  utterance.rate=0.9;
+  utterance.pitch=1.0;
+  utterance.volume=1.0;
+
+  // iPad/Safariでは利用できる音声が端末によって異なるため、
+  // 日本語音声を優先し、特定の音声名には依存しない。
+  const voices=window.speechSynthesis.getVoices();
+  const japaneseVoice=voices.find(voice=>voice.lang.toLowerCase().startsWith("ja-jp"))
+    ??voices.find(voice=>voice.lang.toLowerCase().startsWith("ja"));
+  if(japaneseVoice)utterance.voice=japaneseVoice;
+
   window.speechSynthesis.speak(utterance);
 }
 
