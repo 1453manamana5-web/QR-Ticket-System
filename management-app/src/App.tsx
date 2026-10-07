@@ -1932,9 +1932,9 @@ export default function App() {
       </section>
 
       <section className="settings-section">
-        <div className="settings-section-heading"><small>AI LAB</small><h3>AI試験機能</h3><p>実験用機能です。本番のQR認証判定には使用しません。</p></div>
+        <div className="settings-section-heading"><small>TEST LAB</small><h3>試験機能</h3><p>試験用の機能です。本番のQR認証判定には使用しません。</p></div>
         <div className="settings-card">
-          <Setting title="AI試験機能" text="ONにするとAI LABなどの実験メニューを表示します" checked={appSettings.aiLabEnabled} onChange={() => updateAppSetting("aiLabEnabled", !appSettings.aiLabEnabled)} />
+          <Setting title="試験機能をオンにする" text="ONにすると試験用の実験メニューを表示します" checked={appSettings.aiLabEnabled} onChange={() => updateAppSetting("aiLabEnabled", !appSettings.aiLabEnabled)} />
           <div className={appSettings.aiLabEnabled ? "settings-experiment unlocked" : "settings-experiment"}><span>実験機能</span><strong>{appSettings.aiLabEnabled ? "有効" : "無効"}</strong></div>
         </div>
       </section>
