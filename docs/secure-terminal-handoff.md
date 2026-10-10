@@ -53,7 +53,7 @@ npm --prefix functions run build:migration
 GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" TERMINAL_OWNER_MIGRATION_JSON='[{"terminalId":"T-REPLACE","ownerUid":"UID-REPLACE"}]' node functions/lib-migration/scripts/migrate-terminal-owners.js
 ```
 
-The tool refuses missing/unapproved management terminals, duplicate IDs, and any owner mapping that already exists. It does not overwrite mappings. Run one reviewed mapping at a time and keep the CLI output for audit. If an owner mapping already exists, stop and investigate instead of deleting or replacing it.
+The tool refuses missing/unapproved management terminals, duplicate IDs, and any owner mapping that already exists. In the same transaction it also creates the trusted `terminalInstallations/{ownerUid}` mapping needed by the current management-only Firestore Rules. If that UID already has an installation mapping, the tool proceeds only when it already points to this exact terminal and is approved; mismatched or unapproved mappings are never overwritten. Run one reviewed mapping at a time and keep the CLI output for audit. If an owner mapping already exists, stop and investigate instead of deleting or replacing it.
 
 This utility only seeds the trusted owner map; it does not deploy Functions or make the overall handoff feature production-ready. Do not enable live handoffs until Firestore rules are explicitly reviewed and tested, callable Functions are deployed, and reception access is changed to require the server-created installation record.
 
