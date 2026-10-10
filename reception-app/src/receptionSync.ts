@@ -89,7 +89,6 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
 let networkSpeedCache: number | null = null;
 let networkSpeedMeasuredAt = 0;
 const NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
-const NETWORK_PROBE_SIZE_BYTES = 32768;
 
 function getBrowserDownlink(): number | null {
   if (typeof navigator === "undefined") return null;
@@ -104,10 +103,6 @@ function getBrowserDownlink(): number | null {
 
   const downlink = connection?.downlink;
   return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
-}
-
-function createNetworkProbe(): string {
-  return "0123456789abcdef".repeat(NETWORK_PROBE_SIZE_BYTES / 16);
 }
 
 async function measureNetworkSpeed(
