@@ -164,6 +164,15 @@ export default function App() {
     records: ReceptionRecord[];
     loading: boolean;
   }>({ eventId: "", tickets: [], records: [], loading: false });
+  const [aiPreviousEventData, setAiPreviousEventData] = useState<{
+    eventId: string;
+    eventName: string;
+    eventDate: string;
+    tickets: Ticket[];
+    records: ReceptionRecord[];
+    loading: boolean;
+    error: boolean;
+  }>({ eventId: "", eventName: "", eventDate: "", tickets: [], records: [], loading: false, error: false });
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [eventName, setEventName] = useState("");
@@ -1347,6 +1356,44 @@ export default function App() {
     setTerminalNotice("端末状態を確認しました。未接続の端末は「見つかりません」と表示します。");
   };
 
+  useEffect(() => {
+    if (!event.eventId) {
+      setAiPreviousEventData({ eventId: "", eventName: "", eventDate: "", tickets: [], records: [], loading: false, error: false });
+      return;
+    }
+    const previousEvent = eventHistory
+      .filter(item => item.eventId !== event.eventId && item.eventDate && item.eventDate <= (event.eventDate || "9999-12-31"))
+      .sort((a, b) => (b.eventDate || "").localeCompare(a.eventDate || "") || b.eventId.localeCompare(a.eventId))[0]
+      ?? eventHistory
+        .filter(item => item.eventId !== event.eventId)
+        .sort((a, b) => (b.eventDate || "").localeCompare(a.eventDate || ""))[0];
+    if (!previousEvent) {
+      setAiPreviousEventData({ eventId: "", eventName: "", eventDate: "", tickets: [], records: [], loading: false, error: false });
+      return;
+    }
+    let cancelled = false;
+    setAiPreviousEventData({ eventId: previousEvent.eventId, eventName: previousEvent.eventName, eventDate: previousEvent.eventDate || "", tickets: [], records: [], loading: true, error: false });
+    Promise.all([loadEventTickets(previousEvent.eventId), loadEventReceptionRecords(previousEvent.eventId)])
+      .then(([previousTickets, previousRecords]) => {
+        if (cancelled) return;
+        setAiPreviousEventData({
+          eventId: previousEvent.eventId,
+          eventName: previousEvent.eventName,
+          eventDate: previousEvent.eventDate || "",
+          tickets: previousTickets,
+          records: previousRecords,
+          loading: false,
+          error: false,
+        });
+      })
+      .catch(reason => {
+        console.error("Previous event analysis data could not be loaded", reason);
+        if (cancelled) return;
+        setAiPreviousEventData({ eventId: previousEvent.eventId, eventName: previousEvent.eventName, eventDate: previousEvent.eventDate || "", tickets: [], records: [], loading: false, error: true });
+      });
+    return () => { cancelled = true; };
+  }, [event.eventId, event.eventDate, eventHistory]);
+
   const aiHourlyAnalysis = useMemo(() => {
     const buckets = new Map<number, { entry: number; exit: number; reentry: number }>();
     for (let hour = 0; hour < 24; hour++) buckets.set(hour, { entry: 0, exit: 0, reentry: 0 });
@@ -1365,9 +1412,39 @@ export default function App() {
   }, [receptionRecords]);
 
   const aiPeakHour = useMemo(() => [...aiHourlyAnalysis].sort((a, b) => b.entry - a.entry)[0] ?? null, [aiHourlyAnalysis]);
-  const aiPreviousSnapshot = useMemo(() => analysisHistory
-    .filter(item => item.eventId !== event.eventId)
-    .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt))[0] ?? null, [analysisHistory, event.eventId]);
+  const aiPreviousSnapshot = useMemo(() => {
+    if (aiPreviousEventData.eventId) {
+      const previousTickets = aiPreviousEventData.tickets;
+      return {
+        eventId: aiPreviousEventData.eventId,
+        eventName: aiPreviousEventData.eventName,
+        eventDate: aiPreviousEventData.eventDate,
+        total: previousTickets.length,
+        unused: previousTickets.filter(ticket => ticket.currentStatus === "unused" && ticket.valid).length,
+        inside: previousTickets.filter(ticket => ticket.currentStatus === "inside" && ticket.valid).length,
+        exited: previousTickets.filter(ticket => ticket.currentStatus === "exited" && ticket.valid).length,
+        entryRecords: aiPreviousEventData.records.filter(record => record.type === "entry").length,
+        exitRecords: aiPreviousEventData.records.filter(record => record.type === "exit").length,
+        reentryRecords: aiPreviousEventData.records.filter(record => record.type === "reentry").length,
+        peakHour: (() => {
+          const counts = new Map<number, number>();
+          for (const record of aiPreviousEventData.records) {
+            if (record.type !== "entry") continue;
+            const timestamp = Date.parse(record.timestamp);
+            if (!Number.isFinite(timestamp)) continue;
+            const hour = new Date(timestamp).getHours();
+            counts.set(hour, (counts.get(hour) ?? 0) + 1);
+          }
+          return [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
+        })(),
+        source: "records" as const,
+      };
+    }
+    const snapshot = analysisHistory
+      .filter(item => item.eventId !== event.eventId)
+      .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt))[0];
+    return snapshot ? { ...snapshot, entryRecords: null, exitRecords: null, reentryRecords: null, peakHour: null, source: "snapshot" as const } : null;
+  }, [aiPreviousEventData, analysisHistory, event.eventId]);
 
   const aiOperationalInsights = useMemo(() => {
     const insights: Array<{ title: string; detail: string; priority: "high" | "medium" | "good" }> = [];
@@ -2695,7 +2772,7 @@ function NavIcon({type}:{type:string}){
               <div className="ai-hour-legend"><span><i className="entry" />入場</span><span><i className="exit" />退場</span><span><i className="reentry" />再入場</span></div>
             </div> : <div className="ai-assistant-welcome">時間帯別の受付記録がまだありません。記録が同期されると、入退場の推移を表示します。</div>}
             <h4>過去イベントとの比較</h4>
-            {aiPreviousSnapshot ? <div className="ai-event-comparison"><strong>{aiPreviousSnapshot.eventName}（{aiPreviousSnapshot.eventDate || "開催日不明"}）</strong><p>前回保存時：総チケット {aiPreviousSnapshot.total}枚・未使用 {aiPreviousSnapshot.unused}枚・入場中 {aiPreviousSnapshot.inside}人・退場済み {aiPreviousSnapshot.exited}人</p><p>今回との差：総チケット {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚、入場中 {ticketStats.inside - aiPreviousSnapshot.inside >= 0 ? "+" : ""}{ticketStats.inside - aiPreviousSnapshot.inside}人、退場済み {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}人</p><small>前回の分析保存データとの比較です。過去イベントの受付記録が保存されている場合は、今後、時間帯ごとの比較にも拡張できます。</small></div> : <div className="ai-assistant-welcome">比較できる過去イベントの分析保存データがありません。過去イベントの分析結果を保存すると、次回から数値を比較できます。</div>}
+            {aiPreviousEventData.loading ? <div className="ai-assistant-welcome">過去イベントの受付記録を読み込んでいます…</div> : aiPreviousEventData.error ? <div className="ai-assistant-welcome">過去イベントのデータを読み込めませんでした。Firebaseの接続・閲覧権限を確認してください。保存済みの分析結果がある場合は、その数値を表示します。{aiPreviousSnapshot?.source === "snapshot" ? <p>保存済み分析：{aiPreviousSnapshot.eventName}／チケット {aiPreviousSnapshot.total}枚／入場中 {aiPreviousSnapshot.inside}人</p> : null}</div> : aiPreviousSnapshot ? <div className="ai-event-comparison"><strong>{aiPreviousSnapshot.eventName}（{aiPreviousSnapshot.eventDate || "開催日不明"}）</strong><p>過去イベント：総チケット {aiPreviousSnapshot.total}枚・未使用 {aiPreviousSnapshot.unused}枚・入場中 {aiPreviousSnapshot.inside}人・退場済み {aiPreviousSnapshot.exited}人</p><p>今回との差：総チケット {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚、入場中 {ticketStats.inside - aiPreviousSnapshot.inside >= 0 ? "+" : ""}{ticketStats.inside - aiPreviousSnapshot.inside}人、退場済み {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}人</p>{aiPreviousSnapshot.source === "records" ? <><p>受付記録比較：過去イベントは入場 {aiPreviousSnapshot.entryRecords}件・退場 {aiPreviousSnapshot.exitRecords}件・再入場 {aiPreviousSnapshot.reentryRecords}件、今回は入場 {receptionRecords.filter(record => record.type === "entry").length}件・退場 {receptionRecords.filter(record => record.type === "exit").length}件・再入場 {receptionRecords.filter(record => record.type === "reentry").length}件</p><p>入場ピーク：過去は {aiPreviousSnapshot.peakHour ? String(aiPreviousSnapshot.peakHour[0]).padStart(2, "0") + "時台（" + aiPreviousSnapshot.peakHour[1] + "件）" : "記録なし"}、今回は {aiPeakHour && aiPeakHour.entry > 0 ? String(aiPeakHour.hour).padStart(2, "0") + "時台（" + aiPeakHour.entry + "件）" : "記録なし"}</p><small>過去イベントの実際のチケット・受付記録を読み込んで比較しています。時間帯は端末のローカル時刻で集計します。</small></> : <small>過去イベントの受付記録を取得できないため、保存済み分析の数値のみで比較しています。</small>}</div> : <div className="ai-assistant-welcome">比較対象となる過去イベントがありません。別のイベントを登録し、受付記録が保存されると、実データによる比較が可能になります。</div>}
             <h4>今回の運営で改善できそうな点</h4>
             <div className="ai-operational-insights">{aiOperationalInsights.map((insight, index) => <article className={"ai-operational-insight " + insight.priority} key={insight.title}><span>{index + 1}</span><div><strong>{insight.title}</strong><p>{insight.detail}</p></div></article>)}</div>
           </section>
