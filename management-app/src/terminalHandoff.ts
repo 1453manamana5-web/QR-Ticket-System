@@ -42,3 +42,18 @@ export async function decideTerminalHandoff(
   const result = await callable({ requestId, decision });
   return result.data;
 }
+
+
+/** Requests a role approval from the trusted server; the client never writes approval flags. */
+export async function approveTerminalRegistration(
+  managerTerminalId: string,
+  targetTerminalId: string,
+): Promise<{ terminalId: string; approved: true; role: "management" | "reception" | "both" }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { managerTerminalId: string; targetTerminalId: string },
+    { terminalId: string; approved: true; role: "management" | "reception" | "both" }
+  >(functionsClient(), "approveTerminalRegistration");
+  const result = await callable({ managerTerminalId, targetTerminalId });
+  return result.data;
+}
