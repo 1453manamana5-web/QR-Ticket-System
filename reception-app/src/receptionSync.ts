@@ -1,8 +1,8 @@
-import { doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, getDocFromServer, onSnapshot } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
-import { getTerminalInstallationStatus, releaseOwnReceptionRegistration } from "./terminalHandoff";
+import { getTerminalInstallationStatus, releaseOwnReceptionRegistration, submitReceptionRecord } from "./terminalHandoff";
 
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
@@ -81,9 +81,11 @@ function getTerminalIdForRegistration(): string {
 }
 
 export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticket): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "events", record.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-  await setDoc(doc(db, "events", record.eventId, "receptionRecords", record.recordId), record, { merge: true });
+  if (ticket.ticketId !== record.ticketId || ticket.eventId !== record.eventId) {
+    throw new Error("受付記録とチケットの情報が一致しません。");
+  }
+  // Ticket state is recomputed and validated on the server; never trust the client copy.
+  await submitReceptionRecord(record);
 }
 
 let networkSpeedCache: number | null = null;
