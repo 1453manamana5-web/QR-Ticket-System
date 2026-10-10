@@ -55,37 +55,12 @@ service cloud.firestore {
       allow read, create, update, delete: if signedIn();
     }
 
-    // Terminal status can be read by signed-in app instances. Clients may create
-    // an unapproved terminal and update operational fields, but cannot change
-    // approval/administrator fields from the client.
-    function approvalFieldsUnchanged() {
-      return request.resource.data.get('approved', false) == resource.data.get('approved', false)
-        && request.resource.data.get('managementApproved', false) == resource.data.get('managementApproved', false)
-        && request.resource.data.get('receptionApproved', false) == resource.data.get('receptionApproved', false)
-        && request.resource.data.get('admin', false) == resource.data.get('admin', false)
-        && request.resource.data.get('subAdmin', false) == resource.data.get('subAdmin', false)
-        && request.resource.data.get('role', '') == resource.data.get('role', '');
-    }
-
+    // Terminal documents are read by clients, but every write is routed through
+    // callable Functions so approval, ownership, heartbeat and role fields cannot
+    // be forged by a signed-in browser.
     match /terminals/{terminalId} {
       allow read, list: if signedIn();
-
-      allow create: if signedIn()
-        && request.resource.data.get('terminalId', '') == terminalId
-        && request.resource.data.get('approved', false) == false
-        && request.resource.data.get('managementApproved', false) == false
-        && request.resource.data.get('receptionApproved', false) == false
-        && request.resource.data.get('admin', false) == false
-        && request.resource.data.get('subAdmin', false) == false
-        && request.resource.data.get('role', '') in ['management', 'reception', 'both'];
-
-      allow update: if signedIn()
-        && request.resource.data.get('terminalId', '') == terminalId
-        && approvalFieldsUnchanged();
-
-      // Client-side terminal deletion is intentionally disabled until a trusted
-      // server-side removal flow is implemented.
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     // Default-deny for every path not explicitly listed above.
