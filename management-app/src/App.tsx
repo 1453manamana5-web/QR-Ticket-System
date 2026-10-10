@@ -1218,14 +1218,15 @@ export default function App() {
     if (!operator?.admin) { setTerminalNotice("副管理者の設定は管理者のみ行えます。"); return; }
     const target = terminals.find(terminal => terminal.terminalId === terminalId);
     if (!target || target.admin || target.terminalId === firebaseDeviceId) return;
-    const updatedTerminal: ManagedTerminal = { ...target, subAdmin: enabled };
     try {
-      await saveTerminal(updatedTerminal);
-      setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
+      await setTerminalSubAdminOnServer(firebaseDeviceId, terminalId, enabled);
+      setTerminals(current => current.map(terminal => terminal.terminalId === terminalId
+        ? { ...terminal, subAdmin: enabled }
+        : terminal));
       setTerminalNotice(enabled ? `「${target.name}」を副管理者に設定しました。` : `「${target.name}」の副管理者設定を解除しました。`);
     } catch (reason) {
       console.error("Firebase sub-admin update failed", reason);
-      setTerminalNotice("副管理者の設定をFirebaseへ保存できませんでした。");
+      setTerminalNotice("副管理者の設定をサーバーで確認できませんでした。承認済みの管理端末か確認してください。");
     }
   };
   const registerOwnTerminal = async () => {
