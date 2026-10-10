@@ -3,6 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
+import {listTerminalHandoffRequests,decideTerminalHandoff,type PendingHandoffRequest} from "./terminalHandoff";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
@@ -372,6 +373,8 @@ export default function App() {
   });
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
+  const [handoffRequests, setHandoffRequests] = useState<PendingHandoffRequest[]>([]);
+  const [handoffBusy, setHandoffBusy] = useState(false);
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
   const [terminalDataHydrated, setTerminalDataHydrated] = useState(false);
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
@@ -1104,6 +1107,30 @@ export default function App() {
     });
   };
 
+  const refreshHandoffRequests = async () => {
+    setHandoffBusy(true);
+    try {
+      const requests = await listTerminalHandoffRequests(firebaseDeviceId);
+      setHandoffRequests(requests);
+      setTerminalNotice(requests.length ? "端末引き継ぎ申請を読み込みました。" : "現在、承認待ちの引き継ぎ申請はありません。");
+    } catch (reason) {
+      console.error("Terminal handoff request list failed", reason);
+      setTerminalNotice("引き継ぎ申請を取得できません。既存端末の所有者登録がサーバー側で完了しているか確認してください。");
+    } finally { setHandoffBusy(false); }
+  };
+
+  const handleHandoffDecision = async (requestId: string, decision: "approve" | "reject") => {
+    setHandoffBusy(true);
+    try {
+      await decideTerminalHandoff(requestId, decision);
+      setHandoffRequests(current => current.filter(item => item.requestId !== requestId));
+      setTerminalNotice(decision === "approve" ? "引き継ぎ申請を承認しました。申請側で「承認を確認して引き継ぐ」を押してください。" : "引き継ぎ申請を拒否しました。");
+    } catch (reason) {
+      console.error("Terminal handoff decision failed", reason);
+      setTerminalNotice("引き継ぎ申請を処理できません。所有者権限と申請の有効期限を確認してください。");
+    } finally { setHandoffBusy(false); }
+  };
+
   const approveTerminal = async (terminalId: string) => {
     const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
     if (!operator?.admin && !operator?.subAdmin) { setTerminalNotice("端末の承認権限がありません。"); return; }
@@ -1586,6 +1613,16 @@ export default function App() {
           </div>
         </section>
 
+        <section className="terminal-own-card terminal-handoff-card">
+          <div className="terminal-section-heading">
+            <div><small>SECURE HANDOFF</small><h3>端末引き継ぎ申請</h3><p>この端末に届いた申請を確認し、承認または拒否します。端末IDを知っているだけでは引き継げません。</p></div>
+            <button className="secondary" disabled={handoffBusy} onClick={() => void refreshHandoffRequests()}>{handoffBusy ? "確認中…" : "申請を確認"}</button>
+          </div>
+          {handoffRequests.length === 0 ? <p className="terminal-handoff-empty">未確認の申請はありません。サーバー側でこの端末の所有者登録が必要です。</p> : <div className="terminal-handoff-list">{handoffRequests.map(request => <div className="terminal-handoff-request" key={request.requestId}>
+            <div><strong>引き継ぎ申請</strong><span>期限：{new Date(request.expiresAt).toLocaleString("ja-JP")}</span><small>申請ID：{request.requestId}</small></div>
+            <div className="terminal-handoff-actions"><button className="primary-action" disabled={handoffBusy} onClick={() => void handleHandoffDecision(request.requestId, "approve")}>承認</button><button className="secondary" disabled={handoffBusy} onClick={() => void handleHandoffDecision(request.requestId, "reject")}>拒否</button></div>
+          </div>)}</div>}
+        </section>
         <section className="terminal-summary-grid">
           <div className="terminal-summary-card"><small>REGISTERED</small><strong>{approvedTerminals.length}</strong><span>登録済み端末</span></div>
           <div className="terminal-summary-card online"><small>ONLINE</small><strong>{onlineCount}</strong><span>接続中</span></div>
