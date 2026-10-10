@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
-import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,type PendingHandoffRequest} from "./terminalHandoff";
+import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,deleteManagedTerminalOnServer,type PendingHandoffRequest} from "./terminalHandoff";
 import {ensureInstallationAuth} from "./firebaseClient";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -1073,9 +1073,9 @@ export default function App() {
     );
 
     try {
-      await saveTerminal(updatedTerminal);
+      await revokeTerminalReception(firebaseDeviceId, firebaseDeviceId);
       setSelectedTerminalId(null);
-      setTerminalNotice("この端末の受付を解除しました。");
+      setTerminalNotice("サーバーでこの端末の受付を解除しました。");
     } catch (reason) {
       console.error("受付解除に失敗しました", reason);
       setTerminalNotice("受付解除を保存できませんでした。");
@@ -1199,8 +1199,8 @@ export default function App() {
     if (selectedTerminalId === terminalId) setSelectedTerminalId(null);
 
     try {
-      await deleteTerminal(terminalId);
-      setTerminalNotice(`「${target.name}」を削除しました。`);
+      await deleteManagedTerminalOnServer(firebaseDeviceId, terminalId);
+      setTerminalNotice(`「${target.name}」をサーバーから削除しました。`);
     } catch (reason) {
       console.error("Firebase terminal deletion failed", reason);
       setTerminalNotice("端末をFirebaseから削除できませんでした。");
