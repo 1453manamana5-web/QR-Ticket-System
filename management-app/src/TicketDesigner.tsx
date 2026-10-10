@@ -1362,7 +1362,7 @@ export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventNam
   const cardStyle: CSSProperties = {
     aspectRatio: ratio,
     backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : undefined,
-    backgroundSize: "100% 100%",
+    backgroundSize: "contain",
     backgroundPosition: "center",
     backgroundRepeat: "no-repeat",
     position: "relative",
@@ -1374,11 +1374,11 @@ export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventNam
   };
   return (
     <div className="ticket-qr-design-preview" style={cardStyle}>
-      {!settings.backgroundImage && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,#f2f5fa,#dce4f0)" }} />}
-      <div style={{ position: "absolute", left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%`, transform: "translate(-50%,-50%)", lineHeight: 0, background: "#fff", padding: "0.3%", boxSizing: "border-box" }}>
+      {!settings.backgroundImage && <div className="ticket-no-background" style={{ background: "linear-gradient(135deg,#f2f5fa,#dce4f0)" }}>背景画像が未設定です</div>}
+      <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
         <LazyQrCode value={qrValue} size={500} level="M" marginSize={1} />
       </div>
-      <div style={{ position: "absolute", left: `${settings.numberX}%`, top: `${settings.numberY}%`, transform: "translate(-50%,-50%)", fontSize: `clamp(9px, ${settings.numberSize / 5}px, 28px)`, fontWeight: 700, color: "#111", whiteSpace: "nowrap", textShadow: "0 1px 2px rgba(255,255,255,.6)" }}>{ticketNumber}</div>
+      <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{ticketNumber}</div>
     </div>
   );
 }
