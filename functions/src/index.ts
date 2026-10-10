@@ -248,7 +248,6 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
   return { approved: true, terminalId };
 });
 
-
 /** Approve requested terminal roles only when called by a trusted registered manager. */
 export const approveTerminalRegistration = onCall(async (call) => {
   const uid = requireUid(call);
@@ -497,7 +496,6 @@ export const registerTerminalApplication = onCall(async (call) => {
   if (requestedRole !== "management" && requestedRole !== "reception" && requestedRole !== "both") {
     throw new HttpsError("invalid-argument", "申請する端末種別が正しくありません。");
   }
-
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
   await db.runTransaction(async (tx) => {
@@ -643,15 +641,16 @@ export const recordReception = onCall(async (call) => {
       installationSnap.get("authUid") === uid &&
       installationSnap.get("approved") === true &&
       installationSnap.get("terminalId") === terminalId;
-    const ownerMatches = ownerSnap.exists &&
-      ownerSnap.get("ownerUid") === uid &&
-      ownerSnap.get("enabled") === true;
+    // A handoff installation has its own Auth UID, so it need not equal the
+    // original ownerUid. The server-issued installation must bind this UID to
+    // this terminal, while the trusted owner mapping must remain enabled.
+    const ownerEnabled = ownerSnap.exists && ownerSnap.get("enabled") === true;
     const terminalAllowsReception = terminalSnap.exists &&
       terminalSnap.get("approved") === true &&
       (terminalSnap.get("receptionApproved") === true ||
         (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
       (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both");
-    if (!installationMatches || !ownerMatches || !terminalAllowsReception) {
+    if (!installationMatches || !ownerEnabled || !terminalAllowsReception) {
       throw new HttpsError("permission-denied", "この端末は受付記録を保存する権限がありません。");
     }
     if (!eventSnap.exists || !ticketSnap.exists ||
