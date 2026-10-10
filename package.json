@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces",
     "build": "npm run build --workspace management-app && npm run build --workspace reception-app",
-    "test:rules": "firebase emulators:exec --only firestore \"node --test firestore.rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --project qr-ticket-rules-test --only firestore \"node --test firestore.rules.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
