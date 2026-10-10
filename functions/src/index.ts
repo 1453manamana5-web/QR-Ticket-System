@@ -602,6 +602,87 @@ export const setTerminalSubAdmin = onCall(async (call) => {
 });
 
 
+/** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
+export const recordReception = onCall(async (call) => {
+  const uid = requireUid(call);
+  const input = call.data?.record;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new HttpsError("invalid-argument", "受付記録が正しくありません。");
+  }
+
+  const recordId = readId(input.recordId, "受付記録ID");
+  const eventId = readId(input.eventId, "イベントID");
+  const ticketId = typeof input.ticketId === "string" && input.ticketId.trim().length > 0 &&
+    input.ticketId.length <= 160 ? input.ticketId.trim() : "";
+  const terminalId = readId(input.terminalId, "端末ID");
+  const type = input.type;
+  const timestamp = input.timestamp;
+  if (!ticketId || (type !== "entry" && type !== "exit" && type !== "reentry") ||
+      typeof timestamp !== "string" || !Number.isFinite(Date.parse(timestamp))) {
+    throw new HttpsError("invalid-argument", "受付記録の内容が正しくありません。");
+  }
+
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const eventRef = db.doc("events/" + eventId);
+  const ticketRef = db.doc("events/" + eventId + "/tickets/" + ticketId);
+  const recordRef = db.doc("events/" + eventId + "/receptionRecords/" + recordId);
+
+  await db.runTransaction(async (tx) => {
+    const [installationSnap, terminalSnap, eventSnap, ticketSnap, recordSnap] = await Promise.all([
+      tx.get(installationRef), tx.get(terminalRef), tx.get(eventRef),
+      tx.get(ticketRef), tx.get(recordRef),
+    ]);
+
+    const installationMatches = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId;
+    const terminalAllowsReception = terminalSnap.exists &&
+      terminalSnap.get("approved") === true &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
+      (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both");
+    if (!installationMatches || !terminalAllowsReception) {
+      throw new HttpsError("permission-denied", "この端末は受付記録を保存する権限がありません。");
+    }
+    if (!eventSnap.exists || !ticketSnap.exists ||
+        ticketSnap.get("eventId") !== eventId || ticketSnap.get("ticketId") !== ticketId) {
+      throw new HttpsError("not-found", "イベントまたはチケットが見つかりません。");
+    }
+
+    // Retries of the same offline queue item are idempotent.
+    if (recordSnap.exists) {
+      const sameRecord = recordSnap.get("eventId") === eventId &&
+        recordSnap.get("ticketId") === ticketId &&
+        recordSnap.get("terminalId") === terminalId &&
+        recordSnap.get("type") === type &&
+        recordSnap.get("timestamp") === timestamp;
+      if (!sameRecord) throw new HttpsError("already-exists", "受付記録IDが重複しています。");
+      return;
+    }
+
+    const ticket = ticketSnap.data() ?? {};
+    if (ticket.valid !== true) {
+      throw new HttpsError("failed-precondition", "このチケットは無効です。");
+    }
+    const currentStatus = ticket.currentStatus;
+    const allowed =
+      (type === "entry" && currentStatus === "unused") ||
+      (type === "reentry" && currentStatus === "inside") ||
+      (type === "exit" && currentStatus === "inside");
+    if (!allowed) {
+      throw new HttpsError("failed-precondition", "チケットの現在状態と受付内容が一致しません。最新データを確認してください。");
+    }
+
+    const nextStatus = type === "exit" ? "exited" : "inside";
+    tx.update(ticketRef, { currentStatus: nextStatus, updatedAt: timestamp });
+    tx.create(recordRef, { recordId, eventId, ticketId, terminalId, type, timestamp });
+  });
+
+  return { saved: true, recordId };
+});
+
 /** Update operational heartbeat fields without exposing terminal authorization fields. */
 export const updateTerminalHeartbeat = onCall(async (call) => {
   const uid = requireUid(call);
