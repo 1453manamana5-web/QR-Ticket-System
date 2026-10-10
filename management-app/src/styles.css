@@ -3737,3 +3737,43 @@ body:has(.ticket-screen),
 @media(prefers-reduced-motion:reduce){
   .ai-lab-glass-menu,.ai-lab-glass-menu::before,.ai-lab-glass-menu::after,.ai-lab-detail,.ai-lab-menu-title,.ai-lab-menu-item,.ai-lab-detail-content{animation:none!important}
 }
+
+
+/* AI test lab diagnostics and persistent warning history */
+.ai-lab-status-warning{color:#9a4d08!important}
+.ai-lab-status-ok{color:#187653!important}
+.ai-lab-findings-list{display:grid;gap:9px;margin:14px 0}
+.ai-lab-finding{
+  display:grid;gap:5px;padding:12px 14px;border-radius:14px;
+  background:rgb(255 246 229/.78);border:1px solid rgb(226 166 77/.35);
+  box-shadow:inset 0 1px 0 rgb(255 255 255/.7)
+}
+.ai-lab-finding strong{color:#75420b;font-size:13px}
+.ai-lab-finding span{color:#604d38;font-size:12px;line-height:1.65}
+.ai-lab-diagnostic-ok{
+  display:flex;align-items:flex-start;gap:11px;padding:13px 14px;margin:14px 0;
+  border:1px solid rgb(69 166 126/.25);border-radius:14px;background:rgb(232 250 242/.68)
+}
+.ai-lab-diagnostic-ok>span{
+  display:grid;place-items:center;flex:0 0 25px;height:25px;border-radius:50%;
+  background:rgb(54 159 112/.15);color:#187653;font-weight:800
+}
+.ai-lab-diagnostic-ok>div{display:grid;gap:4px}
+.ai-lab-diagnostic-ok strong{font-size:13px;color:#176347}
+.ai-lab-diagnostic-ok small{font-size:12px;line-height:1.6;color:#3e6556}
+.ai-lab-warning-history{display:grid;gap:10px}
+.ai-lab-warning-history-summary{display:flex;align-items:baseline;gap:9px;padding:3px 1px 7px}
+.ai-lab-warning-history-summary strong{font-size:23px;color:#8b4a0b}
+.ai-lab-warning-history-summary span{font-size:12px;color:#5c6273}
+.ai-lab-warning-entry{
+  padding:13px 14px;border-radius:14px;background:rgb(255 255 255/.58);
+  border:1px solid rgb(255 255 255/.82);box-shadow:inset 0 1px 0 rgb(255 255 255/.68)
+}
+.ai-lab-warning-entry-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.ai-lab-warning-entry-top strong{font-size:13px;color:#75420b}
+.ai-lab-warning-entry time{flex-shrink:0;font-size:10px;color:#6d7281}
+.ai-lab-warning-entry p{margin:7px 0 0;font-size:12px;line-height:1.65;color:#51596c}
+@media(max-width:560px){
+  .ai-lab-warning-entry-top{flex-direction:column;gap:4px}
+  .ai-lab-warning-entry time{white-space:normal}
+}
