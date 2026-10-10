@@ -57,6 +57,35 @@ test("approved management installations can write event and ticket data", async 
   }));
 });
 
+test("event bundles can be fetched by token but only approved management installations can publish", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "eventBundles", "opaque-token-1"), {
+      authToken: "opaque-token-1",
+      event: { eventId: "event-1" },
+      tickets: [],
+    });
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "bundle-manager"), {
+      terminalId: "T-BUNDLE-MANAGER", authUid: "bundle-manager", approved: true,
+    });
+    await setDoc(doc(db, "terminals", "T-BUNDLE-MANAGER"), {
+      terminalId: "T-BUNDLE-MANAGER", approved: true, managementApproved: true,
+      role: "management",
+    });
+  });
+
+  const receptionDb = env.authenticatedContext("reception-user").firestore();
+  await assertSucceeds(getDoc(doc(receptionDb, "eventBundles", "opaque-token-1")));
+  await assertFails(setDoc(doc(receptionDb, "eventBundles", "opaque-token-2"), {
+    authToken: "opaque-token-2", event: { eventId: "event-2" }, tickets: [],
+  }));
+
+  const managementDb = env.authenticatedContext("bundle-manager").firestore();
+  await assertSucceeds(setDoc(doc(managementDb, "eventBundles", "opaque-token-2"), {
+    authToken: "opaque-token-2", event: { eventId: "event-2" }, tickets: [],
+  }));
+});
+
 test("management writes require the installation UID and exact approved management role", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
