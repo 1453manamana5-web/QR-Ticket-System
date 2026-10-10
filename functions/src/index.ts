@@ -17,7 +17,10 @@ function requireUid(request: { auth?: { uid: string } | null }): string {
 }
 
 function readId(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim().length < 8 || value.length > 160) {
+  if (typeof value !== "string" || value.trim().length < 8 ||
+      value.length > 160 || value.includes("/")) {
+    // IDs are used as single Firestore document-path segments. Reject slashes
+    // rather than allowing caller input to alter the path structure.
     throw new HttpsError("invalid-argument", field + "が正しくありません。");
   }
   return value.trim();
@@ -614,7 +617,7 @@ export const recordReception = onCall(async (call) => {
   const recordId = readId(input.recordId, "受付記録ID");
   const eventId = readId(input.eventId, "イベントID");
   const ticketId = typeof input.ticketId === "string" && input.ticketId.trim().length > 0 &&
-    input.ticketId.length <= 160 ? input.ticketId.trim() : "";
+    input.ticketId.length <= 160 && !input.ticketId.includes("/") ? input.ticketId.trim() : "";
   const terminalId = readId(input.terminalId, "端末ID");
   const type = input.type;
   const timestamp = input.timestamp;
