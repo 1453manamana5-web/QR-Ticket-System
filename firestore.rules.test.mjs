@@ -23,7 +23,7 @@ test("rejects access when unauthenticated", async () => {
   await assertFails(setDoc(doc(db, "events", "event-1"), { eventId: "event-1" }));
 });
 
-test("authenticated clients can read event and ticket data but cannot write without management approval", async () => {
+test("unapproved authenticated clients cannot enumerate event or ticket data", async () => {
   await env.withSecurityRulesDisabled(async context => {
     await setDoc(doc(context.firestore(), "events", "event-1"), { eventId: "event-1" });
     await setDoc(doc(context.firestore(), "events", "event-1", "tickets", "ticket-1"), {
@@ -31,12 +31,32 @@ test("authenticated clients can read event and ticket data but cannot write with
     });
   });
   const db = env.authenticatedContext("anonymous-user-1").firestore();
-  await assertSucceeds(getDoc(doc(db, "events", "event-1")));
-  await assertSucceeds(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
+  await assertFails(getDoc(doc(db, "events", "event-1")));
+  await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
   await assertFails(setDoc(doc(db, "events", "event-2"), { eventId: "event-2" }));
   await assertFails(setDoc(doc(db, "events", "event-1", "tickets", "ticket-2"), {
     ticketId: "ticket-2", eventId: "event-1", currentStatus: "unused",
   }));
+});
+
+test("approved reception installations can read event metadata but not ticket documents directly", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "reception-reader"), {
+      terminalId: "T-RECEPTION-READ", authUid: "reception-reader", approved: true,
+    });
+    await setDoc(doc(db, "terminals", "T-RECEPTION-READ"), {
+      terminalId: "T-RECEPTION-READ", approved: true, managementApproved: false,
+      receptionApproved: true, role: "reception",
+    });
+    await setDoc(doc(db, "events", "event-1"), { eventId: "event-1" });
+    await setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), {
+      ticketId: "ticket-1", eventId: "event-1", currentStatus: "unused",
+    });
+  });
+  const db = env.authenticatedContext("reception-reader").firestore();
+  await assertSucceeds(getDoc(doc(db, "events", "event-1")));
+  await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
 });
 
 test("approved management installations can write event and ticket data", async () => {
