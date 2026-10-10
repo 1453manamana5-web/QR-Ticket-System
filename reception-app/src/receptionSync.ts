@@ -2,11 +2,19 @@ import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "fi
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
+import { getTerminalInstallationStatus } from "./terminalHandoff";
 
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
+  const terminalId = getTerminalIdForRegistration();
+  // A browser that completed handoff must re-validate its server-issued installation
+  // record on every registration check, including after reload or app relaunch.
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    const serverStatus = await getTerminalInstallationStatus();
+    if (!serverStatus.approved || serverStatus.terminalId !== terminalId) return null;
+  }
   const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "terminals", getTerminalIdForRegistration()));
+  const snapshot = await getDoc(doc(db, "terminals", terminalId));
   if (!snapshot.exists()) return null;
   const data = snapshot.data();
   if (data.role !== "reception" && data.role !== "both") return null;
