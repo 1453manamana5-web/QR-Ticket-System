@@ -1,32 +1,42 @@
-# Terminal handoff backend (phase 1)
+# Terminal authorization and handoff backend
 
-This package contains authenticated callable functions for the server-side part of terminal handoff:
+This package provides authenticated callable Functions and trusted migration utilities for terminal approval and reception writes.
 
-- `requestTerminalHandoff`: creates a five-minute pending request and applies a per-user cooldown.
-- `listTerminalHandoffRequests`: only the authenticated owner of the target terminal can list pending requests.
-- `decideTerminalHandoff`: only that owner can approve/reject a pending, unexpired request.
-- `completeTerminalHandoff`: the requesting Firebase Auth UID can consume its approval once; the server creates the installation record.
-- `approveTerminalRegistration`: verifies the registered management owner server-side before approving a requested terminal role.
-- `revokeTerminalReception`: revokes reception approval through the trusted server.
-- `deleteManagedTerminal`: checks admin/sub-admin authority server-side, then removes a terminal and its owner/handoff/installation records.
-- `scripts/bootstrap-first-admin.ts`: trusted, one-time bootstrap for a new project that has no approved management terminal.
+## Server-side operations
 
-## Important: not enabled for production yet
+- `registerTerminalApplication`: creates a pending terminal application without accepting client-supplied approval flags.
+- `approveTerminalRegistration`: checks the caller's trusted management-owner mapping, approves the requested role, and writes server-owned owner/installation mappings.
+- `requestTerminalHandoff`, `listTerminalHandoffRequests`, `decideTerminalHandoff`, and `completeTerminalHandoff`: implement expiring, one-time handoff requests with owner checks and rate limiting.
+- `getTerminalInstallationStatus`: verifies the server-issued installation mapping and the terminal's current reception approval.
+- `updateTerminalHeartbeat`: validates the authenticated installation before updating operational status fields.
+- `recordReception`: validates terminal authorization, event/ticket identity, ticket validity, and entry/exit/re-entry state before atomically saving a reception record and ticket status.
+- `revokeTerminalReception`, `releaseOwnReceptionRegistration`, and `deleteManagedTerminal`: perform protected registration changes on the server.
+- `scripts/bootstrap-first-admin.ts`: one-time bootstrap for a genuinely new project; refuses to overwrite existing records.
+- `scripts/migrate-terminal-owners.ts`: trusted migration for existing approved management terminals, with dry-run and conflict checks.
 
-The web apps have not yet been integrated with Firebase Authentication or these callables. Do not deploy or expose the handoff UI until all prerequisites below are complete.
+## Validation
 
-1. Set up Firebase Authentication for both apps and persist a stable authenticated UID per browser installation.
-2. Populate `terminalOwners/{terminalId}` using a trusted, administrator-controlled migration. Each document must contain `ownerUid` and `enabled: true`. Never let a web client write this collection.
-3. Add and test Firestore Security Rules that prevent clients from writing `terminalOwners`, `terminalHandoffRequests`, `terminalHandoffRateLimits`, `terminalInstallations`, and terminal approval/ownership fields. Keep rules compatible with existing event/ticket/reception workflows.
-4. Integrate the callable functions into the reception and management apps. The reception app must verify the server-created installation record before granting reception access; a response from the client UI alone is not proof of approval.
-5. Add expiry cleanup and a management-side revoke flow for `terminalInstallations`.
-6. Run Emulator Suite tests for unauthenticated calls, wrong-owner approval, request replay, expiry, rate limiting, and direct Firestore writes before deploying.
+GitHub Actions runs Firestore Rules tests, web app typechecks/builds, and Functions typecheck/build. A successful CI run verifies those automated checks only; it does not test against the user's live Firebase project or deploy any rules/Functions.
 
-The public terminal ID is an identifier only, not a secret or a login credential. A terminal ID by itself must never grant access.
+## Existing terminal migration
 
+Only run migration from a trusted administrator workstation with Application Default Credentials for the exact intended Firebase project. Verify each terminal ID and owner UID independently. Never place service-account credentials or owner mappings in browser code, repository files, or chat.
 
-## First administrator
+Build the migration utility:
 
-For a new project only, use the trusted `bootstrap-first-admin` procedure in `docs/secure-terminal-handoff.md`. Never let a browser claim the first-admin role. The bootstrap requires Application Default Credentials, an explicit Firebase project ID, and the UID of the intended management app installation; it refuses to overwrite existing terminal or owner documents.
+```sh
+npm --prefix functions install
+npm --prefix functions run build:migration
+```
 
-The callable terminal approval, reception revocation, and deletion flows are committed but are not deployed. Existing direct terminal writes remain in parts of the apps, and event-level role authorization is not complete. Treat this branch as development work and do not deploy restrictive rules to production until the remaining client writes and emulator tests are addressed.
+First run a no-write validation:
+
+```sh
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" MIGRATION_DRY_RUN=true TERMINAL_OWNER_MIGRATION_JSON='[{"terminalId":"T-REPLACE","ownerUid":"UID-REPLACE"}]' node functions/lib-migration/scripts/migrate-terminal-owners.js
+```
+
+Review the project ID, terminal ID, UID, and output. Only after independent verification, run without `MIGRATION_DRY_RUN=true` to create missing mappings. The script refuses unapproved management terminals, duplicate terminal IDs/UIDs, and conflicting or disabled mappings. Matching mappings are treated as already complete and are not overwritten.
+
+## Production blocker
+
+Do not deploy or merge this branch as production-ready until the existing Firebase project and its live rules have been reviewed, the migration has been tested in a non-production Firebase project, and end-to-end checks have verified management approval, reception approval, heartbeat updates, entry/exit/re-entry, and revocation. Current CI is not a substitute for those checks. Keep the pull request in draft and do not deploy rules or Functions from this workflow.
