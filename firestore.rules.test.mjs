@@ -41,50 +41,28 @@ test("clients cannot access trusted handoff collections", async () => {
   await assertFails(setDoc(doc(db, "terminalHandoffRateLimits", "anonymous-user-1"), { count: 1 }));
 });
 
-test("clients cannot create approved or administrator terminals", async () => {
+test("clients cannot create, update, or delete terminal documents directly", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "terminals", "T-ABCDEFGH"), {
+      terminalId: "T-ABCDEFGH", approved: true, managementApproved: true,
+      receptionApproved: true, admin: true, name: "管理端末",
+    });
+  });
+
   const db = env.authenticatedContext("anonymous-user-1").firestore();
-  await assertFails(setDoc(doc(db, "terminals", "T-ABCDEFGH"), {
-    terminalId: "T-ABCDEFGH", approved: true, managementApproved: true,
-    receptionApproved: true, admin: true,
-  }));
-  await assertFails(setDoc(doc(db, "terminals", "T-QRSTUVWX"), {
-    terminalId: "T-QRSTUVWX", approved: false, managementApproved: false,
-    receptionApproved: false, admin: false, subAdmin: true,
-    role: "reception",
-  }));
-  await assertFails(setDoc(doc(db, "terminals", "T-YZABCDEF"), {
-    terminalId: "T-YZABCDEF", approved: false, managementApproved: false,
-    receptionApproved: false, admin: false, subAdmin: false,
-    role: "unknown",
-  }));
-  await assertSucceeds(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
+  await assertFails(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
     terminalId: "T-IJKLMNOP", approved: false, managementApproved: false,
     receptionApproved: false, admin: false, subAdmin: false,
     role: "reception", name: "受付端末",
   }));
-});
-
-test("clients cannot modify approval flags on existing terminals", async () => {
-  await env.withSecurityRulesDisabled(async context => {
-    await setDoc(doc(context.firestore(), "terminals", "T-ABCDEFGH"), {
-      terminalId: "T-ABCDEFGH", approved: true, managementApproved: true,
-      receptionApproved: false, admin: true, name: "管理端末",
-    });
-  });
-  const db = env.authenticatedContext("anonymous-user-1").firestore();
+  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { name: "改ざんした名前" }));
   await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { managementApproved: false }));
-  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { admin: false }));
-  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { subAdmin: true }));
-  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { role: "both" }));
-  await assertSucceeds(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { name: "名前変更" }));
+  await assertFails(deleteDoc(doc(db, "terminals", "T-ABCDEFGH")));
+
+  // Reading terminal status remains necessary for the management/reception UI.
+  await assertSucceeds(getDoc(doc(db, "terminals", "T-ABCDEFGH")));
 });
 
-test("clients cannot delete terminal documents directly", async () => {
-  await env.withSecurityRulesDisabled(async context => {
-    await setDoc(doc(context.firestore(), "terminals", "T-ABCDEFGH"), {
-      terminalId: "T-ABCDEFGH", approved: false, managementApproved: false,
-      receptionApproved: false, admin: false,
-    });
   });
   const db = env.authenticatedContext("anonymous-user-1").firestore();
   await assertFails(deleteDoc(doc(db, "terminals", "T-ABCDEFGH")));
