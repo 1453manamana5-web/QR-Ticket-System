@@ -275,16 +275,56 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
   }
 
-  const patch: Record<string, any> = {
-    approved: true,
-    status: "offline",
-    approvalUpdatedAt: FieldValue.serverTimestamp(),
-    approvalUpdatedByUid: uid,
-  };
-  if (role === "management" || role === "both") patch.managementApproved = true;
-  if (role === "reception" || role === "both") patch.receptionApproved = true;
+  const targetUid = targetSnap.get("requestedByUid");
+  if (typeof targetUid !== "string" || targetUid.length < 1) {
+    throw new HttpsError("failed-precondition", "この申請は端末所有者を検証できません。安全な移行後に再申請してください。");
+  }
 
-  await db.doc("terminals/" + targetTerminalId).update(patch);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  const installationRef = db.doc("terminalInstallations/" + targetUid);
+  await db.runTransaction(async (tx) => {
+    const [freshTarget, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(targetRef), tx.get(targetOwnerRef), tx.get(installationRef),
+    ]);
+    if (!freshTarget.exists ||
+        freshTarget.get("requestedByUid") !== targetUid ||
+        freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true) {
+      throw new HttpsError("failed-precondition", "申請内容が変更されています。再読み込みしてください。");
+    }
+    if (ownerSnap.exists && ownerSnap.get("enabled") === true &&
+        ownerSnap.get("ownerUid") !== targetUid) {
+      throw new HttpsError("already-exists", "この端末IDは別の所有者に登録されています。");
+    }
+    if ((role === "reception" || role === "both") && installationSnap.exists &&
+        installationSnap.get("terminalId") !== targetTerminalId) {
+      throw new HttpsError("already-exists", "この端末環境は別の端末に登録済みです。");
+    }
+
+    const patch: Record<string, any> = {
+      approved: true,
+      status: "offline",
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (role === "management" || role === "both") patch.managementApproved = true;
+    if (role === "reception" || role === "both") patch.receptionApproved = true;
+    tx.update(targetRef, patch);
+    tx.set(targetOwnerRef, {
+      terminalId: targetTerminalId,
+      ownerUid: targetUid,
+      enabled: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    if (role === "reception" || role === "both") {
+      tx.set(installationRef, {
+        terminalId: targetTerminalId,
+        authUid: targetUid,
+        approved: true,
+        registrationApprovedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  });
   return { terminalId: targetTerminalId, approved: true, role };
 });
 
