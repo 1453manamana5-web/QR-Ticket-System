@@ -34,6 +34,7 @@ function EntryIcon(){
 export default function App(){
   const [screen,setScreen]=useState<Screen>("registration");
   const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
+  const [transferTerminalId,setTransferTerminalId]=useState("");
   const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
@@ -442,10 +443,14 @@ export default function App(){
         <p className="entry-result-primary">{terminalRegistration ? "この端末の登録申請を受け付けました。" : "このiPadを受付専用端末として使用するため、最初に登録申請してください。"}</p>
         {!terminalRegistration ? <>
           <label className="reception-registration-field"><span>端末名</span><input value={terminalRegistrationName} onChange={e=>setTerminalRegistrationName(e.target.value)} placeholder="例：入口受付 iPad"/></label>
+          <label className="reception-registration-field"><span>Safariで登録済みの端末ID（引き継ぎ用）</span><input value={transferTerminalId} onChange={e=>setTransferTerminalId(e.target.value.toUpperCase())} placeholder="例：T-1A2B3C4D" autoCapitalize="characters" autoCorrect="off" spellCheck={false}/></label>
+          <button type="button" className="secondary" disabled={busy||!transferTerminalId.trim()} onClick={()=>{const id=transferTerminalId.trim().toUpperCase();if(!/^T-[A-F0-9]{8}$/.test(id)){setError("端末IDの形式が正しくありません。");return;}localStorage.setItem("qr-ticket-terminal-id",id);window.location.reload();}}>登録済み端末IDを引き継ぐ</button>
           <div className="reception-registration-info"><span>端末種別</span><strong>Web / iPad</strong></div>
           <button type="button" className="primary" disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
         </> : <>
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
+          <div className="reception-registration-info"><span>端末ID</span><strong>{getTerminalId()}</strong></div>
+          <button type="button" className="secondary" onClick={()=>{void navigator.clipboard.writeText(getTerminalId()).then(()=>setError("端末IDをコピーしました。ホーム画面アプリ側に貼り付けてください。")).catch(()=>setError("コピーできませんでした。表示中の端末IDを手動でコピーしてください。"));}}>端末IDをコピー</button>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
           <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
           <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
@@ -464,10 +469,14 @@ export default function App(){
           <p className="entry-result-primary">{terminalRegistration ? "この端末の登録申請を受け付けました。" : "このiPadを受付専用端末として使用するため、最初に登録申請してください。"}</p>
           {!terminalRegistration ? <>
             <label className="reception-registration-field"><span>端末名</span><input value={terminalRegistrationName} onChange={e=>setTerminalRegistrationName(e.target.value)} placeholder="例：入口受付 iPad"/></label>
+          <label className="reception-registration-field"><span>Safariで登録済みの端末ID（引き継ぎ用）</span><input value={transferTerminalId} onChange={e=>setTransferTerminalId(e.target.value.toUpperCase())} placeholder="例：T-1A2B3C4D" autoCapitalize="characters" autoCorrect="off" spellCheck={false}/></label>
+          <button type="button" className="secondary" disabled={busy||!transferTerminalId.trim()} onClick={()=>{const id=transferTerminalId.trim().toUpperCase();if(!/^T-[A-F0-9]{8}$/.test(id)){setError("端末IDの形式が正しくありません。");return;}localStorage.setItem("qr-ticket-terminal-id",id);window.location.reload();}}>登録済み端末IDを引き継ぐ</button>
             <div className="reception-registration-info"><span>端末種別</span><strong>Web / iPad</strong></div>
             <button type="button" className="primary" disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
           </> : <>
             <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
+          <div className="reception-registration-info"><span>端末ID</span><strong>{getTerminalId()}</strong></div>
+          <button type="button" className="secondary" onClick={()=>{void navigator.clipboard.writeText(getTerminalId()).then(()=>setError("端末IDをコピーしました。ホーム画面アプリ側に貼り付けてください。")).catch(()=>setError("コピーできませんでした。表示中の端末IDを手動でコピーしてください。"));}}>端末IDをコピー</button>
             <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
             <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
           </>}
