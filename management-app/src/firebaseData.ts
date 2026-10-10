@@ -7,17 +7,11 @@ export type TerminalRecord = { terminalId: string; name: string; type: "Web / iP
 export type AnalysisRecord = { eventId: string; eventName: string; eventDate: string; total: number; unused: number; inside: number; exited: number; savedAt: string; };
 
 export async function deleteEvent(eventId: string): Promise<void> {
-  const db = getFirebaseDb();
-  const { deleteDoc } = await import("firebase/firestore");
-
-  // Firestoreでは親ドキュメントを削除してもサブコレクションは残るため、
-  // イベント配下の運用データもまとめて削除する。
-  const subcollections = ["tickets", "receptionRecords", "analysis", "members", "settings"] as const;
-  for (const subcollection of subcollections) {
-    const snapshot = await getDocs(collection(db, "events", eventId, subcollection));
-    await Promise.all(snapshot.docs.map(item => deleteDoc(item.ref)));
-  }
-  await deleteDoc(doc(db, "events", eventId));
+  // Reception records are server-write-only, so delete the complete event tree
+  // through the callable endpoint rather than issuing direct client deletes.
+  const { deleteManagedEvent } = await import("./terminalHandoff");
+  const result = await deleteManagedEvent(eventId);
+  if (!result.deleted) throw new Error("EVENT_NOT_FOUND");
 }
 export async function saveEvent(event: Event): Promise<void> {
   const db = getFirebaseDb();
