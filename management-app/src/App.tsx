@@ -2077,26 +2077,85 @@ export default function App() {
       {error && <div className="notice error">{error}</div>}
     </div>;
 
-    return <>
-      <section className="hero">
-        <div><small>EVENT CONTROL CENTER</small><h2>{savedEventName}</h2><p>{event.eventDate} {event.startTime}–{event.endTime} ・ {event.eventId} ・ {statusLabel[eventStatus]} ・ チケット {ticketStats.total}枚</p></div>
-        <span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span>
-      </section>
-      <div className="metrics">
-        <Metric title="チケット" value={String(ticketStats.total)} sub="枚" />
-        <Metric title="入場中" value={String(ticketStats.inside)} sub="人" />
-        <Metric title="公開状態" value={bundle ? "OK" : "—"} sub="Firebase" />
-      </div>
-      <section className="panel">
-        <small>QUICK ACTION</small><h2>よく使う操作</h2>
-        <div className="quick">
-          <button onClick={() => setPage("イベント管理")}>イベントを管理 <b>›</b></button>
-          <button onClick={() => setPage("チケット管理")}>チケットを確認 <b>›</b></button>
-          <button onClick={() => setPage("端末管理")}>受付端末を管理 <b>›</b></button>
-          <button onClick={() => setPage("分析")}>分析を見る <b>›</b></button>
+    const activeEvents = eventHistory.filter(item => item.eventStatus === "active").length;
+    const receptionTerminals = terminals.filter(terminal => terminal.role === "reception" || terminal.role === "both");
+    const connectedReceptionTerminals = receptionTerminals.filter(terminal => terminal.approved && terminal.status === "online").length;
+    const recentReceptionRecords = receptionRecords
+      .filter(record => (record.type === "entry" || record.type === "exit") && typeof record.timestamp === "string" && (!event.eventId || !record.eventId || record.eventId === event.eventId))
+      .slice()
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, 5);
+    const homeEventList = eventHistory.slice(0, 4);
+
+    return <div className="home-dashboard">
+      <section className="home-welcome">
+        <div className="home-welcome-copy">
+          <small>MANAGEMENT OVERVIEW</small>
+          <h2>運営状況をひと目で確認</h2>
+          <p>イベント、チケット、受付端末の現在の状態をまとめて確認できます。</p>
+        </div>
+        <div className="home-current-event">
+          <span>選択中のイベント</span>
+          <strong>{event.eventId ? (savedEventName || event.eventName || "名称未設定") : "イベント未選択"}</strong>
+          {event.eventId ? <small>{event.eventDate || "開催日未設定"} ・ {statusLabel[eventStatus]}</small> : <small>イベント管理からイベントを作成してください。</small>}
+          <button className="home-inline-link" onClick={() => setPage("イベント管理")}>イベント管理へ <b>→</b></button>
         </div>
       </section>
-    </>;
+
+      <section className="home-metrics" aria-label="運営状況">
+        <div className="home-metric-card">
+          <span className="home-metric-icon event"><NavIcon type="event" /></span>
+          <div><small>開催中のイベント</small><strong>{activeEvents}</strong><span>件 ・ 履歴 {eventHistory.length}件</span></div>
+        </div>
+        <div className="home-metric-card">
+          <span className="home-metric-icon ticket"><NavIcon type="ticket" /></span>
+          <div><small>チケット総数</small><strong>{ticketStats.total.toLocaleString("ja-JP")}</strong><span>枚 ・ 未使用 {ticketStats.unused.toLocaleString("ja-JP")}枚</span></div>
+        </div>
+        <div className="home-metric-card">
+          <span className="home-metric-icon people"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c.4-4 2.2-6 6-6s5.6 2 6 6M17 11a3 3 0 1 0 0-6M17 14c2.5 0 4 2 4 6"/></svg></span>
+          <div><small>現在入場中</small><strong>{ticketStats.inside.toLocaleString("ja-JP")}</strong><span>人 ・ 退場済み {ticketStats.exited.toLocaleString("ja-JP")}人</span></div>
+        </div>
+        <div className="home-metric-card">
+          <span className="home-metric-icon terminal"><NavIcon type="terminal" /></span>
+          <div><small>接続中の受付端末</small><strong>{connectedReceptionTerminals}</strong><span>台 / 登録済み {receptionTerminals.filter(terminal => terminal.approved).length}台</span></div>
+        </div>
+      </section>
+
+      <div className="home-content-grid">
+        <section className="home-section home-events-section">
+          <div className="home-section-heading"><div><small>EVENTS</small><h3>イベント一覧</h3></div><button className="home-text-button" onClick={() => setPage("イベント管理")}>すべて見る <span>→</span></button></div>
+          {homeEventList.length ? <div className="home-event-list">
+            {homeEventList.map(item => <button className="home-event-row" key={item.eventId} onClick={() => { selectHistoryEvent(item); setPage("イベント管理"); }}>
+              <span className={"home-event-status " + item.eventStatus} />
+              <span className="home-event-info"><strong>{item.eventName || "名称未設定"}</strong><small>{item.eventDate || "開催日未設定"} ・ {item.eventId}</small></span>
+              <span className={"home-event-badge " + item.eventStatus}>{statusLabel[item.eventStatus]}</span>
+              <span className="home-row-chevron">›</span>
+            </button>)}
+          </div> : <div className="home-empty"><span className="home-empty-icon"><NavIcon type="event" /></span><strong>イベントはまだありません</strong><p>新しいイベントを作成すると、ここに表示されます。</p><button className="primary-action" onClick={openNewEventModal}>＋ イベントを作成</button></div>}
+        </section>
+
+        <section className="home-section home-activity-section">
+          <div className="home-section-heading"><div><small>RECENT ACTIVITY</small><h3>最近の受付状況</h3></div><button className="home-text-button" onClick={() => setPage("分析")}>分析を見る <span>→</span></button></div>
+          {recentReceptionRecords.length ? <div className="home-activity-list">
+            {recentReceptionRecords.map((record, index) => <div className="home-activity-row" key={(record.recordId || record.ticketId || "record") + "-" + record.timestamp + "-" + index}>
+              <span className={"home-activity-icon " + record.type}>{record.type === "entry" ? "↘" : "↗"}</span>
+              <span className="home-activity-info"><strong>{record.type === "entry" ? "入場受付" : "退場受付"}</strong><small>{record.ticketId || "チケットID不明"}</small></span>
+              <time>{new Date(record.timestamp).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</time>
+            </div>)}
+          </div> : <div className="home-empty home-activity-empty"><span className="home-empty-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15l3-4 3 2 5-7"/></svg></span><strong>受付記録はまだありません</strong><p>受付が行われると、最新の記録がここに表示されます。</p></div>}
+        </section>
+      </div>
+
+      <section className="home-quick-section">
+        <div className="home-section-heading"><div><small>QUICK ACCESS</small><h3>クイックアクセス</h3></div><p>よく使う管理機能へすばやく移動</p></div>
+        <div className="home-quick-grid">
+          <button onClick={() => setPage("イベント管理")}><span className="home-quick-icon"><NavIcon type="event" /></span><span><strong>イベント管理</strong><small>イベントの作成・状態変更</small></span><b>→</b></button>
+          <button onClick={() => setPage("チケット管理")}><span className="home-quick-icon"><NavIcon type="ticket" /></span><span><strong>チケット管理</strong><small>一覧・発行状況を確認</small></span><b>→</b></button>
+          <button onClick={() => setPage("端末管理")}><span className="home-quick-icon"><NavIcon type="terminal" /></span><span><strong>端末管理</strong><small>受付端末の登録・接続状況</small></span><b>→</b></button>
+          <button onClick={() => setPage("分析")}><span className="home-quick-icon"><NavIcon type="analysis" /></span><span><strong>分析</strong><small>受付データと過去の実績</small></span><b>→</b></button>
+        </div>
+      </section>
+    </div>;
   };
 
 function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
