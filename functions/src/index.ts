@@ -307,9 +307,10 @@ export const approveTerminalRegistration = onCall(async (call) => {
         freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true) {
       throw new HttpsError("failed-precondition", "申請内容が変更されています。再読み込みしてください。");
     }
-    if (ownerSnap.exists && ownerSnap.get("enabled") === true &&
-        ownerSnap.get("ownerUid") !== targetUid) {
-      throw new HttpsError("already-exists", "この端末IDは別の所有者に登録されています。");
+    // A disabled owner mapping still records prior ownership. Ordinary approval
+    // must not transfer ownership; use the explicit handoff/recovery process.
+    if (ownerSnap.exists && ownerSnap.get("ownerUid") !== targetUid) {
+      throw new HttpsError("already-exists", "この端末IDは別の所有者に登録されています。所有権の引き継ぎ手続きが必要です。");
     }
     if (installationSnap.exists &&
         installationSnap.get("terminalId") !== targetTerminalId) {
