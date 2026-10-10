@@ -251,6 +251,60 @@ export default function App() {
     }
     return findings;
   }, [event.eventId, tickets, receptionRecords]);
+
+  const aiLabSuggestions = useMemo(() => {
+    const suggestions: Array<{ title: string; detail: string }> = [];
+    if (!event.eventId) {
+      return [{ title: "イベントを選択してください", detail: "イベントを選択すると、そのイベントのチケットと受付記録を対象に分析できます。" }];
+    }
+
+    if (aiLabDiagnostics.length > 0) {
+      const seen = new Set<string>();
+      for (const finding of aiLabDiagnostics) {
+        if (seen.has(finding.title)) continue;
+        seen.add(finding.title);
+        suggestions.push({
+          title: "要確認：" + finding.title,
+          detail: finding.detail + " 該当データを確認し、必要に応じて正しい情報を再登録してください。",
+        });
+        if (suggestions.length >= 3) break;
+      }
+    }
+
+    const invalidTicketCount = tickets.filter(ticket => !ticket.valid).length;
+    if (invalidTicketCount > 0) {
+      suggestions.push({
+        title: "無効チケットを確認",
+        detail: invalidTicketCount + "枚のチケットが無効扱いです。意図した無効化かをチケット一覧で確認してください。",
+      });
+    }
+    if (tickets.length === 0) {
+      suggestions.push({
+        title: "チケットデータを確認",
+        detail: "この端末で参照できるチケットがありません。イベントの配信・選択先・端末の同期状態を確認してください。",
+      });
+    }
+    if (receptionRecords.length === 0) {
+      suggestions.push({
+        title: "受付記録を確認",
+        detail: "この端末で参照できる受付記録がありません。まだ受付を行っていない場合は、テスト用チケットで受付を試し、記録が反映されるか確認してください。",
+      });
+    }
+    if (event.eventStatus === "preparing" || event.eventStatus === "ready") {
+      suggestions.push({
+        title: "開催前の設定を確認",
+        detail: "受付開始前に、対象イベント・配布チケット数・入場／退場の受付設定が想定どおりか確認してください。",
+      });
+    }
+    if (suggestions.length === 0) {
+      suggestions.push({
+        title: "定期的な動作確認",
+        detail: "現在の基本チェックでは問題を検知していません。受付端末との同期状態を確認し、必要に応じてテスト受付を行ってください。",
+      });
+    }
+    return suggestions.slice(0, 4);
+  }, [event.eventId, event.eventStatus, tickets, receptionRecords, aiLabDiagnostics]);
+
   useEffect(() => {
     if (!appSettings.aiLabEnabled || !event.eventId || aiLabDiagnostics.length === 0) return;
     const now = new Date().toISOString();
@@ -2214,8 +2268,14 @@ function NavIcon({type}:{type:string}){
           <p>これは読み込まれたデータに対する基本診断です。通信品質や端末そのものの完全な診断を保証するものではありません。</p>
         </div>}
         {aiLabPanel === "改善提案" && <div className="ai-lab-detail-content">
-          <p>現時点では診断用ログの種類が限られているため、確実な改善提案を生成できるだけの根拠がありません。</p>
-          <div className="ai-lab-suggestion"><strong>次の改善ステップ</strong><span>読み取り処理時間・保存結果・通信エラーを記録し、イベントごとの傾向比較を有効にします。</span></div>
+          <p>現在この端末で参照できるデータと基本診断の結果から、確認すべき項目を提案します。外部AIには接続せず、ルールに基づいて表示しています。</p>
+          <div className="ai-lab-suggestion-list">
+            {aiLabSuggestions.map((suggestion, index) => <article className="ai-lab-suggestion" key={suggestion.title}>
+              <span className="ai-lab-suggestion-number">{String(index + 1).padStart(2, "0")}</span>
+              <div><strong>{suggestion.title}</strong><span>{suggestion.detail}</span></div>
+            </article>)}
+          </div>
+          <p className="ai-lab-note">提案は現在読み込まれているデータに基づく目安です。端末間の未同期データや通信品質を完全に診断するものではありません。</p>
         </div>}
         {aiLabPanel === "警告履歴" && <div className="ai-lab-detail-content">
           {aiLabWarnings.filter(item => item.eventId === event.eventId).length ? <div className="ai-lab-warning-history">
