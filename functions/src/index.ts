@@ -584,3 +584,54 @@ export const setTerminalSubAdmin = onCall(async (call) => {
   });
   return { terminalId: targetTerminalId, subAdmin: enabled };
 });
+
+
+/** Update operational heartbeat fields without exposing terminal authorization fields. */
+export const updateTerminalHeartbeat = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const mode = call.data?.mode;
+  const syncPendingCount = call.data?.syncPendingCount;
+  const networkMbps = call.data?.networkMbps;
+  if (mode !== "入口受付" && mode !== "出口受付" && mode !== "停止") {
+    throw new HttpsError("invalid-argument", "受付モードが正しくありません。");
+  }
+  if (syncPendingCount !== undefined &&
+      (!Number.isInteger(syncPendingCount) || syncPendingCount < 0 || syncPendingCount > 100000)) {
+    throw new HttpsError("invalid-argument", "未同期件数が正しくありません。");
+  }
+  if (networkMbps !== undefined &&
+      (typeof networkMbps !== "number" || !Number.isFinite(networkMbps) || networkMbps < 0 || networkMbps > 10000)) {
+    throw new HttpsError("invalid-argument", "通信速度の値が正しくありません。");
+  }
+
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+    terminalRef.get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+    db.doc("terminalInstallations/" + uid).get(),
+  ]);
+  const ownerMatches = ownerSnap.exists && ownerSnap.get("enabled") === true &&
+    ownerSnap.get("ownerUid") === uid;
+  const installationMatches = installationSnap.exists &&
+    installationSnap.get("terminalId") === terminalId &&
+    installationSnap.get("authUid") === uid &&
+    installationSnap.get("approved") === true;
+  if (!terminalSnap.exists || (!ownerMatches && !installationMatches)) {
+    throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
+  }
+
+  const existing = terminalSnap.data() ?? {};
+  const patch: Record<string, unknown> = {
+    status: "online",
+    lastSeen: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (ownerMatches && existing.managementApproved === true) {
+    patch.mode = mode;
+  }
+  if (typeof syncPendingCount === "number") patch.syncPendingCount = syncPendingCount;
+  if (typeof networkMbps === "number") patch.networkMbps = networkMbps;
+  await terminalRef.update(patch);
+  return { terminalId, status: "online" };
+});
