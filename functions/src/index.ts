@@ -543,3 +543,44 @@ export const registerTerminalApplication = onCall(async (call) => {
 
   return { terminalId, approved: false, status: "pending" };
 });
+
+
+/** Change sub-administrator status only from the trusted primary admin terminal. */
+export const setTerminalSubAdmin = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  const enabled = call.data?.enabled;
+  if (typeof enabled !== "boolean") {
+    throw new HttpsError("invalid-argument", "副管理者の設定値が正しくありません。");
+  }
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身を副管理者に設定できません。");
+  }
+
+  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+  ]);
+  if (!managerSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("admin") !== true || managerSnap.get("managementApproved") !== true) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+  if (targetSnap.get("admin") === true) {
+    throw new HttpsError("failed-precondition", "管理者端末の権限は変更できません。");
+  }
+  if (targetSnap.get("managementApproved") !== true ||
+      (targetSnap.get("role") !== "management" && targetSnap.get("role") !== "both")) {
+    throw new HttpsError("failed-precondition", "承認済みの管理端末のみ副管理者に設定できます。");
+  }
+
+  await db.doc("terminals/" + targetTerminalId).update({
+    subAdmin: enabled,
+    subAdminUpdatedAt: FieldValue.serverTimestamp(),
+    subAdminUpdatedByUid: uid,
+  });
+  return { terminalId: targetTerminalId, subAdmin: enabled };
+});
