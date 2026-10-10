@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "",
@@ -158,6 +158,12 @@ export default function App() {
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const [historicalAnalysisData, setHistoricalAnalysisData] = useState<{
+    eventId: string;
+    tickets: Ticket[];
+    records: ReceptionRecord[];
+    loading: boolean;
+  }>({ eventId: "", tickets: [], records: [], loading: false });
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [eventName, setEventName] = useState("");
@@ -443,6 +449,38 @@ export default function App() {
     }
     return () => unsubscribe?.();
   }, [event.eventId]);
+
+  useEffect(() => {
+    const targetEventId = selectedAnalysisEventId || event.eventId;
+    if (page !== "分析" || !targetEventId || targetEventId === event.eventId) {
+      setHistoricalAnalysisData(current => current.eventId === targetEventId && !current.loading
+        ? current
+        : { eventId: targetEventId, tickets: [], records: [], loading: false });
+      return;
+    }
+
+    let cancelled = false;
+    setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: true });
+    Promise.all([
+      loadEventTickets(targetEventId),
+      loadEventReceptionRecords(targetEventId),
+    ]).then(([loadedTickets, loadedRecords]) => {
+      if (cancelled) return;
+      setHistoricalAnalysisData({
+        eventId: targetEventId,
+        tickets: loadedTickets,
+        records: loadedRecords,
+        loading: false,
+      });
+    }).catch(reason => {
+      console.error("Historical event analysis load failed", reason);
+      if (!cancelled) {
+        setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: false });
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [page, selectedAnalysisEventId, event.eventId]);
 
   useEffect(() => {
     void deleteFirebaseEvent("DEMO-2027").catch(reason => {
@@ -1945,24 +1983,86 @@ export default function App() {
     </>;
 
     if (page === "分析") {
-      const selectedRecord = analysisHistory.find(item => item.eventId === selectedAnalysisEventId);
-      const isCurrentAnalysis = !selectedRecord || selectedAnalysisEventId === event.eventId;
-      const analyzedTotal = isCurrentAnalysis ? ticketStats.inside + ticketStats.exited : selectedRecord.total - selectedRecord.unused;
-      const total = isCurrentAnalysis ? ticketStats.total : selectedRecord.total;
-      const unused = isCurrentAnalysis ? ticketStats.unused : selectedRecord.unused;
-      const inside = isCurrentAnalysis ? ticketStats.inside : selectedRecord.inside;
-      const exited = isCurrentAnalysis ? ticketStats.exited : selectedRecord.exited;
+      const selectedEventId = selectedAnalysisEventId || event.eventId;
+      const isCurrentAnalysis = !selectedEventId || selectedEventId === event.eventId;
+      const selectedRecord = analysisHistory.find(item => item.eventId === selectedEventId);
+      const selectedEvent = isCurrentAnalysis
+        ? event
+        : eventHistory.find(item => item.eventId === selectedEventId);
+      const analysisTickets = isCurrentAnalysis
+        ? tickets
+        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.tickets : [];
+      const analysisReceptionRecords = isCurrentAnalysis
+        ? receptionRecords
+        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.records : [];
+      const analysisTicketStats = {
+        total: analysisTickets.length || (!isCurrentAnalysis ? selectedRecord?.total ?? 0 : 0),
+        unused: analysisTickets.length
+          ? analysisTickets.filter(ticket => ticket.currentStatus === "unused").length
+          : (!isCurrentAnalysis ? selectedRecord?.unused ?? 0 : 0),
+        inside: analysisTickets.length
+          ? analysisTickets.filter(ticket => ticket.currentStatus === "inside").length
+          : (!isCurrentAnalysis ? selectedRecord?.inside ?? 0 : 0),
+        exited: analysisTickets.length
+          ? analysisTickets.filter(ticket => ticket.currentStatus === "exited").length
+          : (!isCurrentAnalysis ? selectedRecord?.exited ?? 0 : 0),
+      };
+      const analyzedTotal = analysisTicketStats.inside + analysisTicketStats.exited;
+      const total = analysisTicketStats.total;
+      const unused = analysisTicketStats.unused;
+      const inside = analysisTicketStats.inside;
+      const exited = analysisTicketStats.exited;
       const utilization = total > 0 ? Math.round((analyzedTotal / total) * 100) : 0;
       const insideRate = analyzedTotal > 0 ? Math.round((inside / analyzedTotal) * 100) : 0;
       const exitedRate = analyzedTotal > 0 ? Math.round((exited / analyzedTotal) * 100) : 0;
-      const analysisEventName = isCurrentAnalysis ? event.eventName : selectedRecord.eventName;
-      const analysisEventDate = isCurrentAnalysis ? event.eventDate : selectedRecord.eventDate;
+      const analysisEventName = selectedEvent?.eventName ?? selectedRecord?.eventName ?? "イベント未選択";
+      const analysisEventDate = selectedEvent?.eventDate ?? selectedRecord?.eventDate ?? "";
+      const analysisStartTime = selectedEvent?.startTime ?? "10:00";
+      const analysisEndTime = selectedEvent?.endTime ?? "16:00";
+
+      const exportAnalysisCsv = () => {
+        const rows = [
+          ["項目", "値"],
+          ["イベント名", analysisEventName],
+          ["開催日", analysisEventDate],
+          ["総チケット数", String(total)],
+          ["未使用", String(unused)],
+          ["入場中", String(inside)],
+          ["退場済み", String(exited)],
+          ["来場者数", String(analyzedTotal)],
+          ["利用率(%)", String(utilization)],
+          [],
+          ["受付時刻", "受付種別", "チケットID", "チケット番号", "端末ID"],
+          ...analysisReceptionRecords
+            .filter(record => record.type === "entry" || record.type === "exit")
+            .slice()
+            .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+            .map(record => [
+              record.timestamp,
+              record.type === "entry" ? "入場" : "退場",
+              record.ticketId ?? "",
+              String(record.ticketNumber ?? ""),
+              record.terminalId ?? "",
+            ]),
+        ];
+        const csv = "\uFEFF" + rows.map(row => row.map(value =>
+          '"' + String(value ?? "").replace(/"/g, '""') + '"'
+        ).join(",")).join("\r\n");
+        const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `イベント分析_${analysisEventDate || selectedEventId || "data"}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      };
 
       return <div className="analysis-screen">
         <section className="analysis-summary">
           <div className="analysis-summary-heading">
             <div><small>ANALYSIS OVERVIEW</small><h2>イベント分析</h2><p>{analysisEventName} ・ {analysisEventDate}</p></div>
-            <span className="analysis-live"><i />リアルタイム集計</span>
+            <span className={isCurrentAnalysis ? "analysis-live" : "analysis-live historical"}><i />{isCurrentAnalysis ? "リアルタイム集計" : historicalAnalysisData.loading ? "過去データ読込中" : "過去データ"}</span>
           </div>
           <div className="analysis-metrics">
             <div className="analysis-metric primary"><small>来場者数</small><strong>{analyzedTotal}</strong><span>人</span><b>入場済み + 退場済み</b></div>
@@ -1977,20 +2077,19 @@ export default function App() {
             <div><small>PAST EVENTS</small><h3>過去のイベントデータ</h3></div>
             <button className="secondary" onClick={() => saveAnalysisSnapshot()}>{isCurrentAnalysis ? "現在のデータを保存" : "現在のイベントを保存"}</button>
           </div>
-          {analysisHistory.length === 0 ? (
-            <div className="analysis-history-empty">まだ保存された過去データはありません。イベント終了時に保存すると、あとから確認できます。</div>
+          {eventHistory.length === 0 ? (
+            <div className="analysis-history-empty">イベントがありません。イベント管理からイベントを作成してください。</div>
           ) : (
             <div className="analysis-history-list">
-              {analysisHistory.map(record => (
-                <button key={record.eventId} className={selectedAnalysisEventId === record.eventId ? "analysis-history-item selected" : "analysis-history-item"} onClick={() => setSelectedAnalysisEventId(record.eventId)}>
-                  <span><b>{record.eventName}</b><small>{record.eventDate} ・ 利用 {record.total - record.unused}人</small></span>
-                  <strong>{record.total}枚</strong>
-                </button>
-              ))}
-              <button className={selectedAnalysisEventId === event.eventId ? "analysis-history-item selected current" : "analysis-history-item current"} onClick={() => setSelectedAnalysisEventId(event.eventId)}>
-                <span><b>{event.eventName}</b><small>{event.eventDate} ・ 現在のイベント</small></span>
-                <strong>現在</strong>
-              </button>
+              {eventHistory.map(item => {
+                const saved = analysisHistory.find(record => record.eventId === item.eventId);
+                return (
+                  <button key={item.eventId} className={selectedEventId === item.eventId ? "analysis-history-item selected" : "analysis-history-item"} onClick={() => setSelectedAnalysisEventId(item.eventId)}>
+                    <span><b>{item.eventName}</b><small>{item.eventDate} ・ {item.eventStatus === "finished" ? "終了イベント" : item.eventStatus === "active" ? "開催中" : "イベント履歴"}{saved ? ` ・ 保存済み` : ""}</small></span>
+                    <strong>{item.eventId === event.eventId ? "現在" : saved ? `${saved.total}枚` : "分析"}</strong>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>
@@ -2002,12 +2101,15 @@ export default function App() {
               <div className="analysis-y-axis"><span>多</span><span>中</span><span>少</span></div>
               <div className="analysis-chart-area">
                 {(() => {
-                  const startHour = Number(event.startTime.slice(0, 2));
-                  const endHour = Number(event.endTime.slice(0, 2));
-                  const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
-                  const counts = hours.map(hour => receptionRecords.filter(record => {
+                  const startHour = Number(analysisStartTime.slice(0, 2));
+                  const endHour = Number(analysisEndTime.slice(0, 2));
+                  const safeStartHour = Number.isFinite(startHour) ? startHour : 10;
+                  const safeEndHour = Number.isFinite(endHour) ? Math.max(safeStartHour, endHour) : 16;
+                  const hours = Array.from({ length: Math.min(24, Math.max(1, safeEndHour - safeStartHour + 1)) }, (_, index) => safeStartHour + index);
+                  const counts = hours.map(hour => analysisReceptionRecords.filter(record => {
                     if (record.type !== "entry") return false;
-                    return new Date(record.timestamp).getHours() === hour;
+                    const timestamp = Date.parse(record.timestamp);
+                    return Number.isFinite(timestamp) && new Date(timestamp).getHours() === hour;
                   }).length);
                   const max = Math.max(1, ...counts);
                   return <>
@@ -2029,7 +2131,7 @@ export default function App() {
           <section className="analysis-card">
             <div className="analysis-card-heading"><div><small>TICKET STATUS</small><h3>チケット利用状況</h3></div><span>{total}枚</span></div>
             <div className="analysis-status-list">
-              <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{ticketStats.unused}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(unused / total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{unused}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(unused / total) * 100}%` : "0%"}} /></div></div>
               <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{ticketStats.inside}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(inside / total) * 100}%` : "0%"}} /></div></div>
               <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{ticketStats.exited}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(exited / total) * 100}%` : "0%"}} /></div></div>
             </div>
@@ -2039,8 +2141,8 @@ export default function App() {
           <section className="analysis-card analysis-chart-card">
             <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {inside}人</span></div>
             {(() => {
-              const timeline = receptionRecords
-                .filter(record => (record.type === "entry" || record.type === "exit") && typeof record.timestamp === "string")
+              const timeline = analysisReceptionRecords
+                .filter(record => (record.type === "entry" || record.type === "exit") && typeof record.timestamp === "string" && Number.isFinite(Date.parse(record.timestamp)))
                 .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
               if (!timeline.length) return <div className="analysis-capacity-empty"><div><strong>まだ推移データがありません</strong><span>入退場記録が蓄積されると、会場内人数の変化を確認できます。</span></div></div>;
               let current = 0;
@@ -2066,10 +2168,10 @@ export default function App() {
           <section className="analysis-card">
             <div className="analysis-card-heading"><div><small>REPORT</small><h3>データ操作</h3></div></div>
             <div className="analysis-actions">
-              <button className="secondary" disabled>データを保存</button>
-              <button className="secondary" disabled>CSV出力</button>
+              <button className="secondary" onClick={() => saveAnalysisSnapshot(event)}>現在のデータを保存</button>
+              <button className="secondary" onClick={exportAnalysisCsv} disabled={!selectedEventId || historicalAnalysisData.loading}>CSV出力</button>
             </div>
-            <p className="analysis-note">現在は画面上のイベントデータを基に集計しています。受付記録の保存・同期機能を接続すると、時間帯別の詳細分析とCSV出力が利用できます。</p>
+            <p className="analysis-note">{isCurrentAnalysis ? "受付記録とチケットのリアルタイムデータを集計しています。" : historicalAnalysisData.loading ? "選択したイベントの受付記録とチケットを読み込んでいます。" : "選択したイベントの保存済み受付記録・チケットを集計しています。CSVにはイベント概要と入退場記録が含まれます。"}</p>
           </section>
         </div>
       </div>;
