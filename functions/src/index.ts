@@ -488,6 +488,27 @@ export const registerTerminalApplication = onCall(async (call) => {
     }
     if (terminalSnap.exists) {
       const current = terminalSnap.data() ?? {};
+      const sameTrustedOwner = ownerSnap.exists &&
+        ownerSnap.get("enabled") === true && ownerSnap.get("ownerUid") === uid;
+      if (requestedRole === "reception" && sameTrustedOwner &&
+          current.managementApproved === true) {
+        // A management terminal may apply for reception again, but that action
+        // must not revoke or downgrade its existing management authorization.
+        tx.set(terminalRef, {
+          name: name || (typeof current.name === "string" ? current.name : "受付端末"),
+          type,
+          role: "both",
+          receptionApproved: false,
+          approved: true,
+          managementApproved: true,
+          requestedRole: "reception",
+          requestedByUid: uid,
+          requestedAt: FieldValue.serverTimestamp(),
+          status: current.status === "online" ? "online" : "offline",
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        return;
+      }
       if (current.admin === true || current.subAdmin === true ||
           current.managementApproved === true || current.receptionApproved === true ||
           current.approved === true) {
