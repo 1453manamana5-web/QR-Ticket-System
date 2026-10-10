@@ -172,3 +172,14 @@ export async function setManagedTerminalMode(
   const result = await callable({ managerTerminalId, targetTerminalId, mode });
   return result.data;
 }
+
+export async function deleteManagedEvent(eventId: string): Promise<{ eventId: string; deleted: boolean }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { eventId: string },
+    { eventId: string; deleted: boolean }
+  >(functionsClient(), "deleteManagedEvent");
+  const result = await callable({ eventId });
+  return result.data;
+}
+
