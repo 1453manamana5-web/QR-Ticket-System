@@ -73,3 +73,27 @@ Do not deploy the handoff flow while this catch-all rule remains. A safe migrati
 
 The latest client review also found that the reception registration snapshot listener previously bypassed the server installation-status check used by the initial read. The listener now performs the same check when the local handoff marker is present, to avoid inconsistent UI behavior. This marker is client-controlled and is **not** an authorization boundary; only server-side rules and trusted callable functions can enforce ownership.
 
+
+
+## Trusted first-admin bootstrap
+
+For a brand-new Firebase project with no existing approved management terminal, use the one-time bootstrap utility from a trusted administrator workstation. Do not add a browser-side "first admin wins" exception to Firestore Rules.
+
+1. Open the management app in the exact browser/Home Screen installation that will be the permanent first admin. Trigger the app's Firebase installation-auth initialization and copy the displayed authenticated UID. Do not share or commit the UID publicly.
+2. Authenticate Google Application Default Credentials for the intended Firebase project.
+3. Build the migration scripts and set the exact project, terminal ID generated for that installation, UID, and an optional terminal name:
+
+```sh
+gcloud auth application-default login
+npm --prefix functions install
+npm --prefix functions run build:migration
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" \
+BOOTSTRAP_TERMINAL_ID="T-REPLACE_WITH_REAL_ID" \
+BOOTSTRAP_OWNER_UID="REPLACE_WITH_AUTH_UID" \
+BOOTSTRAP_TERMINAL_NAME="管理端末" \
+node functions/lib-migration/scripts/bootstrap-first-admin.js
+```
+
+The command creates both `terminals/{terminalId}` and `terminalOwners/{terminalId}` in one transaction, only when neither document exists. It refuses to overwrite existing documents. If either document already exists, stop and review the current state; do not delete or recreate it just to bypass the guard.
+
+This bootstrap utility is a trusted server-side administrative operation. It has not been run against production data from this repository session.
