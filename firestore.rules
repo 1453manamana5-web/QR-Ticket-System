@@ -6,6 +6,26 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // A browser UID is not a role. Management writes require a server-issued
+    // installation grant and a currently approved management-capable terminal.
+    function managementTerminalId() {
+      return get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId;
+    }
+
+    function approvedManagementTerminal() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminals/$(managementTerminalId()))
+        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.approved == true
+        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.managementApproved == true
+        && (
+          get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "management"
+          || get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "both"
+        );
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow read, write: if false;
@@ -23,13 +43,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Event data is available only to authenticated Firebase clients.
-    // Role-based management access requires a later server-verified admin claim.
+    // Event and ticket reads are available to authenticated clients. Direct
+    // management writes require a trusted management-terminal installation.
     match /events/{eventId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
-        allow read, create, update, delete: if signedIn();
+        allow read: if signedIn();
+        // Reception ticket status changes go through recordReception (Admin SDK).
+        allow create, update, delete: if approvedManagementTerminal();
       }
 
       match /receptionRecords/{recordId} {
@@ -39,22 +62,25 @@ service cloud.firestore {
       }
 
       match /analysis/{analysisId} {
-        allow read, create, update, delete: if signedIn();
+        allow read: if signedIn();
+        allow create, update, delete: if approvedManagementTerminal();
       }
 
       match /members/{memberId} {
-        allow read, create, update, delete: if signedIn();
+        allow read: if signedIn();
+        allow create, update, delete: if approvedManagementTerminal();
       }
 
       match /settings/{settingId} {
-        allow read, create, update, delete: if signedIn();
+        allow read: if signedIn();
+        allow create, update, delete: if approvedManagementTerminal();
       }
     }
 
-    // App settings are currently stored in devices/{deviceId}.
-    // Authentication is required, but per-device ownership is not yet enforced.
+    // Device/app settings can only be modified by approved management terminals.
     match /devices/{deviceId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if approvedManagementTerminal();
     }
 
     // Terminal documents are read by clients, but every write is routed through
