@@ -1,4 +1,4 @@
-import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
