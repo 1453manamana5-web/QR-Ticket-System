@@ -2148,7 +2148,7 @@ function NavIcon({type}:{type:string}){
           <div className="ai-lab-suggestion"><strong>次の改善ステップ</strong><span>読み取り処理時間・保存結果・通信エラーを記録し、イベントごとの傾向比較を有効にします。</span></div>
         </div>}
         {aiLabPanel === "警告履歴" && <div className="ai-lab-detail-content">
-          <div className="ai-lab-empty"><icon>✓</icon><strong>警告履歴はまだありません</strong><span>診断ルールの実装後、検知した警告がここに表示されます。</span></div>
+          <div className="ai-lab-empty"><span className="ai-lab-empty-icon">✓</span><strong>警告履歴はまだありません</strong><span>診断ルールの実装後、検知した警告がここに表示されます。</span></div>
         </div>}
       </section>}
       {aiLabMenuOpen && <div className="ai-lab-glass-menu" role="menu" aria-label="AI受付分析メニュー">
