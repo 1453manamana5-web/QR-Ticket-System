@@ -81,3 +81,19 @@ export async function registerTerminalApplication(
   const result = await callable({ terminalId, name, type, role });
   return result.data;
 }
+
+
+export async function updateTerminalHeartbeat(
+  terminalId: string,
+  mode: "入口受付" | "出口受付" | "停止",
+  syncPendingCount?: number,
+  networkMbps?: number | null,
+): Promise<{ terminalId: string; status: "online" }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string; mode: "入口受付" | "出口受付" | "停止"; syncPendingCount?: number; networkMbps?: number | null },
+    { terminalId: string; status: "online" }
+  >(functionsClient(), "updateTerminalHeartbeat");
+  const result = await callable({ terminalId, mode, syncPendingCount, networkMbps: networkMbps ?? undefined });
+  return result.data;
+}
