@@ -473,6 +473,18 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   if (!terminalSnap.exists) {
     return { terminalId, receptionApproved: false, released: false };
   }
+
+  // A handed-off installation may release only its own installation grant.
+  // Updating the shared terminal document here would revoke reception for every
+  // installation and could also downgrade the original terminal's role.
+  if (!ownsTerminal && hasInstallationGrant) {
+    await installationRef.update({
+      approved: false,
+      releasedAt: FieldValue.serverTimestamp(),
+    });
+    return { terminalId, receptionApproved: false, released: true };
+  }
+
   const role = terminalSnap.get("role");
   const managementApproved = terminalSnap.get("managementApproved") === true;
   const patch: Record<string, unknown> = {
