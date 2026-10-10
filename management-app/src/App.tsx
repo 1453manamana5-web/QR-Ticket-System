@@ -199,6 +199,73 @@ export default function App() {
   const [settingsNotice, setSettingsNotice] = useState("");
   const [aiLabMenuOpen, setAiLabMenuOpen] = useState(false);
   const [aiLabPanel, setAiLabPanel] = useState<"受付分析" | "システム診断" | "改善提案" | "警告履歴" | null>(null);
+  type AiLabWarning = { id: string; eventId: string; title: string; detail: string; detectedAt: string };
+  const [aiLabWarnings, setAiLabWarnings] = useState<AiLabWarning[]>(() => {
+    try {
+      const raw = localStorage.getItem("qr-ticket-ai-lab-warnings");
+      return raw ? (JSON.parse(raw) as AiLabWarning[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const aiLabDiagnostics = useMemo(() => {
+    const findings: Array<{ id: string; title: string; detail: string }> = [];
+    const ticketIds = new Set<string>();
+    const duplicateTicketIds = new Set<string>();
+    for (const ticket of tickets) {
+      if (!ticket.ticketId) {
+        findings.push({ id: "ticket-missing-id", title: "チケットID未設定", detail: "IDがないチケットが含まれています。受付判定の前にチケットデータを確認してください。" });
+      } else if (ticketIds.has(ticket.ticketId)) {
+        duplicateTicketIds.add(ticket.ticketId);
+      } else {
+        ticketIds.add(ticket.ticketId);
+      }
+      if (ticket.eventId && ticket.eventId !== event.eventId) {
+        findings.push({ id: "ticket-event-mismatch-" + ticket.ticketId, title: "イベントID不一致", detail: "別イベントに属するチケットが現在の一覧に含まれています。" });
+      }
+      if (!["unused", "inside", "exited"].includes(ticket.currentStatus)) {
+        findings.push({ id: "ticket-status-" + (ticket.ticketId || "unknown"), title: "チケット状態が不正", detail: "チケット「" + (ticket.ticketId || "ID不明") + "」の状態を確認してください。" });
+      }
+    }
+    for (const ticketId of duplicateTicketIds) {
+      findings.push({ id: "ticket-duplicate-" + ticketId, title: "チケットID重複", detail: "同じID「" + ticketId + "」が複数のチケットに使われています。" });
+    }
+    const recordIds = new Set<string>();
+    for (const record of receptionRecords) {
+      if (!record.recordId) {
+        findings.push({ id: "record-missing-id-" + String(record.ticketId || "unknown") + "-" + String(record.timestamp || ""), title: "受付記録ID未設定", detail: "受付記録にIDがありません。同期時の重複防止を確認してください。" });
+      } else if (recordIds.has(record.recordId)) {
+        findings.push({ id: "record-duplicate-" + record.recordId, title: "受付記録ID重複", detail: "受付記録ID「" + record.recordId + "」が重複しています。" });
+      } else {
+        recordIds.add(record.recordId);
+      }
+      if (!record.timestamp || !Number.isFinite(Date.parse(record.timestamp))) {
+        findings.push({ id: "record-time-" + (record.recordId || record.ticketId || "unknown"), title: "受付時刻が不正", detail: "時刻を解釈できない受付記録があります。" });
+      }
+      if (record.eventId && record.eventId !== event.eventId) {
+        findings.push({ id: "record-event-mismatch-" + (record.recordId || record.ticketId), title: "受付記録のイベント不一致", detail: "別イベントに属する受付記録が混在しています。" });
+      }
+      if (record.ticketId && !tickets.some(ticket => ticket.ticketId === record.ticketId)) {
+        findings.push({ id: "record-ticket-missing-" + (record.recordId || record.ticketId), title: "チケット参照先なし", detail: "受付記録が参照するチケット「" + record.ticketId + "」が現在のチケット一覧にありません。同期状況を確認してください。" });
+      }
+    }
+    return findings;
+  }, [event.eventId, tickets, receptionRecords]);
+  useEffect(() => {
+    if (!appSettings.aiLabEnabled || !event.eventId || aiLabDiagnostics.length === 0) return;
+    const now = new Date().toISOString();
+    setAiLabWarnings(current => {
+      const existing = new Set(current.map(item => item.eventId + "::" + item.id));
+      const additions = aiLabDiagnostics
+        .filter(item => !existing.has(event.eventId + "::" + item.id))
+        .map(item => ({ ...item, eventId: event.eventId, detectedAt: now }));
+      if (additions.length === 0) return current;
+      const next = [...additions, ...current].slice(0, 100);
+      try { localStorage.setItem("qr-ticket-ai-lab-warnings", JSON.stringify(next)); } catch (reason) { console.warn("AI試験警告履歴を保存できませんでした", reason); }
+      return next;
+    });
+  }, [appSettings.aiLabEnabled, event.eventId, aiLabDiagnostics]);
+
 
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
@@ -2138,18 +2205,26 @@ function NavIcon({type}:{type:string}){
           <p>現在端末で参照できるイベントデータを集計しています。複数端末の全記録が同期済みとは限りません。</p>
         </div>}
         {aiLabPanel === "システム診断" && <div className="ai-lab-detail-content">
-          <div className="ai-lab-diagnostic-row"><span>受付記録データ</span><strong>{event.eventId ? "イベント選択済み" : "イベント未選択"}</strong></div>
-          <div className="ai-lab-diagnostic-row"><span>チケットデータ</span><strong>{tickets.length ? "データあり" : "データなし／未読込"}</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>イベント</span><strong>{event.eventId ? "選択済み" : "未選択"}</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>チケットデータ</span><strong>{tickets.length ? tickets.length + "件確認" : "0件"}</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>受付記録</span><strong>{receptionRecords.length}件確認</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>検知した問題</span><strong className={aiLabDiagnostics.length ? "ai-lab-status-warning" : "ai-lab-status-ok"}>{aiLabDiagnostics.length ? aiLabDiagnostics.length + "件" : "問題は検知されていません"}</strong></div>
           <div className="ai-lab-diagnostic-row"><span>外部AI接続</span><strong>使用しない</strong></div>
-          <p>この初期版では画面から確認できる情報のみを表示します。読み取り時間や保存失敗の詳細診断は、計測ログの整備後に接続します。</p>
-        </div>}
+          {aiLabDiagnostics.length > 0 ? <div className="ai-lab-findings-list">{aiLabDiagnostics.map(item => <div className="ai-lab-finding" key={item.id}><strong>{item.title}</strong><span>{item.detail}</span></div>)}</div> : <div className="ai-lab-diagnostic-ok"><span>✓</span><div><strong>基本チェックを通過</strong><small>現在読み込まれているデータに、実装済みのチェック項目で問題は見つかりませんでした。</small></div></div>}
+          <p>これは読み込まれたデータに対する基本診断です。通信品質や端末そのものの完全な診断を保証するものではありません。</p>
+        </div>
         {aiLabPanel === "改善提案" && <div className="ai-lab-detail-content">
           <p>現時点では診断用ログの種類が限られているため、確実な改善提案を生成できるだけの根拠がありません。</p>
           <div className="ai-lab-suggestion"><strong>次の改善ステップ</strong><span>読み取り処理時間・保存結果・通信エラーを記録し、イベントごとの傾向比較を有効にします。</span></div>
         </div>}
         {aiLabPanel === "警告履歴" && <div className="ai-lab-detail-content">
-          <div className="ai-lab-empty"><span className="ai-lab-empty-icon">✓</span><strong>警告履歴はまだありません</strong><span>診断ルールの実装後、検知した警告がここに表示されます。</span></div>
-        </div>}
+          {aiLabWarnings.filter(item => item.eventId === event.eventId).length ? <div className="ai-lab-warning-history">
+            <div className="ai-lab-warning-history-summary"><strong>{aiLabWarnings.filter(item => item.eventId === event.eventId).length}件</strong><span>このイベントで記録された警告（最大100件を保存）</span></div>
+            {aiLabWarnings.filter(item => item.eventId === event.eventId).map(item => <article className="ai-lab-warning-entry" key={item.eventId + item.id}>
+              <div className="ai-lab-warning-entry-top"><strong>{item.title}</strong><time>{new Date(item.detectedAt).toLocaleString("ja-JP")}</time></div><p>{item.detail}</p>
+            </article>)}
+          </div> : <div className="ai-lab-empty"><span className="ai-lab-empty-icon">✓</span><strong>このイベントの警告はありません</strong><span>基本診断で問題が検知されると、ここに履歴として保存されます。</span></div>}
+        </div>
       </section>}
       {aiLabMenuOpen && <div className="ai-lab-glass-menu" role="menu" aria-label="AI受付分析メニュー">
         <div className="ai-lab-menu-title"><span className="ai-lab-eyebrow">AI TEST LAB</span><strong>AI受付分析</strong><small>端末内で動作する試験機能</small></div>
