@@ -56,3 +56,20 @@ GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" TERMINAL_OWNER_MIGRATION_JSON='[{"term
 The tool refuses missing/unapproved management terminals, duplicate IDs, and any owner mapping that already exists. It does not overwrite mappings. Run one reviewed mapping at a time and keep the CLI output for audit. If an owner mapping already exists, stop and investigate instead of deleting or replacing it.
 
 This utility only seeds the trusted owner map; it does not deploy Functions or make the overall handoff feature production-ready. Do not enable live handoffs until Firestore rules are explicitly reviewed and tested, callable Functions are deployed, and reception access is changed to require the server-created installation record.
+
+## Existing Firestore rules discovered during implementation
+
+The currently reported live rules use a single catch-all match:
+
+```
+match /{document=**} {
+  allow read, write: if request.time < timestamp.date(2026, 11, 4);
+}
+```
+
+This means clients can currently read and write every Firestore path until the expiry date, including `terminalOwners`, `terminalInstallations`, handoff request documents, and terminal approval fields. Adding a second restrictive `match` block would **not** fix this: Firestore combines matching `allow` expressions with logical OR, so the catch-all grant would still permit access.
+
+Do not deploy the handoff flow while this catch-all rule remains. A safe migration must replace the catch-all with path-specific rules and update all existing terminal writers so they no longer write approval/ownership fields from client code. The broad rule must not simply be deleted before those paths are mapped and emulator-tested, because that would break existing event, ticket, analysis, settings, member, device, and reception synchronization.
+
+The latest client review also found that the reception registration snapshot listener previously bypassed the server installation-status check used by the initial read. The listener now performs the same check when the local handoff marker is present, to avoid inconsistent UI behavior. This marker is client-controlled and is **not** an authorization boundary; only server-side rules and trusted callable functions can enforce ownership.
+
