@@ -259,6 +259,12 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("not-found", "承認対象の端末が見つかりません。");
   }
 
+  // The bootstrap administrator and any designated sub-administrator are protected
+  // identities; they cannot be re-approved through the ordinary registration queue.
+  if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+    throw new HttpsError("failed-precondition", "管理権限を持つ端末は通常の申請から変更できません。");
+  }
+
   const role = targetSnap.get("role");
   if (role !== "management" && role !== "reception" && role !== "both") {
     throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
@@ -301,6 +307,9 @@ export const revokeTerminalReception = onCall(async (call) => {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
   if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+  if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+    throw new HttpsError("permission-denied", "管理権限を持つ端末の受付権限は解除できません。");
+  }
 
   const role = targetSnap.get("role");
   const patch: Record<string, unknown> = {
@@ -337,6 +346,10 @@ export const deleteManagedTerminal = onCall(async (call) => {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
   if (!targetSnap.exists) return { terminalId: targetTerminalId, deleted: false };
+  // Administrator terminals are never deletable, including by another admin.
+  if (targetSnap.get("admin") === true) {
+    throw new HttpsError("permission-denied", "管理者端末は削除できません。");
+  }
 
   const isAdmin = managerSnap.get("admin") === true;
   const targetRole = targetSnap.get("role");
