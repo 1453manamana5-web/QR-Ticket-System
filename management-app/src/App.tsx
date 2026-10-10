@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
-import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,releaseOwnReceptionRegistration,deleteManagedTerminalOnServer,setTerminalSubAdmin as setTerminalSubAdminOnServer,type PendingHandoffRequest} from "./terminalHandoff";
+import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,releaseOwnReceptionRegistration,deleteManagedTerminalOnServer,setTerminalSubAdmin as setTerminalSubAdminOnServer,updateManagedTerminalName,setManagedTerminalMode,type PendingHandoffRequest} from "./terminalHandoff";
 import {ensureInstallationAuth} from "./firebaseClient";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -1092,20 +1092,17 @@ export default function App() {
     if (!currentTerminal) return;
 
     const normalizedName = name.trim() || "管理端末";
-    const updatedTerminal: ManagedTerminal = {
-      ...currentTerminal,
-      name: normalizedName,
-      lastSeen: new Date().toISOString(),
-    };
-
-    setTerminals(current =>
-      current.map(terminal =>
-        terminal.terminalId === firebaseDeviceId ? updatedTerminal : terminal
-      )
-    );
-    void saveTerminal(updatedTerminal).catch(reason => {
+    void updateManagedTerminalName(firebaseDeviceId, normalizedName).then(() => {
+      setTerminals(current =>
+        current.map(terminal => terminal.terminalId === firebaseDeviceId
+          ? { ...terminal, name: normalizedName }
+          : terminal
+        )
+      );
+      setTerminalNotice("端末名をサーバーに保存しました。");
+    }).catch(reason => {
       console.error("Firebase terminal name update failed", reason);
-      setTerminalNotice("端末名をFirebaseへ保存できませんでした。");
+      setTerminalNotice("端末名を保存できませんでした。端末の承認状態を確認してください。");
     });
   };
 
@@ -1165,7 +1162,7 @@ export default function App() {
     }
   };
 
-  const setTerminalMode = (terminalId: string, mode: TerminalMode) => {
+  const setTerminalMode = async (terminalId: string, mode: TerminalMode) => {
     const operator = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
     if (!operator?.admin && !operator?.subAdmin) { setTerminalNotice("端末の操作権限がありません。"); return; }
     const target = terminals.find(terminal => terminal.terminalId === terminalId);
@@ -1173,10 +1170,17 @@ export default function App() {
       setTerminalNotice("端末が見つからないため、リモート操作を実行できません。");
       return;
     }
-    const updatedTerminal = { ...target, mode, desiredMode: mode, desiredModeUpdatedAt: new Date().toISOString() };
-    setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
-    void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
-    setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
+    try {
+      const result = await setManagedTerminalMode(firebaseDeviceId, terminalId, mode);
+      setTerminals(current => current.map(terminal => terminal.terminalId === terminalId
+        ? { ...terminal, desiredMode: result.mode, desiredModeUpdatedAt: result.updatedAt }
+        : terminal
+      ));
+      setTerminalNotice(`${target.name}に「${mode}」への切替指示を送信しました。`);
+    } catch (reason) {
+      console.error("Firebase terminal mode command failed", reason);
+      setTerminalNotice("リモート操作に失敗しました。管理権限と受付端末の承認状態を確認してください。");
+    }
   };
 
   const deleteManagedTerminal = async (terminalId: string) => {
