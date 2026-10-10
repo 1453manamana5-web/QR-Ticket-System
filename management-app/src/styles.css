@@ -4052,3 +4052,55 @@ body:has(.ticket-screen),
 @media(max-width:850px){.home-welcome{grid-template-columns:1fr}.home-content-grid{grid-template-columns:1fr}.home-current-event{padding:17px 19px}}
 @media(max-width:560px){.home-dashboard{gap:14px}.home-welcome{padding:20px;border-radius:20px;gap:16px}.home-welcome-copy h2{font-size:24px}.home-welcome-copy p{font-size:12px}.home-metrics{gap:9px}.home-metric-card{padding:13px 11px;gap:9px;border-radius:16px}.home-metric-icon{width:36px;height:36px;border-radius:12px}.home-metric-icon svg{width:20px;height:20px}.home-metric-card strong{font-size:23px}.home-metric-card small{font-size:10px}.home-metric-card>div>span{font-size:9px}.home-section,.home-quick-section{padding:17px;border-radius:19px}.home-section-heading h3{font-size:17px}.home-section-heading>p{display:none}.home-event-badge{font-size:9px;padding:4px 6px}.home-quick-grid{grid-template-columns:1fr}.home-quick-grid>button{padding:12px}.home-event-row{gap:8px}.home-event-info small{max-width:155px}}
 @media(prefers-reduced-motion:reduce){.home-quick-grid>button{transition:none}.home-quick-grid>button:hover{transform:none}}
+
+
+/* Event management refresh: larger event cards and separate archive */
+.event-management-grid{align-items:start;gap:20px}
+.event-history-panel.event-card-panel{padding:24px;min-width:0}
+.event-card-panel>.event-section-heading{margin-bottom:22px}
+.event-list-group{margin-top:22px}
+.event-list-group:first-of-type{margin-top:0}
+.event-list-group-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:13px}
+.event-list-group-heading h4{margin:0;font-size:17px;letter-spacing:-.02em;color:#202b3d}
+.event-list-group-heading p{margin:5px 0 0;font-size:11px;color:#7a8494}
+.event-list-group-heading>span{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:34px;padding:6px 10px;border-radius:999px;background:#edf1f6;color:#5d6a7d;font-size:11px;font-weight:800}
+.event-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.event-overview-card{min-width:0;overflow:hidden;border:1px solid #e0e6ee;border-radius:19px;background:#fff;box-shadow:0 7px 22px rgba(30,43,65,.045);transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+.event-overview-card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(30,43,65,.08)}
+.event-overview-card.selected{border-color:#8296b8;box-shadow:0 0 0 2px rgba(105,133,179,.13),0 12px 28px rgba(30,43,65,.08)}
+.event-overview-select{display:block;width:100%;min-height:190px;padding:17px;border:0;background:transparent;text-align:left;color:inherit;cursor:pointer}
+.event-overview-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px}
+.event-overview-top .event-status-badge{flex:none}
+.event-selected-indicator{font-size:10px;font-weight:800;color:#506a94}
+.event-overview-select h4{margin:0 0 16px;font-size:16px;line-height:1.4;overflow-wrap:anywhere}
+.event-overview-date{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #edf0f4}
+.event-overview-date span,.event-overview-time{font-size:11px;color:#758195}
+.event-overview-date strong{font-size:12px;color:#334056;text-align:right}
+.event-overview-time{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.event-overview-arrow{font-size:17px;color:#8a96a8}
+.event-overview-select code{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8993a2;font:10px ui-monospace,SFMono-Regular,Menlo,monospace}
+.event-overview-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 13px;border-top:1px solid #e9edf2;background:#f7f9fc}
+.event-overview-actions>span{font-size:10px;color:#6d788a}
+.event-overview-actions .danger-action{padding:8px 11px;font-size:11px}
+.event-list-empty{display:flex;flex-direction:column;gap:6px;padding:26px 18px;border:1px dashed #d5dde7;border-radius:16px;text-align:center;color:#6d788a}
+.event-list-empty strong{font-size:13px;color:#3b475b}
+.event-list-empty span{font-size:11px;line-height:1.5}
+.event-past-group{padding-top:22px;border-top:1px solid #e8ecf2}
+.event-past-grid .event-overview-card{background:#f9fafc}
+.event-overview-card-past .event-overview-select{min-height:174px}
+.event-status-badge.preparing{background:#fff3d7;color:#8e651b}
+.event-status-badge.ready{background:#e8f1ff;color:#315f9e}
+.event-status-badge.active{background:#e1f6e9;color:#216c43}
+.event-status-badge.finalizing{background:#f0eaff;color:#7352a6}
+.event-status-badge.finished{background:#edf0f4;color:#697487}
+.liquid-glass-enabled .event-history-panel.event-card-panel,
+.liquid-glass-enabled .event-current-card,
+.liquid-glass-enabled .event-details-panel,
+.liquid-glass-enabled .event-status-panel{background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(238,244,255,.46));border-color:rgba(255,255,255,.82);box-shadow:0 15px 40px rgba(38,53,83,.09),inset 0 1px 0 rgba(255,255,255,.94);backdrop-filter:blur(24px) saturate(165%);-webkit-backdrop-filter:blur(24px) saturate(165%)}
+.liquid-glass-enabled .event-overview-card{background:linear-gradient(135deg,rgba(255,255,255,.75),rgba(241,245,255,.48));border-color:rgba(255,255,255,.9);box-shadow:0 9px 26px rgba(44,62,112,.08),inset 0 1px 0 rgba(255,255,255,.92);backdrop-filter:blur(18px) saturate(150%);-webkit-backdrop-filter:blur(18px) saturate(150%)}
+.liquid-glass-enabled .event-overview-card.selected{border-color:rgba(107,134,185,.62);box-shadow:0 0 0 2px rgba(107,134,185,.15),0 16px 36px rgba(44,62,112,.14),inset 0 1px 0 rgba(255,255,255,.98)}
+.liquid-glass-enabled .event-overview-actions{background:rgba(255,255,255,.36);border-color:rgba(255,255,255,.66)}
+.liquid-glass-enabled .event-list-empty{border-color:rgba(255,255,255,.86);background:rgba(255,255,255,.28)}
+@media(max-width:1050px){.event-card-grid{grid-template-columns:1fr}.event-overview-select{min-height:0}.event-overview-card-past .event-overview-select{min-height:0}}
+@media(max-width:560px){.event-history-panel.event-card-panel{padding:17px}.event-list-group-heading h4{font-size:15px}.event-overview-select{padding:14px}.event-overview-select h4{font-size:15px}.event-overview-date{padding:8px 0}}
+@media(prefers-reduced-motion:reduce){.event-overview-card,.event-overview-card:hover{transition:none;transform:none}}
