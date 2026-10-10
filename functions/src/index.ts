@@ -252,7 +252,7 @@ export const approveTerminalRegistration = onCall(async (call) => {
       managerOwnerSnap.get("enabled") !== true ||
       managerOwnerSnap.get("ownerUid") !== uid ||
       managerSnap.get("managementApproved") !== true ||
-      managerSnap.get("admin") !== true) {
+      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
   if (!targetSnap.exists) {
@@ -264,7 +264,12 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
   }
 
-  const patch: Record<string, unknown> = {
+  const isAdmin = managerSnap.get("admin") === true;
+  if (!isAdmin && (role === "management" || role === "both")) {
+    throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
+  }
+
+  const patch: Record<string, any> = {
     approved: true,
     status: "offline",
     approvalUpdatedAt: FieldValue.serverTimestamp(),
