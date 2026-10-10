@@ -349,17 +349,21 @@ export const deleteManagedTerminal = onCall(async (call) => {
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   const targetOwner = await targetOwnerRef.get();
   if (targetOwner.exists) batch.delete(targetOwnerRef);
+  await batch.commit();
+
   const pending = await db.collection("terminalHandoffRequests")
     .where("terminalId", "==", targetTerminalId).get();
-  pending.docs.forEach((doc) => batch.delete(doc.ref));
-  await batch.commit();
+  for (let i = 0; i < pending.docs.length; i += 400) {
+    const cleanup = db.batch();
+    pending.docs.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
+    await cleanup.commit();
+  }
 
   const installations = await db.collection("terminalInstallations")
     .where("terminalId", "==", targetTerminalId).get();
-  const chunks = installations.docs;
-  for (let i = 0; i < chunks.length; i += 400) {
+  for (let i = 0; i < installations.docs.length; i += 400) {
     const cleanup = db.batch();
-    chunks.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
+    installations.docs.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
     await cleanup.commit();
   }
   return { terminalId: targetTerminalId, deleted: true };
