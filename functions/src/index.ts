@@ -231,3 +231,48 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
 
   return { approved: true, terminalId };
 });
+
+
+/** Approve requested terminal roles only when called by a trusted registered manager. */
+export const approveTerminalRegistration = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("invalid-argument", "自分自身は承認できません。");
+  }
+
+  const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+  ]);
+
+  if (!managerSnap.exists || !managerOwnerSnap.exists ||
+      managerOwnerSnap.get("enabled") !== true ||
+      managerOwnerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("managementApproved") !== true ||
+      managerSnap.get("admin") !== true) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "承認対象の端末が見つかりません。");
+  }
+
+  const role = targetSnap.get("role");
+  if (role !== "management" && role !== "reception" && role !== "both") {
+    throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
+  }
+
+  const patch: Record<string, unknown> = {
+    approved: true,
+    status: "offline",
+    approvalUpdatedAt: FieldValue.serverTimestamp(),
+    approvalUpdatedByUid: uid,
+  };
+  if (role === "management" || role === "both") patch.managementApproved = true;
+  if (role === "reception" || role === "both") patch.receptionApproved = true;
+
+  await db.doc("terminals/" + targetTerminalId).update(patch);
+  return { terminalId: targetTerminalId, approved: true, role };
+});
