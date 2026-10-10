@@ -3783,3 +3783,183 @@ body:has(.ticket-screen),
   .ai-lab-warning-entry-top{flex-direction:column;gap:4px}
   .ai-lab-warning-entry time{white-space:normal}
 }
+
+
+/* ===== AI TEST LAB: Liquid Glass management theme =====
+   Enabled only while the existing AI test switch is ON.
+   UI-only overrides: all event, ticket, Firebase and reception logic remains unchanged. */
+.app-shell.liquid-glass-enabled{
+  --lg-ink:#17233c;
+  --lg-muted:#64718a;
+  --lg-line:rgba(255,255,255,.72);
+  --lg-glass:rgba(255,255,255,.62);
+  --lg-shadow:0 18px 48px rgba(44,62,112,.10),inset 0 1px 0 rgba(255,255,255,.92);
+  position:relative;
+  isolation:isolate;
+  width:100%;
+  min-height:100vh;
+  color:var(--lg-ink);
+  background:
+    radial-gradient(ellipse at 8% 4%,rgba(178,204,255,.60),transparent 36%),
+    radial-gradient(ellipse at 88% 12%,rgba(224,205,255,.52),transparent 32%),
+    radial-gradient(ellipse at 60% 90%,rgba(183,226,255,.40),transparent 36%),
+    linear-gradient(135deg,#edf3ff 0%,#f7f8ff 48%,#edf4ff 100%);
+}
+.app-shell.liquid-glass-enabled::before{
+  content:"";
+  position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:linear-gradient(120deg,rgba(255,255,255,.28),transparent 42%,rgba(255,255,255,.20));
+}
+.app-shell.liquid-glass-enabled .sidebar{
+  position:sticky;top:14px;align-self:flex-start;
+  width:252px;min-height:calc(100vh - 28px);max-height:calc(100vh - 28px);
+  margin:14px 0 14px 14px;padding:22px 14px;
+  border:1px solid rgba(255,255,255,.82);border-radius:30px;
+  color:#f8faff;
+  background:linear-gradient(155deg,rgba(40,55,91,.82),rgba(64,78,120,.68) 52%,rgba(43,57,91,.78));
+  box-shadow:0 22px 56px rgba(33,47,86,.18),inset 0 1px 0 rgba(255,255,255,.30),inset 0 0 0 1px rgba(255,255,255,.07);
+  -webkit-backdrop-filter:blur(34px) saturate(155%);
+  backdrop-filter:blur(34px) saturate(155%);
+}
+.app-shell.liquid-glass-enabled .brand-mark{
+  border:1px solid rgba(255,255,255,.62);
+  background:linear-gradient(145deg,rgba(255,255,255,.36),rgba(255,255,255,.10));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 8px 22px rgba(7,17,43,.15);
+}
+.app-shell.liquid-glass-enabled .event-mini{
+  border:1px solid rgba(255,255,255,.25);border-radius:20px;
+  background:linear-gradient(140deg,rgba(255,255,255,.16),rgba(255,255,255,.07));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.20);
+}
+.app-shell.liquid-glass-enabled .sidebar-group-title{color:rgba(255,255,255,.78)}
+.app-shell.liquid-glass-enabled .sidebar-group-title span{background:rgba(255,255,255,.24)}
+.app-shell.liquid-glass-enabled .sidebar nav button{
+  border:1px solid transparent;border-radius:16px;
+  color:#fff!important;background:transparent;
+  transition:background .24s ease,border-color .24s ease,box-shadow .24s ease,transform .24s ease;
+}
+.app-shell.liquid-glass-enabled .sidebar nav button:hover{
+  background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.20);
+  transform:translateX(2px);
+}
+.app-shell.liquid-glass-enabled .sidebar nav button.active{
+  color:#fff!important;
+  background:linear-gradient(135deg,rgba(255,255,255,.28),rgba(255,255,255,.12));
+  border-color:rgba(255,255,255,.44);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.42),0 8px 24px rgba(8,16,42,.16);
+}
+.app-shell.liquid-glass-enabled .sidebar-item-label,
+.app-shell.liquid-glass-enabled .sidebar nav button .sidebar-item-icon,
+.app-shell.liquid-glass-enabled .sidebar nav button .sidebar-item-icon svg{color:#fff!important}
+.app-shell.liquid-glass-enabled .management-main{
+  width:min(1440px,calc(100% - 280px));max-width:none;min-width:0;
+  padding:30px clamp(22px,3vw,48px);margin:0 auto;
+}
+.app-shell.liquid-glass-enabled .management-header{
+  align-items:center;margin-bottom:26px;padding:20px 24px;
+  border:1px solid rgba(255,255,255,.80);border-radius:25px;
+  background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.43));
+  box-shadow:var(--lg-shadow);
+  -webkit-backdrop-filter:blur(26px) saturate(145%);backdrop-filter:blur(26px) saturate(145%);
+}
+.app-shell.liquid-glass-enabled .management-header h1{color:#182541;letter-spacing:-.035em}
+.app-shell.liquid-glass-enabled .management-header small,
+.app-shell.liquid-glass-enabled .panel small,
+.app-shell.liquid-glass-enabled .hero small{color:#64718a}
+.app-shell.liquid-glass-enabled :is(.panel,.hero,.metric,.settings-hero,.settings-section,.settings-card,
+.event-management-hero,.event-current-card,.event-section,.ticket-management-panel,
+.analysis-card,.analysis-panel,.terminal-registration-card,.member-panel,.ticket-home-card){
+  border-color:rgba(255,255,255,.78)!important;
+  background:linear-gradient(145deg,rgba(255,255,255,.78),rgba(247,249,255,.55))!important;
+  box-shadow:0 14px 36px rgba(44,62,112,.08),inset 0 1px 0 rgba(255,255,255,.92)!important;
+  -webkit-backdrop-filter:blur(22px) saturate(145%);backdrop-filter:blur(22px) saturate(145%);
+}
+.app-shell.liquid-glass-enabled :is(section,.settings-card,.event-management-hero,.event-current-card,.event-section,.metric,.panel,.hero){
+  border-radius:24px;
+}
+.app-shell.liquid-glass-enabled :is(.settings-section-heading,.event-section-heading,.event-current-heading){color:#1b2947}
+.app-shell.liquid-glass-enabled :is(h1,h2,h3,h4,strong,b,label){text-wrap:pretty}
+.app-shell.liquid-glass-enabled :is(button,.primary-action,.secondary,.danger-action,.ticket-list-launch,.ticket-action-button){
+  transition:transform .18s ease,box-shadow .18s ease,background .18s ease,border-color .18s ease;
+}
+.app-shell.liquid-glass-enabled :is(button,.primary-action,.secondary,.danger-action):not(:disabled):hover{
+  transform:translateY(-1px);
+}
+.app-shell.liquid-glass-enabled :is(.primary-action,.primary,.ticket-list-launch){
+  border:1px solid rgba(255,255,255,.68);
+  box-shadow:0 8px 20px rgba(61,91,165,.18),inset 0 1px 0 rgba(255,255,255,.32);
+}
+.app-shell.liquid-glass-enabled :is(.secondary,.settings-data-actions button){
+  background:rgba(255,255,255,.68);
+  border-color:rgba(157,174,211,.55);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 4px 12px rgba(44,62,112,.05);
+  color:#263653;
+}
+.app-shell.liquid-glass-enabled :is(input,select,textarea){
+  border-color:rgba(150,167,204,.58)!important;
+  border-radius:13px!important;
+  background:rgba(255,255,255,.76)!important;
+  color:#17233c!important;
+  box-shadow:inset 0 1px 2px rgba(36,52,88,.035);
+}
+.app-shell.liquid-glass-enabled :is(input,select,textarea):focus{
+  outline:3px solid rgba(119,151,231,.24);border-color:#7d9be5!important;
+}
+.app-shell.liquid-glass-enabled :is(table,.ticket-table,.analysis-table){border-color:rgba(159,174,207,.42)}
+.app-shell.liquid-glass-enabled :is(th,.table-header){background:rgba(225,233,250,.72)!important;color:#34425f}
+.app-shell.liquid-glass-enabled :is(td,.table-cell){border-color:rgba(159,174,207,.28)}
+.app-shell.liquid-glass-enabled .modal-backdrop,
+.app-shell.liquid-glass-enabled .ticket-modal-backdrop{
+  background:rgba(31,43,72,.24);
+  -webkit-backdrop-filter:blur(20px) saturate(135%);backdrop-filter:blur(20px) saturate(135%);
+}
+.app-shell.liquid-glass-enabled :is(.new-event-modal,.ticket-modal,.modal-content,.ai-lab-detail){
+  border:1px solid rgba(255,255,255,.86);
+  border-radius:28px;
+  background:linear-gradient(145deg,rgba(255,255,255,.88),rgba(237,243,255,.76));
+  box-shadow:0 30px 90px rgba(25,39,78,.24),inset 0 1px 0 rgba(255,255,255,.98);
+  -webkit-backdrop-filter:blur(32px) saturate(160%);backdrop-filter:blur(32px) saturate(160%);
+}
+.app-shell.liquid-glass-enabled .ai-lab-glass-menu{
+  border-color:rgba(255,255,255,.96);
+  box-shadow:0 26px 76px rgba(35,47,88,.22),inset 0 1px 0 rgba(255,255,255,.98);
+}
+.app-shell.liquid-glass-enabled .ai-lab-fab{
+  border:1px solid rgba(255,255,255,.92);
+  box-shadow:0 14px 36px rgba(54,76,145,.28),inset 0 1px 0 rgba(255,255,255,.95);
+}
+.app-shell.liquid-glass-enabled :is(.notice,.pill,.status-pill,.settings-device-pill){
+  border-color:rgba(255,255,255,.70);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55);
+}
+.app-shell.liquid-glass-enabled .sidebar,
+.app-shell.liquid-glass-enabled .management-header,
+.app-shell.liquid-glass-enabled :is(.panel,.hero,.metric,.settings-hero,.settings-section,.settings-card,
+.event-management-hero,.event-current-card,.event-section,.ticket-management-panel,
+.analysis-card,.analysis-panel,.terminal-registration-card,.member-panel,.ticket-home-card){
+  background-clip:padding-box;
+}
+@media(max-width:900px){
+  .app-shell.liquid-glass-enabled .sidebar{width:228px;margin-left:10px}
+  .app-shell.liquid-glass-enabled .management-main{width:calc(100% - 248px);padding:22px}
+}
+@media(max-width:560px){
+  .app-shell.liquid-glass-enabled{background:
+    radial-gradient(ellipse at 8% 4%,rgba(178,204,255,.52),transparent 36%),
+    radial-gradient(ellipse at 88% 12%,rgba(224,205,255,.44),transparent 32%),
+    linear-gradient(135deg,#edf3ff,#f7f8ff)}
+  .app-shell.liquid-glass-enabled .sidebar{
+    width:auto;min-height:auto;max-height:none;margin:8px 8px 0;padding:14px 12px 10px;
+    border-radius:24px;position:relative;top:auto;
+  }
+  .app-shell.liquid-glass-enabled .management-main{width:100%;padding:16px 12px 24px}
+  .app-shell.liquid-glass-enabled .management-header{padding:16px 18px;border-radius:21px;margin-bottom:16px}
+  .app-shell.liquid-glass-enabled :is(.panel,.hero,.metric,.settings-hero,.settings-section,.settings-card,
+  .event-management-hero,.event-current-card,.event-section,.ticket-management-panel,
+  .analysis-card,.analysis-panel,.terminal-registration-card,.member-panel,.ticket-home-card){border-radius:20px}
+}
+@media(prefers-reduced-motion:reduce){
+  .app-shell.liquid-glass-enabled *,
+  .app-shell.liquid-glass-enabled *::before,
+  .app-shell.liquid-glass-enabled *::after{transition:none!important;animation:none!important}
+}
