@@ -97,3 +97,17 @@ node functions/lib-migration/scripts/bootstrap-first-admin.js
 The command creates both `terminals/{terminalId}` and `terminalOwners/{terminalId}` in one transaction, only when neither document exists. It refuses to overwrite existing documents. If either document already exists, stop and review the current state; do not delete or recreate it just to bypass the guard.
 
 This bootstrap utility is a trusted server-side administrative operation. It has not been run against production data from this repository session.
+
+## Compatibility audit (2026-10-10)
+
+The branch now includes `releaseOwnReceptionRegistration`, a callable that checks the current Firebase Auth UID against either the trusted owner mapping or the server-issued installation record before clearing reception approval. Both the management app's own-terminal release action and the reception app's reset action call this endpoint instead of attempting to delete the terminal document. The ordinary manager revoke endpoint also refuses to alter a target marked `admin` or `subAdmin`, and managed-terminal deletion refuses to delete an admin terminal even when called by another admin.
+
+The following issues remain blockers before deploying the rules or Functions:
+
+- `registerReceptionTerminal`, `saveTerminalHeartbeat`, and `saveManagementTerminalHeartbeat` still write terminal documents directly. Their payloads must be audited and moved to server callables where they would create or modify protected fields.
+- The management app's legacy duplicate-terminal merge still calls direct `deleteTerminal`; this will be denied by the proposed rules and needs a safe, owner-checked migration path.
+- Newly approved management terminals do not automatically receive a trusted `terminalOwners/{terminalId}` mapping. Do not assume they can use manager callables until a safe, server-bound registration flow creates that mapping.
+- The current rules allow any Firebase-authenticated client (including anonymous auth) to read and modify event, ticket, member, analysis, settings, and device data. This is narrower than the expiring public catch-all, but it is not yet role-based authorization.
+- The reception release callable works only when the caller has a matching server-owned owner or installation record. Existing installations need migration or a server-side registration flow before the action can work.
+
+No production rules or Functions were deployed from this work session. CI has not reported a run for the latest branch commit, so build and emulator test results remain unverified.
