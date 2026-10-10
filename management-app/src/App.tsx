@@ -2247,6 +2247,7 @@ function NavIcon({type}:{type:string}){
                   onPointerDown={(event) => {
                     if (item.comingSoon || !appSettings.aiLabEnabled || event.button !== 0) return;
                     navSwipeRef.current = { startX: event.clientX, startY: event.clientY, current: item.label, moved: false };
+                    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* pointer capture may be unavailable */ }
                     setNavSwipePreview(item.label);
                   }}
                   onClick={() => {
