@@ -1,3 +1,4 @@
+import type { ReceptionRecord } from "@qr-ticket-system/shared";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ensureInstallationAuth } from "./firebaseClient";
@@ -95,5 +96,19 @@ export async function updateTerminalHeartbeat(
     { terminalId: string; status: "online" }
   >(functionsClient(), "updateTerminalHeartbeat");
   const result = await callable({ terminalId, mode, syncPendingCount, networkMbps: networkMbps ?? undefined });
+  return result.data;
+}
+
+
+/** Saves a reception record through server-side terminal and ticket validation. */
+export async function submitReceptionRecord(
+  record: ReceptionRecord,
+): Promise<{ saved: true; recordId: string }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { record: ReceptionRecord },
+    { saved: true; recordId: string }
+  >(functionsClient(), "recordReception");
+  const result = await callable({ record });
   return result.data;
 }
