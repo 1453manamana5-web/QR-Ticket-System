@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
-import {listTerminalHandoffRequests,decideTerminalHandoff,type PendingHandoffRequest} from "./terminalHandoff";
+import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,type PendingHandoffRequest} from "./terminalHandoff";
 import {ensureInstallationAuth} from "./firebaseClient";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -1146,8 +1146,9 @@ export default function App() {
         return;
       }
 
-      const isReceptionRequest = target.role === "reception" || target.role === "both";
-      const isManagementRequest = target.role === "management" || target.role === "both";
+      const approval = await approveTerminalRegistration(firebaseDeviceId, terminalId);
+      const isReceptionRequest = approval.role === "reception" || approval.role === "both";
+      const isManagementRequest = approval.role === "management" || approval.role === "both";
       const updatedTerminal = {
         ...target,
         approved: true,
@@ -1155,9 +1156,8 @@ export default function App() {
         receptionApproved: isReceptionRequest ? true : target.receptionApproved === true,
         status: "offline" as TerminalStatus,
       };
-      await saveTerminal(updatedTerminal);
       setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
-      setTerminalNotice("端末を承認しました。受付端末側にも自動反映されます。");
+      setTerminalNotice("サーバーで端末を承認しました。受付端末側にも自動反映されます。");
       setSelectedTerminalId(terminalId);
     } catch (reason) {
       console.error("Firebase terminal approval failed", reason);
