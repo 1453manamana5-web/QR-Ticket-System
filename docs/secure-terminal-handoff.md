@@ -17,7 +17,7 @@ Ownership is intentionally stored separately in `terminalOwners/{terminalId}`. T
 
 ## Not yet production-ready
 
-This is a backend foundation, not a complete live feature. The web apps have not yet been integrated with Firebase Authentication or the callable endpoints, and the receiving app does not yet check `terminalInstallations/{uid}` before enabling reception. Existing terminals also have not been migrated to trusted owner mappings. Do not deploy or enable this flow until all of the following are completed:
+This is a backend foundation, not a complete live feature. The UI now has a first integration with Firebase Authentication and the callable endpoints. However, existing terminals have not been migrated to trusted owner mappings, the reception app still needs to enforce `terminalInstallations/{uid}` before granting access, and Firebase deployment/configuration and emulator tests remain outstanding. Do not deploy or enable this flow until all of the following are completed:
 
 1. Set up Firebase Authentication in both apps and persist an authenticated UID per browser installation.
 2. Populate `terminalOwners/{terminalId}` through a trusted administrator-controlled migration. Each document must contain `ownerUid` and `enabled: true`.
@@ -37,3 +37,22 @@ This is a backend foundation, not a complete live feature. The web apps have not
 - A new installation cannot modify the original installation's credentials.
 - Existing event/ticket/reception synchronization continues to work.
 - Safari and the Home Screen app on the same iPad can complete the explicit approval flow.
+
+
+## Trusted owner migration (manual, create-only)
+
+1. Open the already-approved management terminal in the exact browser/Home Screen installation that should retain ownership.
+2. In **端末管理 → 端末引き継ぎ申請**, click **申請を確認** once. This also initializes its anonymous Firebase Auth identity and shows **この管理アプリの認証ID**. Copy that UID. Do not use a UID from a different browser storage context.
+3. From a trusted administrator workstation, authenticate Application Default Credentials for the intended Firebase project. Never put service-account credentials or owner mappings in the browser app or commit them to Git.
+4. Build and run the create-only migration utility with a reviewed mapping. Example (replace values with the real project ID, terminal ID, and copied UID):
+
+```sh
+gcloud auth application-default login
+npm --prefix functions install
+npm --prefix functions run build:migration
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" TERMINAL_OWNER_MIGRATION_JSON='[{"terminalId":"T-REPLACE","ownerUid":"UID-REPLACE"}]' node functions/lib-migration/scripts/migrate-terminal-owners.js
+```
+
+The tool refuses missing/unapproved management terminals, duplicate IDs, and any owner mapping that already exists. It does not overwrite mappings. Run one reviewed mapping at a time and keep the CLI output for audit. If an owner mapping already exists, stop and investigate instead of deleting or replacing it.
+
+This utility only seeds the trusted owner map; it does not deploy Functions or make the overall handoff feature production-ready. Do not enable live handoffs until Firestore rules are explicitly reviewed and tested, callable Functions are deployed, and reception access is changed to require the server-created installation record.
