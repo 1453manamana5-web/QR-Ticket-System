@@ -508,6 +508,8 @@ export default function App(){
                 <div className="entry-result-icon">✓</div>
                 <h2>イベント認証の準備完了</h2>
                 <p className="entry-result-primary">管理アプリのイベントデータQRを読み取るか、連携コードを入力してください</p>
+                <div className="reception-registration-info"><span>この端末のID</span><strong>{getTerminalId()}</strong></div>
+                <button type="button" className="secondary" onClick={()=>{void navigator.clipboard.writeText(getTerminalId()).then(()=>setError("端末IDをコピーしました。ホーム画面アプリ側に貼り付けてください。")).catch(()=>setError("コピーできませんでした。表示中の端末IDを手動でコピーしてください。"));}}>端末IDをコピー</button>
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
                   <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
