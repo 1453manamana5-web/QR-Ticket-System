@@ -381,3 +381,48 @@ export const deleteManagedTerminal = onCall(async (call) => {
   }
   return { terminalId: targetTerminalId, deleted: true };
 });
+
+
+/** Let an installation release only its own reception permission. */
+export const releaseOwnReceptionRegistration = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+    terminalRef.get(),
+    ownerRef.get(),
+    installationRef.get(),
+  ]);
+
+  const ownsTerminal = ownerSnap.exists &&
+    ownerSnap.get("enabled") === true &&
+    ownerSnap.get("ownerUid") === uid;
+  const hasInstallationGrant = installationSnap.exists &&
+    installationSnap.get("authUid") === uid &&
+    installationSnap.get("approved") === true &&
+    installationSnap.get("terminalId") === terminalId;
+  if (!ownsTerminal && !hasInstallationGrant) {
+    throw new HttpsError("permission-denied", "この端末の受付権限を解除する権限がありません。");
+  }
+  if (!terminalSnap.exists) {
+    return { terminalId, receptionApproved: false, released: false };
+  }
+  if (terminalSnap.get("admin") === true) {
+    throw new HttpsError("failed-precondition", "管理者端末の登録状態はこの操作では変更できません。");
+  }
+
+  const role = terminalSnap.get("role");
+  const managementApproved = terminalSnap.get("managementApproved") === true;
+  const patch: Record<string, unknown> = {
+    receptionApproved: false,
+    approved: managementApproved,
+    updatedAt: new Date().toISOString(),
+    approvalUpdatedAt: FieldValue.serverTimestamp(),
+    approvalUpdatedByUid: uid,
+  };
+  if (role === "both" && managementApproved) patch.role = "management";
+  await terminalRef.update(patch);
+  return { terminalId, receptionApproved: false, released: true };
+});
