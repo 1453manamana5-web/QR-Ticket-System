@@ -49,7 +49,8 @@ test("clients cannot create approved or administrator terminals", async () => {
   }));
   await assertSucceeds(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
     terminalId: "T-IJKLMNOP", approved: false, managementApproved: false,
-    receptionApproved: false, admin: false, name: "受付端末",
+    receptionApproved: false, admin: false, subAdmin: false,
+    role: "reception", name: "受付端末",
   }));
 });
 
