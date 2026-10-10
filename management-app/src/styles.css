@@ -4439,3 +4439,26 @@ body:has(.ticket-screen),
     transform: none;
   }
 }
+
+
+/* AI event assistant and end-of-event report */
+.ai-assistant-content,.ai-report-content{display:flex;flex-direction:column;gap:12px}
+.ai-assistant-quick-prompts{display:flex;flex-wrap:wrap;gap:7px}
+.ai-assistant-quick-prompts button{border:1px solid rgba(110,130,160,.28);background:rgba(255,255,255,.7);color:#172033;border-radius:999px;padding:7px 10px;font-size:12px;cursor:pointer}
+.ai-assistant-quick-prompts button:hover{background:#eef4ff;border-color:#8aa9dc}
+.ai-assistant-messages{display:flex;flex-direction:column;gap:10px;max-height:310px;overflow:auto;padding:2px}
+.ai-assistant-welcome{border:1px dashed rgba(110,130,160,.4);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:7px;color:#4b5563;font-size:13px}
+.ai-assistant-welcome strong{color:#172033;font-size:14px}
+.ai-assistant-message{max-width:95%;border-radius:14px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ai-assistant-message.user{align-self:flex-end;background:#e8efff;color:#172033}
+.ai-assistant-message.assistant{align-self:flex-start;background:rgba(255,255,255,.82);border:1px solid rgba(110,130,160,.2);color:#263246}
+.ai-assistant-message>span{display:block;font-size:10px;font-weight:700;opacity:.65;margin-bottom:4px}
+.ai-assistant-message p{font-size:13px;line-height:1.65;margin:0}
+.ai-assistant-form{display:flex;gap:8px;align-items:center}
+.ai-assistant-form input{min-width:0;flex:1;border:1px solid #cbd5e1;border-radius:10px;background:#fff;padding:11px 12px;color:#172033;font:inherit;font-size:13px}
+.ai-assistant-form button{white-space:nowrap}
+.ai-assistant-form button:disabled{opacity:.45;cursor:not-allowed}
+.ai-report-textarea{width:100%;min-height:280px;resize:vertical;border:1px solid #cbd5e1;border-radius:12px;padding:12px;background:rgba(255,255,255,.9);color:#172033;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ai-report-actions{display:flex;gap:8px;flex-wrap:wrap}
+.ai-report-actions button{flex:1}
+@media(max-width:560px){.ai-assistant-form{align-items:stretch}.ai-assistant-form button{padding-inline:12px}.ai-report-actions{flex-direction:column}}
