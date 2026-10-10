@@ -32,6 +32,14 @@ test("authenticated clients can access event and ticket data", async () => {
   }));
 });
 
+test("clients cannot write reception records directly", async () => {
+  const db = env.authenticatedContext("anonymous-user-1").firestore();
+  await assertFails(setDoc(doc(db, "events", "event-1", "receptionRecords", "record-12345678"), {
+    recordId: "record-12345678", eventId: "event-1", ticketId: "ticket-1",
+    terminalId: "T-ABCDEFGH", type: "entry", timestamp: new Date().toISOString(),
+  }));
+});
+
 test("clients cannot access trusted handoff collections", async () => {
   const db = env.authenticatedContext("anonymous-user-1").firestore();
   await assertFails(getDoc(doc(db, "terminalOwners", "T-ABCDEFGH")));
