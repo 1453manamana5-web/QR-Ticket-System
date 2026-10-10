@@ -1332,23 +1332,71 @@ export default function App() {
       </section>}
 
       <div className="event-management-grid">
-        <section className="event-history-panel">
-          <div className="event-section-heading"><div><small>EVENT LIST</small><h3>イベント一覧</h3></div><span>{eventHistory.length}件</span></div>
-          <div className="event-history-list">
-            {eventHistory.map(item => {
-              const selected = item.eventId === selectedHistoryEventId;
-              return <div className={selected ? "event-history-card selected" : "event-history-card"} key={item.eventId}>
-                <button className="event-history-main" onClick={() => selectHistoryEvent(item)}>
-                  <div><b>{item.eventName}</b><small>{item.eventDate} ・ {item.startTime}–{item.endTime}</small><span>{item.eventId}</span></div>
-                </button>
-                {selected && <div className="event-history-actions">
-                  <div>
-                    <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
-                  </div>
-                </div>}
-              </div>;
-            })}
+        <section className="event-history-panel event-card-panel">
+          <div className="event-section-heading">
+            <div><small>MANAGE EVENTS</small><h3>イベント一覧</h3></div>
+            <span>{eventHistory.length}件</span>
           </div>
+
+          <section className="event-list-group">
+            <div className="event-list-group-heading">
+              <div><h4>現在のイベント</h4><p>準備中・受付可能・開催中・終了処理中</p></div>
+              <span>{eventHistory.filter(item => item.eventStatus !== "finished").length}件</span>
+            </div>
+            {eventHistory.some(item => item.eventStatus !== "finished") ? (
+              <div className="event-card-grid">
+                {eventHistory.filter(item => item.eventStatus !== "finished").map(item => {
+                  const selected = item.eventId === selectedHistoryEventId;
+                  return <article className={selected ? "event-overview-card selected" : "event-overview-card"} key={item.eventId}>
+                    <button className="event-overview-select" onClick={() => selectHistoryEvent(item)} aria-label={item.eventName + "を選択"}>
+                      <div className="event-overview-top">
+                        <span className={"event-status-badge " + item.eventStatus}>{statusLabel[item.eventStatus]}</span>
+                        {selected && <span className="event-selected-indicator">選択中</span>}
+                      </div>
+                      <h4>{item.eventName || "名称未設定のイベント"}</h4>
+                      <div className="event-overview-date"><span>開催日</span><strong>{item.eventDate || "未設定"}</strong></div>
+                      <div className="event-overview-time"><span>{item.startTime || "--:--"} – {item.endTime || "--:--"}</span><span className="event-overview-arrow">↗</span></div>
+                      <code>{item.eventId}</code>
+                    </button>
+                    {selected && <div className="event-overview-actions">
+                      <span>選択中のイベント</span>
+                      <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
+                    </div>}
+                  </article>;
+                })}
+              </div>
+            ) : <div className="event-list-empty"><strong>現在のイベントはありません</strong><span>「新しいイベント」からイベントを作成できます。</span></div>}
+          </section>
+
+          <section className="event-list-group event-past-group">
+            <div className="event-list-group-heading">
+              <div><h4>過去のイベント</h4><p>終了したイベントの履歴</p></div>
+              <span>{eventHistory.filter(item => item.eventStatus === "finished").length}件</span>
+            </div>
+            {eventHistory.some(item => item.eventStatus === "finished") ? (
+              <div className="event-card-grid event-past-grid">
+                {eventHistory.filter(item => item.eventStatus === "finished").map(item => {
+                  const selected = item.eventId === selectedHistoryEventId;
+                  return <article className={selected ? "event-overview-card event-overview-card-past selected" : "event-overview-card event-overview-card-past"} key={item.eventId}>
+                    <button className="event-overview-select" onClick={() => selectHistoryEvent(item)} aria-label={item.eventName + "の履歴を選択"}>
+                      <div className="event-overview-top">
+                        <span className="event-status-badge finished">終了</span>
+                        {selected && <span className="event-selected-indicator">選択中</span>}
+                      </div>
+                      <h4>{item.eventName || "名称未設定のイベント"}</h4>
+                      <div className="event-overview-date"><span>開催日</span><strong>{item.eventDate || "未設定"}</strong></div>
+                      <div className="event-overview-time"><span>{item.startTime || "--:--"} – {item.endTime || "--:--"}</span><span className="event-overview-arrow">↗</span></div>
+                      <code>{item.eventId}</code>
+                    </button>
+                    {selected && <div className="event-overview-actions">
+                      <span>選択中の履歴</span>
+                      <button className="danger-action" onClick={() => deleteHistoryEvent(item.eventId)}>削除</button>
+                    </div>}
+                  </article>;
+                })}
+              </div>
+            ) : <div className="event-list-empty"><strong>過去のイベントはありません</strong><span>終了したイベントはここに保存されます。</span></div>}
+          </section>
         </section>
 
         {selectedHistoryEventId && event.eventId && <section className="event-details-panel">
