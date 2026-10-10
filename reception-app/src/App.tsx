@@ -480,6 +480,7 @@ export default function App(){
                 throw new Error("SERVER_INSTALLATION_NOT_APPROVED");
               }
               localStorage.setItem("qr-ticket-terminal-id",result.terminalId);
+              localStorage.setItem("qr-ticket-terminal-handoff-verified","true");
               localStorage.removeItem("qr-ticket-handoff-request-id");
               setHandoffRequestId("");
               const registration=await getTerminalRegistration();
