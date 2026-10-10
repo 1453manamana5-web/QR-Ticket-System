@@ -57,6 +57,30 @@ test("approved management installations can write event and ticket data", async 
   }));
 });
 
+test("management writes require the installation UID and exact approved management role", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "uid-mismatch-user"), {
+      terminalId: "T-MISMATCH-01", authUid: "some-other-user", approved: true,
+    });
+    await setDoc(doc(db, "terminals", "T-MISMATCH-01"), {
+      terminalId: "T-MISMATCH-01", approved: true, managementApproved: true, role: "management",
+    });
+    await setDoc(doc(db, "terminalInstallations", "missing-management-flag-user"), {
+      terminalId: "T-MISSING-FLAG-01", authUid: "missing-management-flag-user", approved: true,
+    });
+    await setDoc(doc(db, "terminals", "T-MISSING-FLAG-01"), {
+      terminalId: "T-MISSING-FLAG-01", approved: true, role: "management",
+    });
+  });
+
+  const mismatchedDb = env.authenticatedContext("uid-mismatch-user").firestore();
+  await assertFails(setDoc(doc(mismatchedDb, "events", "event-mismatch"), { eventId: "event-mismatch" }));
+
+  const missingFlagDb = env.authenticatedContext("missing-management-flag-user").firestore();
+  await assertFails(setDoc(doc(missingFlagDb, "events", "event-missing-flag"), { eventId: "event-missing-flag" }));
+});
+
 test("reception-only installations cannot write management data", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
