@@ -2,10 +2,13 @@
   "name": "qr-ticket-system-functions",
   "private": true,
   "main": "lib/index.js",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:migration": "tsc -p tsconfig.migration.json"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0",
