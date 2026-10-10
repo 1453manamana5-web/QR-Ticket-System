@@ -33,7 +33,9 @@ service cloud.firestore {
       }
 
       match /receptionRecords/{recordId} {
-        allow read, create, update, delete: if signedIn();
+        allow read: if signedIn();
+        // Writes are only allowed through the server-validated recordReception callable.
+        allow create, update, delete: if false;
       }
 
       match /analysis/{analysisId} {
