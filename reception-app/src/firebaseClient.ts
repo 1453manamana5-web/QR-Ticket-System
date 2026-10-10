@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth, signInAnonymously, type User } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -23,4 +24,20 @@ export function getFirebaseDb() {
   validateConfig();
   const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   return getFirestore(app);
+}
+
+/**
+ * Creates a stable Firebase Auth identity for this browser installation.
+ * Safari and a Home Screen web app may have separate storage and therefore
+ * separate UIDs; that is intentional. A UID or terminal ID alone must never
+ * be treated as approval to use an existing terminal.
+ * Enable Anonymous sign-in in Firebase Authentication before calling this.
+ */
+export async function ensureInstallationAuth(): Promise<User> {
+  validateConfig();
+  const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  if (auth.currentUser) return auth.currentUser;
+  const credential = await signInAnonymously(auth);
+  return credential.user;
 }
