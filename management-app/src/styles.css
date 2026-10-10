@@ -3993,3 +3993,8 @@ body:has(.ticket-screen),
   .terminal-handoff-actions { width: 100%; }
   .terminal-handoff-actions button { flex: 1; }
 }
+
+.terminal-handoff-uid { display: grid; gap: 7px; margin-top: 12px; padding: 12px; border: 1px solid #dce2eb; border-radius: 10px; background: #f8fafc; }
+.terminal-handoff-uid span, .terminal-handoff-uid small { color: #5b6474; font-size: .82rem; }
+.terminal-handoff-uid code { overflow-wrap: anywhere; user-select: all; font-size: .88rem; color: #202735; }
+.terminal-handoff-uid button { justify-self: start; }
