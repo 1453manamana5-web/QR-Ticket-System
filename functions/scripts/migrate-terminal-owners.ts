@@ -60,8 +60,11 @@ async function main() {
       ]);
       if (!terminal.exists) throw new Error(`Terminal ${entry.terminalId} does not exist.`);
       const data = terminal.data()!;
-      const approvedManagement = data.managementApproved === true || data.admin === true ||
-        (data.approved === true && (data.role === "management" || data.role === "both"));
+      // Match the Firestore Rules predicate exactly: migration must not
+      // grant a trusted installation to a terminal that the rules would reject.
+      const approvedManagement = data.approved === true &&
+        data.managementApproved === true &&
+        (data.role === "management" || data.role === "both");
       if (!approvedManagement) {
         throw new Error(`Terminal ${entry.terminalId} is not an approved management terminal.`);
       }
