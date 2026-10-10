@@ -635,3 +635,60 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
   await terminalRef.update(patch);
   return { terminalId, status: "online" };
 });
+
+
+/** Change only the authenticated owner's own management-terminal display name. */
+export const updateManagedTerminalName = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const name = typeof call.data?.name === "string" ? call.data.name.trim() : "";
+  if (!name || name.length > 80) {
+    throw new HttpsError("invalid-argument", "端末名は1〜80文字で入力してください。");
+  }
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const [terminalSnap, ownerSnap] = await Promise.all([terminalRef.get(), ownerRef.get()]);
+  if (!terminalSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      terminalSnap.get("managementApproved") !== true) {
+    throw new HttpsError("permission-denied", "この管理端末の名前を変更する権限がありません。");
+  }
+  await terminalRef.update({ name, updatedAt: new Date().toISOString() });
+  return { terminalId, name };
+});
+
+/** Send a remote reception-mode command without rewriting terminal approval fields. */
+export const setManagedTerminalMode = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  const mode = call.data?.mode;
+  if (mode !== "入口受付" && mode !== "出口受付" && mode !== "停止") {
+    throw new HttpsError("invalid-argument", "受付モードが正しくありません。");
+  }
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身へのリモート操作はできません。");
+  }
+  const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+  ]);
+  if (!managerSnap.exists || !managerOwnerSnap.exists ||
+      managerOwnerSnap.get("enabled") !== true || managerOwnerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists || targetSnap.get("receptionApproved") !== true ||
+      targetSnap.get("approved") !== true || targetSnap.get("admin") === true) {
+    throw new HttpsError("failed-precondition", "対象は承認済みの受付端末ではありません。");
+  }
+  const updatedAt = new Date().toISOString();
+  await db.doc("terminals/" + targetTerminalId).update({
+    desiredMode: mode,
+    desiredModeUpdatedAt: updatedAt,
+    updatedAt,
+  });
+  return { terminalId: targetTerminalId, mode, updatedAt };
+});
