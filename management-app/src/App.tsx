@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
-import TicketDesigner from "./TicketDesigner";
+import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
@@ -1555,9 +1555,11 @@ export default function App() {
             <div className="ticket-qr-modal-icon"><QrIcon /></div>
             <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>
           </div>
-          <div className="ticket-qr-large">
-            <QRCodeSVG value={ticketQrValue(event.eventId, ticketQrModalTicket)} size={280} includeMargin />
-          </div>
+          <TicketQrPreview
+            eventName={event.eventName}
+            ticketNumber={String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(6, "0")}
+            qrValue={ticketQrValue(event.eventId, ticketQrModalTicket)}
+          />
           <strong className="ticket-qr-number">{ticketQrModalTicket.ticketId}</strong>
           <div className={`ticket-qr-status ticket-qr-status-${ticketQrModalTicket.currentStatus}`}>
             <span>●</span>{ticketQrModalTicket.currentStatus === "inside" ? "入場中" : ticketQrModalTicket.currentStatus === "exited" ? "使用済み" : "未使用"}
