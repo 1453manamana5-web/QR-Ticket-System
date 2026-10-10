@@ -601,6 +601,7 @@ export default function App() {
           : false;
         return {
           ...terminal,
+          role: managementApproved ? "management" as const : terminal.role,
           approved: managementApproved,
           managementApproved,
           receptionApproved: false,
