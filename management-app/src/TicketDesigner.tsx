@@ -1344,4 +1344,43 @@ function TicketDesigner({
   );
 }
 
+
+
+export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventName: string; ticketNumber: string; qrValue: string }) {
+  const settings = loadDesignSettings(eventName);
+  const ratio = (() => {
+    switch (settings.cardRatio) {
+      case "4:3": return "4 / 3";
+      case "3:2": return "3 / 2";
+      case "card": return "1.586 / 1";
+      case "square": return "1 / 1";
+      case "9:16": return "9 / 16";
+      case "custom": return `${Math.max(1, settings.customWidth)} / ${Math.max(1, settings.customHeight)}`;
+      default: return "16 / 9";
+    }
+  })();
+  const cardStyle: CSSProperties = {
+    aspectRatio: ratio,
+    backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : undefined,
+    backgroundSize: "100% 100%",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    position: "relative",
+    width: "min(100%, 560px)",
+    overflow: "hidden",
+    borderRadius: 12,
+    boxShadow: "0 8px 28px rgba(0,0,0,.16)",
+    margin: "0 auto",
+  };
+  return (
+    <div className="ticket-qr-design-preview" style={cardStyle}>
+      {!settings.backgroundImage && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,#f2f5fa,#dce4f0)" }} />}
+      <div style={{ position: "absolute", left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%`, transform: "translate(-50%,-50%)", lineHeight: 0, background: "#fff", padding: "0.3%", boxSizing: "border-box" }}>
+        <LazyQrCode value={qrValue} size={500} level="M" marginSize={1} />
+      </div>
+      <div style={{ position: "absolute", left: `${settings.numberX}%`, top: `${settings.numberY}%`, transform: "translate(-50%,-50%)", fontSize: `clamp(9px, ${settings.numberSize / 5}px, 28px)`, fontWeight: 700, color: "#111", whiteSpace: "nowrap", textShadow: "0 1px 2px rgba(255,255,255,.6)" }}>{ticketNumber}</div>
+    </div>
+  );
+}
+
 export default TicketDesigner;
