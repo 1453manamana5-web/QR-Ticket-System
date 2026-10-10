@@ -10,8 +10,10 @@ export async function deleteEvent(eventId: string): Promise<void> {
   // Reception records are server-write-only, so delete the complete event tree
   // through the callable endpoint rather than issuing direct client deletes.
   const { deleteManagedEvent } = await import("./terminalHandoff");
-  const result = await deleteManagedEvent(eventId);
-  if (!result.deleted) throw new Error("EVENT_NOT_FOUND");
+  // Treat an already-absent event as an idempotent success. The app runs a
+  // one-time legacy-demo cleanup on startup, so a missing demo must not surface
+  // as a false deletion failure or console error.
+  await deleteManagedEvent(eventId);
 }
 export async function saveEvent(event: Event): Promise<void> {
   const db = getFirebaseDb();
