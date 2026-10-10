@@ -23,5 +23,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
+      - name: Build web apps
         run: npm run build
+
+      - name: Install Functions dependencies
+        run: npm install --prefix functions
+
+      - name: Typecheck Functions
+        run: npm run typecheck --prefix functions
+
+      - name: Build Functions
+        run: npm run build --prefix functions
