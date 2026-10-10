@@ -84,3 +84,16 @@ export async function deleteManagedTerminalOnServer(
   const result = await callable({ managerTerminalId, targetTerminalId });
   return result.data;
 }
+
+
+export async function releaseOwnReceptionRegistration(
+  terminalId: string,
+): Promise<{ terminalId: string; receptionApproved: false; released: boolean }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string },
+    { terminalId: string; receptionApproved: false; released: boolean }
+  >(functionsClient(), "releaseOwnReceptionRegistration");
+  const result = await callable({ terminalId });
+  return result.data;
+}
