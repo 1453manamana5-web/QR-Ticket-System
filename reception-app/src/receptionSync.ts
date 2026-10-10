@@ -2,7 +2,7 @@ import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "fi
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
-import { getTerminalInstallationStatus } from "./terminalHandoff";
+import { getTerminalInstallationStatus, releaseOwnReceptionRegistration } from "./terminalHandoff";
 
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
@@ -26,8 +26,8 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
 }
 
 export async function resetReceptionTerminalRegistration(): Promise<void> {
-  const db = getFirebaseDb();
-  await deleteDoc(doc(db, "terminals", getTerminalIdForRegistration()));
+  await releaseOwnReceptionRegistration(getTerminalIdForRegistration());
+  localStorage.removeItem("qr-ticket-terminal-handoff-verified");
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
