@@ -2212,7 +2212,7 @@ function NavIcon({type}:{type:string}){
           <div className="ai-lab-diagnostic-row"><span>外部AI接続</span><strong>使用しない</strong></div>
           {aiLabDiagnostics.length > 0 ? <div className="ai-lab-findings-list">{aiLabDiagnostics.map(item => <div className="ai-lab-finding" key={item.id}><strong>{item.title}</strong><span>{item.detail}</span></div>)}</div> : <div className="ai-lab-diagnostic-ok"><span>✓</span><div><strong>基本チェックを通過</strong><small>現在読み込まれているデータに、実装済みのチェック項目で問題は見つかりませんでした。</small></div></div>}
           <p>これは読み込まれたデータに対する基本診断です。通信品質や端末そのものの完全な診断を保証するものではありません。</p>
-        </div>
+        </div>}
         {aiLabPanel === "改善提案" && <div className="ai-lab-detail-content">
           <p>現時点では診断用ログの種類が限られているため、確実な改善提案を生成できるだけの根拠がありません。</p>
           <div className="ai-lab-suggestion"><strong>次の改善ステップ</strong><span>読み取り処理時間・保存結果・通信エラーを記録し、イベントごとの傾向比較を有効にします。</span></div>
@@ -2224,7 +2224,7 @@ function NavIcon({type}:{type:string}){
               <div className="ai-lab-warning-entry-top"><strong>{item.title}</strong><time>{new Date(item.detectedAt).toLocaleString("ja-JP")}</time></div><p>{item.detail}</p>
             </article>)}
           </div> : <div className="ai-lab-empty"><span className="ai-lab-empty-icon">✓</span><strong>このイベントの警告はありません</strong><span>基本診断で問題が検知されると、ここに履歴として保存されます。</span></div>}
-        </div>
+        </div>}
       </section>}
       {aiLabMenuOpen && <div className="ai-lab-glass-menu" role="menu" aria-label="AI受付分析メニュー">
         <div className="ai-lab-menu-title"><span className="ai-lab-eyebrow">AI TEST LAB</span><strong>AI受付分析</strong><small>端末内で動作する試験機能</small></div>
