@@ -3661,7 +3661,7 @@ body:has(.ticket-screen),
 .ai-lab-suggestion strong{font-size:12px;color:#465994}
 .ai-lab-suggestion span{font-size:12px;line-height:1.7;color:#58647e}
 .ai-lab-empty{display:grid;justify-items:center;gap:9px;padding:22px 10px;text-align:center}
-.ai-lab-empty>icon{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:rgb(255 255 255/.8);color:#6174b9;font-size:20px}
+.ai-lab-empty-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:rgb(255 255 255/.8);color:#6174b9;font-size:20px}
 .ai-lab-empty strong{font-size:13px}
 .ai-lab-empty span{font-size:11px;line-height:1.7;color:#717a90}
 @keyframes ai-lab-pop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
