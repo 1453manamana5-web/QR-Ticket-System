@@ -2810,10 +2810,56 @@ function NavIcon({type}:{type:string}){
           </section>
         </div>}
         {aiLabPanel === "AIイベント終了レポート" && <div className="ai-lab-detail-content ai-report-content">
-          <p>イベントの集計・受付記録・基本診断から、終了レポートの下書きを作成します。作成後に内容を確認してから利用してください。</p>
-          <button className="primary-action" type="button" onClick={generateAiEventReport}>レポートを作成・更新</button>
-          {aiReportText && <><textarea className="ai-report-textarea" aria-label="イベント終了レポート" value={aiReportText} onChange={e => setAiReportText(e.target.value)} rows={16} /><div className="ai-report-actions"><button className="secondary" type="button" onClick={() => { void navigator.clipboard?.writeText(aiReportText); }}>レポートをコピー</button><button className="primary-action" type="button" onClick={downloadAiReport}>テキストで保存</button></div></>}
-          <p className="ai-lab-note">読み込み済みの記録のみを集計します。端末間の同期状況を確認し、正式な報告に使う前に数値を確認してください。</p>
+          <div className="ai-report-heading">
+            <div><span className="ai-report-eyebrow">EVENT SUMMARY</span><h3>{event.eventName || "イベント終了レポート"}</h3><p>{event.eventDate || "開催日未設定"} ・ {event.eventId ? statusLabel[event.eventStatus] : "イベント未選択"}</p></div>
+            <button className="primary-action" type="button" onClick={generateAiEventReport}>レポートを作成・更新</button>
+          </div>
+          {event.eventId && <React.Fragment>
+            <div className="ai-report-kpi-grid">
+              <article className="ai-report-kpi"><span>総チケット数</span><strong>{ticketStats.total.toLocaleString("ja-JP")}</strong><small>枚</small></article>
+              <article className="ai-report-kpi"><span>入場記録</span><strong>{receptionRecords.filter(record => record.type === "entry").length.toLocaleString("ja-JP")}</strong><small>件</small></article>
+              <article className="ai-report-kpi"><span>退場記録</span><strong>{receptionRecords.filter(record => record.type === "exit").length.toLocaleString("ja-JP")}</strong><small>件</small></article>
+              <article className="ai-report-kpi"><span>再入場記録</span><strong>{receptionRecords.filter(record => record.type === "reentry").length.toLocaleString("ja-JP")}</strong><small>件</small></article>
+            </div>
+            <div className="ai-report-panels">
+              <section className="ai-report-panel ai-report-hourly">
+                <h4>時間帯別の受付状況</h4>
+                <p className="ai-report-subtitle">受付記録のタイムスタンプを端末のローカル時刻で集計</p>
+                {(() => {
+                  const rows = Array.from({ length: 24 }, (_, hour) => {
+                    const records = receptionRecords.filter(record => Number.isFinite(Date.parse(record.timestamp)) && new Date(record.timestamp).getHours() === hour);
+                    return { hour, entry: records.filter(record => record.type === "entry").length, exit: records.filter(record => record.type === "exit").length, reentry: records.filter(record => record.type === "reentry").length };
+                  }).filter(row => row.entry + row.exit + row.reentry > 0);
+                  const max = Math.max(1, ...rows.flatMap(row => [row.entry, row.exit, row.reentry]));
+                  return rows.length ? <div className="ai-report-chart">{rows.map(row => <div className="ai-report-chart-row" key={row.hour}><span className="ai-report-hour-label">{String(row.hour).padStart(2, "0")}:00</span><div className="ai-report-bar-stack"><div className="ai-report-bar entry" style={{ width: (row.entry / max * 100) + "%" }} /><div className="ai-report-bar exit" style={{ width: (row.exit / max * 100) + "%" }} /><div className="ai-report-bar reentry" style={{ width: (row.reentry / max * 100) + "%" }} /></div><span className="ai-report-chart-count">{row.entry + row.exit + row.reentry}件</span></div>)}</div> : <p className="ai-report-empty">集計できる受付記録がありません。記録が同期されると、ここにグラフが表示されます。</p>;
+                })()}
+                <div className="ai-report-legend"><span><i className="entry" />入場</span><span><i className="exit" />退場</span><span><i className="reentry" />再入場</span></div>
+              </section>
+              <section className="ai-report-panel">
+                <h4>チケット状況</h4>
+                <div className="ai-report-status-list">
+                  <div><span><i className="unused" />未使用</span><strong>{ticketStats.unused}枚</strong></div>
+                  <div><span><i className="inside" />入場中</span><strong>{ticketStats.inside}枚</strong></div>
+                  <div><span><i className="exited" />退場済み</span><strong>{ticketStats.exited}枚</strong></div>
+                  <div><span><i className="invalid" />無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}枚</strong></div>
+                </div>
+                <div className="ai-report-total-line"><span>受付記録合計</span><strong>{receptionRecords.length}件</strong></div>
+                <div className="ai-report-total-line"><span>時刻不備</span><strong>{receptionRecords.filter(record => !Number.isFinite(Date.parse(record.timestamp))).length}件</strong></div>
+              </section>
+            </div>
+            <section className="ai-report-panel ai-report-insight-panel">
+              <h4>今回の運営で改善できそうな点</h4>
+              <div className="ai-report-insight-grid">{aiOperationalInsights.slice(0, 6).map((insight, index) => <article className={"ai-report-insight " + insight.priority} key={insight.title}><span className="ai-report-insight-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{insight.title}</strong><p>{insight.detail}</p></div></article>)}</div>
+            </section>
+            <section className="ai-report-panel">
+              <h4>過去イベントとの比較</h4>
+              {aiPreviousEventData.loading ? <p className="ai-report-empty">過去イベントの実データを読み込んでいます…</p> : aiPreviousSnapshot ? <div className="ai-report-comparison"><div><span>比較対象</span><strong>{aiPreviousSnapshot.eventName}</strong></div><div><span>チケット総数</span><strong>{aiPreviousSnapshot.total}枚</strong><small>今回との差 {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚</small></div><div><span>入場記録</span><strong>{aiPreviousSnapshot.entryRecords ?? "未取得"}件</strong><small>{aiPreviousSnapshot.source === "records" ? "今回 " + receptionRecords.filter(record => record.type === "entry").length + "件" : "保存済み分析から比較"}</small></div><div><span>退場済み</span><strong>{aiPreviousSnapshot.exited}枚</strong><small>今回との差 {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}枚</small></div></div> : <p className="ai-report-empty">比較対象となる過去イベントのデータがありません。</p>}
+            </section>
+          </React.Fragment>}
+          <section className="ai-report-panel ai-report-text-panel"><h4>レポート本文（編集可能）</h4><p className="ai-report-subtitle">数値を確認し、必要に応じて文章を修正してから保存してください。</p>
+            {aiReportText ? <><textarea className="ai-report-textarea" aria-label="イベント終了レポート" value={aiReportText} onChange={e => setAiReportText(e.target.value)} rows={16} /><div className="ai-report-actions"><button className="secondary" type="button" onClick={() => { void navigator.clipboard?.writeText(aiReportText); }}>レポートをコピー</button><button className="primary-action" type="button" onClick={downloadAiReport}>テキストで保存</button></div></> : <p className="ai-report-empty">「レポートを作成・更新」を押すと、詳細な報告本文を生成します。</p>}
+          </section>
+          <p className="ai-lab-note">読み込み済みの記録のみを集計します。端末間の同期状況を確認し、正式な報告に使う前に数値を確認してください。生成AIは使用せず、実データとルールベースの判定で表示します。</p>
         </div>}
         {aiLabPanel === "受付分析" && <div className="ai-lab-detail-content">
           <div className="ai-lab-stat"><span>受付記録</span><strong>{receptionRecords.filter(record => record.type === "entry" || record.type === "exit").length}件</strong></div>
