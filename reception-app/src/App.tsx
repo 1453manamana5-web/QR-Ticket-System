@@ -4,6 +4,7 @@ import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
+import {requestTerminalHandoff,completeTerminalHandoff} from "./terminalHandoff";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
@@ -48,6 +49,10 @@ export default function App(){
   const [scannerKey,setScannerKey]=useState(0);
   const [online,setOnline]=useState(()=>navigator.onLine);
   const [networkMbps,setNetworkMbps]=useState<number|null>(null);
+  const [handoffTerminalId,setHandoffTerminalId]=useState("");
+  const [handoffRequestId,setHandoffRequestId]=useState(()=>localStorage.getItem("qr-ticket-handoff-request-id")||"");
+  const [handoffBusy,setHandoffBusy]=useState(false);
+  const [handoffNotice,setHandoffNotice]=useState("");
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
 
@@ -450,6 +455,40 @@ export default function App(){
           <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
           <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
         </>}
+        <div className="reception-registration-handoff">
+          <h3>登録済み端末を引き継ぐ</h3>
+          <p>Safariとホーム画面アプリで端末IDが分かれた場合は、登録済み端末のIDを入力して申請します。IDを入力しただけでは登録されません。</p>
+          <label className="reception-registration-field"><span>引き継ぎ元の端末ID</span><input value={handoffTerminalId} onChange={e=>setHandoffTerminalId(e.target.value)} placeholder="登録済み端末のID" disabled={handoffBusy}/></label>
+          <button type="button" className="secondary" disabled={handoffBusy||!handoffTerminalId.trim()} onClick={()=>void (async()=>{
+            setHandoffBusy(true);setHandoffNotice("");
+            try{
+              const result=await requestTerminalHandoff(handoffTerminalId);
+              setHandoffRequestId(result.requestId);
+              localStorage.setItem("qr-ticket-handoff-request-id",result.requestId);
+              setHandoffNotice("申請を送信しました。登録済み端末側で承認後、「承認を確認して引き継ぐ」を押してください。申請は5分で期限切れになります。");
+            }catch(reason){
+              console.error("端末引き継ぎ申請に失敗しました",reason);
+              setHandoffNotice("申請を送信できませんでした。端末ID、通信状態、サーバー側の登録設定を確認してください。");
+            }finally{setHandoffBusy(false);}
+          })()}>引き継ぎを申請</button>
+          {handoffRequestId&&<button type="button" className="primary" disabled={handoffBusy} onClick={()=>void (async()=>{
+            setHandoffBusy(true);setHandoffNotice("");
+            try{
+              const result=await completeTerminalHandoff(handoffRequestId);
+              localStorage.setItem("qr-ticket-terminal-id",result.terminalId);
+              localStorage.removeItem("qr-ticket-handoff-request-id");
+              setHandoffRequestId("");
+              const registration=await getTerminalRegistration();
+              setTerminalRegistration(registration);
+              setHandoffNotice(registration?.approved?"引き継ぎが完了しました。登録済み端末として認識しました。":"引き継ぎは承認されましたが、受付権限が確認できません。管理画面で状態を確認してください。");
+              if(registration?.approved)setScreen("auth");
+            }catch(reason){
+              console.error("端末引き継ぎの完了確認に失敗しました",reason);
+              setHandoffNotice("まだ承認されていないか、申請の期限が切れています。登録済み端末側で承認してから再確認してください。");
+            }finally{setHandoffBusy(false);}
+          })()}>承認を確認して引き継ぐ</button>}
+          {handoffNotice&&<p className="entry-result-secondary" role="status">{handoffNotice}</p>}
+        </div>
         {error&&<p className="entry-result-secondary">{error}</p>}
       </section>
     </main>
