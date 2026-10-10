@@ -580,7 +580,8 @@ export default function App() {
 
     const finishEvent = async () => {
       const receptionTerminals = terminals.filter(
-        terminal => terminal.role === "reception" || terminal.role === "both",
+        terminal => (terminal.role === "reception" || terminal.role === "both") &&
+          !terminal.admin && !terminal.subAdmin,
       );
       const allReceptionDataSynced = receptionTerminals.every(
         terminal => terminal.syncPendingCount === 0,
@@ -593,7 +594,8 @@ export default function App() {
 
       saveAnalysisSnapshot(event);
       const released = terminals.map(terminal => {
-        if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
+        if ((terminal.role !== "reception" && terminal.role !== "both") ||
+            terminal.admin || terminal.subAdmin) return terminal;
         const managementApproved = terminal.role === "both"
           ? Boolean(terminal.managementApproved ?? terminal.approved)
           : false;
@@ -610,7 +612,10 @@ export default function App() {
       });
 
       try {
-        await Promise.all(released.map(terminal => saveTerminal(terminal)));
+        await Promise.all(receptionTerminals.map(async terminal => {
+          await setManagedTerminalMode(firebaseDeviceId, terminal.terminalId, "停止");
+          await revokeTerminalReception(firebaseDeviceId, terminal.terminalId);
+        }));
         setTerminals(released);
         setSelectedTerminalId(null);
         setTerminalNotice("受付データの回収が完了しました。受付機能の認証を解除しました。");
