@@ -47,6 +47,16 @@ test("clients cannot create approved or administrator terminals", async () => {
     terminalId: "T-ABCDEFGH", approved: true, managementApproved: true,
     receptionApproved: true, admin: true,
   }));
+  await assertFails(setDoc(doc(db, "terminals", "T-QRSTUVWX"), {
+    terminalId: "T-QRSTUVWX", approved: false, managementApproved: false,
+    receptionApproved: false, admin: false, subAdmin: true,
+    role: "reception",
+  }));
+  await assertFails(setDoc(doc(db, "terminals", "T-YZABCDEF"), {
+    terminalId: "T-YZABCDEF", approved: false, managementApproved: false,
+    receptionApproved: false, admin: false, subAdmin: false,
+    role: "unknown",
+  }));
   await assertSucceeds(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
     terminalId: "T-IJKLMNOP", approved: false, managementApproved: false,
     receptionApproved: false, admin: false, subAdmin: false,
