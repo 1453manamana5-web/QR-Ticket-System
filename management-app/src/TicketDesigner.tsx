@@ -826,6 +826,44 @@ function TicketDesigner({
 
             <div className="ticket-setting-group">
               <h4>
+                背景画像
+              </h4>
+
+              <label className="ticket-background-label">
+                PNG・JPEG画像
+
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={
+                    handleBackgroundImage
+                  }
+                />
+              </label>
+
+              <p className="ticket-designer-help">
+                KeynoteやPowerPointから書き出したPNG画像も使用できます。
+              </p>
+
+              {settings.backgroundImage !==
+                "" && (
+                <button
+                  type="button"
+                  className="ticket-remove-background"
+                  onClick={() =>
+                    updateSetting(
+                      "backgroundImage",
+                      ""
+                    )
+                  }
+                >
+                  背景画像を削除
+                </button>
+              )}
+            </div>
+
+            <div className="ticket-setting-group">
+              <h4>
                 チケットサイズ
               </h4>
 
@@ -960,44 +998,6 @@ function TicketDesigner({
 
                 <span>mm</span>
               </label>
-            </div>
-
-            <div className="ticket-setting-group">
-              <h4>
-                背景画像
-              </h4>
-
-              <label className="ticket-background-label">
-                PNG・JPEG画像
-
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={
-                    handleBackgroundImage
-                  }
-                />
-              </label>
-
-              <p className="ticket-designer-help">
-                KeynoteやPowerPointから書き出したPNG画像も使用できます。
-              </p>
-
-              {settings.backgroundImage !==
-                "" && (
-                <button
-                  type="button"
-                  className="ticket-remove-background"
-                  onClick={() =>
-                    updateSetting(
-                      "backgroundImage",
-                      ""
-                    )
-                  }
-                >
-                  背景画像を削除
-                </button>
-              )}
             </div>
 
             <div className="ticket-setting-group">
