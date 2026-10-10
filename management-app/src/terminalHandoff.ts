@@ -113,3 +113,18 @@ export async function registerTerminalApplication(
   const result = await callable({ terminalId, name, type, role });
   return result.data;
 }
+
+
+export async function setTerminalSubAdmin(
+  managerTerminalId: string,
+  targetTerminalId: string,
+  enabled: boolean,
+): Promise<{ terminalId: string; subAdmin: boolean }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { managerTerminalId: string; targetTerminalId: string; enabled: boolean },
+    { terminalId: string; subAdmin: boolean }
+  >(functionsClient(), "setTerminalSubAdmin");
+  const result = await callable({ managerTerminalId, targetTerminalId, enabled });
+  return result.data;
+}
