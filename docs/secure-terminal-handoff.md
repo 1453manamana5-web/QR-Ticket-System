@@ -98,16 +98,26 @@ The command creates both `terminals/{terminalId}` and `terminalOwners/{terminalI
 
 This bootstrap utility is a trusted server-side administrative operation. It has not been run against production data from this repository session.
 
-## Compatibility audit (2026-10-10)
+## Compatibility audit (2026-10-10, rechecked)
 
-The branch now includes `releaseOwnReceptionRegistration`, a callable that checks the current Firebase Auth UID against either the trusted owner mapping or the server-issued installation record before clearing reception approval. Both the management app's own-terminal release action and the reception app's reset action call this endpoint instead of attempting to delete the terminal document. The ordinary manager revoke endpoint also refuses to alter a target marked `admin` or `subAdmin`, and managed-terminal deletion refuses to delete an admin terminal even when called by another admin.
+The latest source review confirms these client paths now use trusted callable Functions rather than writing protected terminal or reception fields directly:
 
-The following issues remain blockers before deploying the rules or Functions:
+- New terminal applications use `registerTerminalApplication`; the browser cannot set approval flags.
+- Approval uses `approveTerminalRegistration`, which creates the trusted owner mapping and server-issued installation mapping for the approved UID.
+- Reception heartbeat uses `updateTerminalHeartbeat`; the callable verifies the authenticated UID against a trusted owner or installation mapping.
+- Management heartbeat uses the same callable path.
+- Reception records use `recordReception`, which validates the installation, terminal role/approval, event, ticket, and ticket-state transition before writing with the Admin SDK.
+- Own-terminal reception release, manager revoke, and managed-terminal deletion use server callables with server-side ownership/role checks.
 
-- `registerReceptionTerminal`, `saveTerminalHeartbeat`, and `saveManagementTerminalHeartbeat` still write terminal documents directly. Their payloads must be audited and moved to server callables where they would create or modify protected fields.
-- The management app's legacy duplicate-terminal merge still calls direct `deleteTerminal`; this will be denied by the proposed rules and needs a safe, owner-checked migration path.
-- Newly approved management terminals do not automatically receive a trusted `terminalOwners/{terminalId}` mapping. Do not assume they can use manager callables until a safe, server-bound registration flow creates that mapping.
-- The current rules allow any Firebase-authenticated client (including anonymous auth) to read and modify event, ticket, member, analysis, settings, and device data. This is narrower than the expiring public catch-all, but it is not yet role-based authorization.
-- The reception release callable works only when the caller has a matching server-owned owner or installation record. Existing installations need migration or a server-side registration flow before the action can work.
+The latest CI runs for commits `0ecd50b6`, `2d0086ee`, `2a70c565`, and `5fd7b275` completed successfully. This confirms the configured automated rules tests, typechecks, and builds; it does not prove that production Firebase has been migrated or deployed.
 
-No production rules or Functions were deployed from this work session. CI has not reported a run for the latest branch commit, so build and emulator test results remain unverified.
+Remaining deployment blockers:
+
+1. **Existing terminal migration:** older terminals may not have `terminalOwners/{terminalId}` or `terminalInstallations/{uid}`. Those mappings must be created using the reviewed trusted migration process. Do not delete or overwrite existing mappings to force migration.
+2. **First administrator:** the trusted bootstrap script is for a genuinely new project only and refuses to overwrite existing documents. For an existing project, inspect the existing terminal/owner records and use a reviewed migration instead.
+3. **Production rules and Functions:** this branch's rules and callable Functions have not been deployed from this work session. The reported live catch-all rule must be replaced, not supplemented with restrictive matches, because Firestore combines matching allows with OR.
+4. **Read permissions:** current proposed rules permit any authenticated client, including anonymous Auth users, to read event, ticket, analysis, member, settings, device, and terminal data. Writes are more restricted, but read access still needs a deliberate privacy review before production.
+5. **Legacy helper review:** `saveTerminal` and `deleteTerminal` remain in the management data module as legacy helpers. The reviewed App.tsx flow does not import them, but confirm there are no other callers before deploying rules that deny direct terminal writes.
+6. **End-to-end verification:** CI does not exercise a real Firebase project. After a reviewed migration in a non-production test project, verify management approval, reception approval, heartbeat updates, ticket entry/exit/re-entry, and revocation against deployed callable Functions and Firestore Rules.
+
+Do not deploy the rules or Functions until the existing terminal mappings and live Firebase configuration have been reviewed.
