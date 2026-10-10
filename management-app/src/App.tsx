@@ -132,69 +132,9 @@ function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
 
 export default function App() {
   const [page, setPage] = useState("ホーム");
-  const [navigationOrder, setNavigationOrder] = useState<string[]>(() => {
-    const defaults = navigationGroups.flatMap(group => group.items.map(item => item.label));
-    try {
-      const stored = JSON.parse(localStorage.getItem("qr-ticket-navigation-order") || "null");
-      if (!Array.isArray(stored)) return defaults;
-      const valid = stored.filter((label: unknown): label is string => typeof label === "string" && defaults.includes(label));
-      return [...valid, ...defaults.filter(label => !valid.includes(label))];
-    } catch {
-      return defaults;
-    }
-  });
-  const [navDragSource, setNavDragSource] = useState<string | null>(null);
-  const [navDropTarget, setNavDropTarget] = useState<string | null>(null);
-  const [navDropBefore, setNavDropBefore] = useState(true);
-  const navPressTimerRef = useRef<number | null>(null);
-  const navLongPressRef = useRef(false);
-  const navDragMetaRef = useRef<{ source: string; group: string } | null>(null);
-
-  useEffect(() => {
-    try { localStorage.setItem("qr-ticket-navigation-order", JSON.stringify(navigationOrder)); }
-    catch (reason) { console.warn("サイドバーの並び順を保存できませんでした", reason); }
-  }, [navigationOrder]);
-
-  useEffect(() => {
-    if (!navDragSource) return;
-    const onPointerMove = (event: PointerEvent) => {
-      const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-nav-label]");
-      if (!element) return;
-      const label = element.dataset.navLabel;
-      const group = element.dataset.navGroup;
-      if (!label || !group || group !== navDragMetaRef.current?.group || label === navDragSource) return;
-      const bounds = element.getBoundingClientRect();
-      setNavDropTarget(label);
-      setNavDropBefore(event.clientY < bounds.top + bounds.height / 2);
-    };
-    const onPointerUp = () => {
-      if (navDragMetaRef.current && navDropTarget && navDropTarget !== navDragSource) {
-        const groupLabels = navigationGroups.find(group => group.label === navDragMetaRef.current?.group)?.items.map(item => item.label) ?? [];
-        setNavigationOrder(current => {
-          const orderedGroup = current.filter(label => groupLabels.includes(label));
-          const from = orderedGroup.indexOf(navDragSource);
-          const to = orderedGroup.indexOf(navDropTarget);
-          if (from < 0 || to < 0) return current;
-          orderedGroup.splice(from, 1);
-          const insertAt = orderedGroup.indexOf(navDropTarget) + (navDropBefore ? 0 : 1);
-          orderedGroup.splice(insertAt, 0, navDragSource);
-          let groupIndex = 0;
-          return current.map(label => groupLabels.includes(label) ? orderedGroup[groupIndex++] : label);
-        });
-      }
-      setNavDragSource(null);
-      setNavDropTarget(null);
-      navDragMetaRef.current = null;
-    };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-  }, [navDragSource, navDropTarget, navDropBefore, navigationOrder]);
+  const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
+  const navSwipeRef = useRef<{ startX: number; startY: number; current: string; moved: boolean } | null>(null);
+  const navSuppressClickRef = useRef(false);
   const [event, setEvent] = useState<Event>(baseEvent);
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
     try {
@@ -2264,55 +2204,62 @@ function NavIcon({type}:{type:string}){
         <b>{savedEventName}</b>
         <span>● {statusLabel[eventStatus]}</span>
       </div>
-      <nav className={`sidebar-nav ${appSettings.aiLabEnabled ? "sidebar-nav-reorder-enabled" : ""}`}>
+      <nav
+        className={`sidebar-nav ${appSettings.aiLabEnabled ? "sidebar-nav-swipe-enabled" : ""}`}
+        onPointerMove={(event) => {
+          const swipe = navSwipeRef.current;
+          if (!swipe || !appSettings.aiLabEnabled) return;
+          if (Math.abs(event.clientY - swipe.startY) > 8) swipe.moved = true;
+          if (!swipe.moved) return;
+          const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-nav-label]");
+          const label = element?.dataset.navLabel;
+          if (!label || element?.dataset.navDisabled === "true") return;
+          swipe.current = label;
+          setNavSwipePreview(label);
+        }}
+        onPointerUp={() => {
+          const swipe = navSwipeRef.current;
+          if (!swipe) return;
+          if (swipe.moved) {
+            setPage(swipe.current);
+            navSuppressClickRef.current = true;
+            window.setTimeout(() => { navSuppressClickRef.current = false; }, 0);
+          }
+          navSwipeRef.current = null;
+          setNavSwipePreview(null);
+        }}
+        onPointerCancel={() => {
+          navSwipeRef.current = null;
+          setNavSwipePreview(null);
+        }}
+      >
         {navigationGroups.map(group => (
           <div className="sidebar-group" key={group.label}>
             <div className="sidebar-group-title"><strong>{group.label}</strong><span /></div>
             <div className="sidebar-group-items">
-              {group.items
-                .slice()
-                .sort((left, right) => navigationOrder.indexOf(left.label) - navigationOrder.indexOf(right.label))
-                .map(item => (
+              {group.items.map(item => (
                 <button
                   key={item.label}
                   data-nav-label={item.label}
-                  data-nav-group={group.label}
+                  data-nav-disabled={item.comingSoon ? "true" : "false"}
                   disabled={item.comingSoon}
-                  className={`${page === item.label ? "active" : ""} ${item.comingSoon ? "coming-soon" : ""} ${navDragSource === item.label ? "nav-item-dragging" : ""} ${navDropTarget === item.label && navDragSource !== item.label ? (navDropBefore ? "nav-drop-before" : "nav-drop-after") : ""}`}
-                  onPointerDown={() => {
-                    if (item.comingSoon || !appSettings.aiLabEnabled) return;
-                    navLongPressRef.current = false;
-                    if (navPressTimerRef.current !== null) window.clearTimeout(navPressTimerRef.current);
-                    navPressTimerRef.current = window.setTimeout(() => {
-                      navLongPressRef.current = true;
-                      navDragMetaRef.current = { source: item.label, group: group.label };
-                      setNavDragSource(item.label);
-                      setNavDropTarget(item.label);
-                    }, 420);
-                  }}
-                  onPointerUp={() => {
-                    if (navPressTimerRef.current !== null) window.clearTimeout(navPressTimerRef.current);
-                    navPressTimerRef.current = null;
-                  }}
-                  onPointerLeave={() => {
-                    if (!navLongPressRef.current && navPressTimerRef.current !== null) {
-                      window.clearTimeout(navPressTimerRef.current);
-                      navPressTimerRef.current = null;
-                    }
+                  className={`${(navSwipePreview ?? page) === item.label ? "active" : ""} ${item.comingSoon ? "coming-soon" : ""} ${navSwipePreview === item.label && navSwipeRef.current?.moved ? "nav-swipe-preview" : ""}`}
+                  onPointerDown={(event) => {
+                    if (item.comingSoon || !appSettings.aiLabEnabled || event.button !== 0) return;
+                    navSwipeRef.current = { startX: event.clientX, startY: event.clientY, current: item.label, moved: false };
+                    setNavSwipePreview(item.label);
                   }}
                   onClick={() => {
-                    if (navLongPressRef.current) {
-                      navLongPressRef.current = false;
+                    if (navSuppressClickRef.current) {
+                      navSuppressClickRef.current = false;
                       return;
                     }
                     if (!item.comingSoon) setPage(item.label);
                   }}
-                  title={appSettings.aiLabEnabled ? "長押ししてドラッグすると、このグループ内で並び替えできます" : undefined}
                 >
                   <span className="sidebar-item-icon"><NavIcon type={item.icon} /></span>
                   <span className="sidebar-item-label">{item.label}</span>
                   {item.comingSoon && <small className="sidebar-coming-soon">近日公開</small>}
-                  {appSettings.aiLabEnabled && !item.comingSoon && <span className="sidebar-reorder-grip" aria-hidden="true">⠿</span>}
                 </button>
               ))}
             </div>
