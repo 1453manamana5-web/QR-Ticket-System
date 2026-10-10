@@ -62,7 +62,9 @@ test("clients cannot modify approval flags on existing terminals", async () => {
   });
   const db = env.authenticatedContext("anonymous-user-1").firestore();
   await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { managementApproved: false }));
-  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { admin: true }));
+  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { admin: false }));
+  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { subAdmin: true }));
+  await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { role: "both" }));
   await assertSucceeds(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { name: "名前変更" }));
 });
 
