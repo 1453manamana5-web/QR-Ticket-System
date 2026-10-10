@@ -144,3 +144,31 @@ export async function updateTerminalHeartbeat(
   const result = await callable({ terminalId, mode, syncPendingCount, networkMbps: networkMbps ?? undefined });
   return result.data;
 }
+
+
+export async function updateManagedTerminalName(
+  terminalId: string,
+  name: string,
+): Promise<{ terminalId: string; name: string }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string; name: string },
+    { terminalId: string; name: string }
+  >(functionsClient(), "updateManagedTerminalName");
+  const result = await callable({ terminalId, name });
+  return result.data;
+}
+
+export async function setManagedTerminalMode(
+  managerTerminalId: string,
+  targetTerminalId: string,
+  mode: "入口受付" | "出口受付" | "停止",
+): Promise<{ terminalId: string; mode: "入口受付" | "出口受付" | "停止"; updatedAt: string }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { managerTerminalId: string; targetTerminalId: string; mode: "入口受付" | "出口受付" | "停止" },
+    { terminalId: string; mode: "入口受付" | "出口受付" | "停止"; updatedAt: string }
+  >(functionsClient(), "setManagedTerminalMode");
+  const result = await callable({ managerTerminalId, targetTerminalId, mode });
+  return result.data;
+}
