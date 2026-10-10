@@ -55,6 +55,15 @@ async function main() {
       migratedAt: new Date().toISOString(),
       migrationSource: "trusted-first-admin-bootstrap",
     });
+    // Firestore Rules use this trusted installation mapping to authorize
+    // management data writes from the first admin's authenticated browser.
+    tx.create(db.doc("terminalInstallations/" + ownerUid), {
+      terminalId,
+      authUid: ownerUid,
+      approved: true,
+      registrationApprovedAt: new Date().toISOString(),
+      createdByTrustedBootstrap: true,
+    });
   });
 
   process.stdout.write("First admin terminal and trusted owner mapping created. Keep this output in your admin audit log.\n");
