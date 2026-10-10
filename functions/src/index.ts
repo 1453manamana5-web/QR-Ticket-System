@@ -422,3 +422,61 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   await terminalRef.update(patch);
   return { terminalId, receptionApproved: false, released: true };
 });
+
+
+/** Create a pending terminal application without allowing the browser to grant privileges. */
+export const registerTerminalApplication = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const name = typeof call.data?.name === "string" ? call.data.name.trim().slice(0, 80) : "";
+  const type = call.data?.type === "Web / PC" ? "Web / PC" : "Web / iPad";
+  const requestedRole = call.data?.role;
+  if (!/^T-[A-Za-z0-9-]{8,40}$/.test(terminalId)) {
+    throw new HttpsError("invalid-argument", "端末IDが正しくありません。");
+  }
+  if (requestedRole !== "management" && requestedRole !== "reception" && requestedRole !== "both") {
+    throw new HttpsError("invalid-argument", "申請する端末種別が正しくありません。");
+  }
+
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
+    if (ownerSnap.exists && ownerSnap.get("enabled") === true &&
+        ownerSnap.get("ownerUid") !== uid) {
+      throw new HttpsError("already-exists", "この端末IDは別の登録に使用されています。");
+    }
+    if (terminalSnap.exists) {
+      const current = terminalSnap.data() ?? {};
+      if (current.admin === true || current.subAdmin === true ||
+          current.managementApproved === true || current.receptionApproved === true ||
+          current.approved === true) {
+        throw new HttpsError("already-exists", "登録済み端末は新規申請できません。管理端末から承認操作を行ってください。");
+      }
+      if (typeof current.requestedByUid === "string" && current.requestedByUid !== uid) {
+        throw new HttpsError("already-exists", "この端末IDは別の申請で使用されています。");
+      }
+    }
+
+    tx.set(terminalRef, {
+      terminalId,
+      name: name || "端末申請",
+      type,
+      role: requestedRole,
+      mode: "停止",
+      status: "pending",
+      approved: false,
+      managementApproved: false,
+      receptionApproved: false,
+      admin: false,
+      subAdmin: false,
+      requestedRole,
+      requestedByUid: uid,
+      requestedAt: FieldValue.serverTimestamp(),
+      lastSeen: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  });
+
+  return { terminalId, approved: false, status: "pending" };
+});
