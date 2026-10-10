@@ -2034,14 +2034,14 @@ export default function App() {
           [],
           ["受付時刻", "受付種別", "チケットID", "チケット番号", "端末ID"],
           ...analysisReceptionRecords
-            .filter(record => record.type === "entry" || record.type === "exit")
+            .filter(record => record.type === "entry" || record.type === "exit" || record.type === "reentry")
             .slice()
             .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
             .map(record => [
               record.timestamp,
-              record.type === "entry" ? "入場" : "退場",
+              record.type === "entry" ? "入場" : record.type === "reentry" ? "再入場" : "退場",
               record.ticketId ?? "",
-              String(record.ticketNumber ?? ""),
+              String(analysisTickets.find(ticket => ticket.ticketId === record.ticketId)?.basicInfo.ticketNumber ?? ""),
               record.terminalId ?? "",
             ]),
         ];
@@ -2142,12 +2142,12 @@ export default function App() {
             <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {inside}人</span></div>
             {(() => {
               const timeline = analysisReceptionRecords
-                .filter(record => (record.type === "entry" || record.type === "exit") && typeof record.timestamp === "string" && Number.isFinite(Date.parse(record.timestamp)))
+                .filter(record => (record.type === "entry" || record.type === "exit" || record.type === "reentry") && typeof record.timestamp === "string" && Number.isFinite(Date.parse(record.timestamp)))
                 .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
               if (!timeline.length) return <div className="analysis-capacity-empty"><div><strong>まだ推移データがありません</strong><span>入退場記録が蓄積されると、会場内人数の変化を確認できます。</span></div></div>;
               let current = 0;
               const points = timeline.map(record => {
-                current += record.type === "entry" ? 1 : -1;
+                current += record.type === "entry" || record.type === "reentry" ? 1 : -1;
                 return { timestamp: record.timestamp, value: Math.max(0, current) };
               });
               const max = Math.max(1, ...points.map(point => point.value));
