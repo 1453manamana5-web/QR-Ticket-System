@@ -355,6 +355,9 @@ export const revokeTerminalReception = onCall(async (call) => {
   const patch: Record<string, unknown> = {
     receptionApproved: false,
     approved: targetSnap.get("managementApproved") === true,
+    mode: "停止",
+    desiredMode: "停止",
+    desiredModeUpdatedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     approvalUpdatedAt: FieldValue.serverTimestamp(),
     approvalUpdatedByUid: uid,
