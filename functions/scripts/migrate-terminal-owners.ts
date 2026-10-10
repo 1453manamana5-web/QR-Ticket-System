@@ -43,11 +43,13 @@ async function main() {
   for (const entry of entries) {
     const terminalRef = db.doc(`terminals/${entry.terminalId}`);
     const ownerRef = db.doc(`terminalOwners/${entry.terminalId}`);
+    const installationRef = db.doc(`terminalInstallations/${entry.ownerUid}`);
 
     await db.runTransaction(async transaction => {
-      const [terminal, owner] = await Promise.all([
+      const [terminal, owner, installation] = await Promise.all([
         transaction.get(terminalRef),
         transaction.get(ownerRef),
+        transaction.get(installationRef),
       ]);
       if (!terminal.exists) throw new Error(`Terminal ${entry.terminalId} does not exist.`);
       const data = terminal.data()!;
@@ -59,6 +61,16 @@ async function main() {
       if (owner.exists) {
         throw new Error(`Owner mapping for ${entry.terminalId} already exists; refusing to overwrite it.`);
       }
+      if (installation.exists) {
+        const installed = installation.data()!;
+        if (installed.authUid !== entry.ownerUid ||
+            installed.terminalId !== entry.terminalId ||
+            installed.approved !== true) {
+          throw new Error(
+            `Installation mapping for UID ${entry.ownerUid} already exists with a different or unapproved terminal; refusing to overwrite it.`,
+          );
+        }
+      }
       transaction.create(ownerRef, {
         terminalId: entry.terminalId,
         ownerUid: entry.ownerUid,
@@ -66,6 +78,17 @@ async function main() {
         migratedAt: new Date().toISOString(),
         migrationSource: "trusted-one-time-cli",
       });
+      if (!installation.exists) {
+        // The same trusted mapping is required by Firestore Rules to permit
+        // approved management clients to write event/ticket/settings data.
+        transaction.create(installationRef, {
+          terminalId: entry.terminalId,
+          authUid: entry.ownerUid,
+          approved: true,
+          registrationApprovedAt: new Date().toISOString(),
+          createdByTrustedMigration: true,
+        });
+      }
     });
     results.push(`Created owner mapping for terminal ${entry.terminalId}.`);
   }
