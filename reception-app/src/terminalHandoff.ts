@@ -39,3 +39,15 @@ export async function completeTerminalHandoff(requestId: string): Promise<{ term
   const result = await callable({ requestId });
   return result.data;
 }
+
+
+/** Reads the server-owned installation record; a terminal ID alone is not approval. */
+export async function getTerminalInstallationStatus(): Promise<{ approved: boolean; terminalId: string | null }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<void, { approved: boolean; terminalId: string | null }>(
+    functionsClient(),
+    "getTerminalInstallationStatus",
+  );
+  const result = await callable();
+  return result.data;
+}
