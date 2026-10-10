@@ -2190,7 +2190,7 @@ function NavIcon({type}:{type:string}){
     </div>;
   }
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""}`}>
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">QR</div>
