@@ -217,8 +217,6 @@ export default function App() {
   const [settingsNotice, setSettingsNotice] = useState("");
   const [aiLabMenuOpen, setAiLabMenuOpen] = useState(false);
   const [aiLabPanel, setAiLabPanel] = useState<"受付分析" | "システム診断" | "改善提案" | "警告履歴" | "AIイベント分析アシスタント" | "AIイベント終了レポート" | null>(null);
-  const [aiAssistantQuestion, setAiAssistantQuestion] = useState("");
-  const [aiAssistantMessages, setAiAssistantMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
   const [aiReportText, setAiReportText] = useState("");
   type AiLabWarning = { id: string; eventId: string; title: string; detail: string; detectedAt: string };
   const [aiLabWarnings, setAiLabWarnings] = useState<AiLabWarning[]>(() => {
@@ -1502,46 +1500,6 @@ export default function App() {
     return insights.slice(0, 6);
   }, [event.eventId, event.eventName, receptionRecords, tickets, aiLabDiagnostics, aiPeakHour, aiHourlyAnalysis, aiPreviousSnapshot]);
 
-  const answerAiAssistant = (rawQuestion: string) => {
-    const question = rawQuestion.trim();
-    if (!question) return;
-    const entryCount = receptionRecords.filter(record => record.type === "entry").length;
-    const exitCount = receptionRecords.filter(record => record.type === "exit").length;
-    const reentryCount = receptionRecords.filter(record => record.type === "reentry").length;
-    const invalidCount = tickets.filter(ticket => !ticket.valid).length;
-    const findingCount = aiLabDiagnostics.length;
-    let answer = "";
-    if (!event.eventId) {
-      answer = "先にイベント管理から対象イベントを選択してください。イベントを選ぶと、そのイベントの読み込み済みデータをもとに回答できます。";
-    } else if (/入場者|来場者|何人|人数|入場数/.test(question)) {
-      answer = "「" + event.eventName + "」の現在の集計です。\n入場中：" + ticketStats.inside + "人\n退場済み：" + ticketStats.exited + "人\n入場済み合計：" + (ticketStats.inside + ticketStats.exited) + "人\n受付記録の入場：" + entryCount + "件\n\nチケット状態と受付記録は集計方法が異なるため、数値が一致しない場合があります。";
-    } else if (/未使用|残り|チケット|利用率/.test(question)) {
-      answer = "「" + event.eventName + "」のチケット状況です。\n総チケット：" + ticketStats.total + "枚\n未使用：" + ticketStats.unused + "枚\n入場中：" + ticketStats.inside + "枚\n退場済み：" + ticketStats.exited + "枚\n無効チケット：" + invalidCount + "枚";
-    } else if (/問題|異常|エラー|警告|トラブル|診断/.test(question)) {
-      answer = findingCount ? "現在の基本診断で確認が必要な項目が" + findingCount + "件見つかっています。\n" + aiLabDiagnostics.slice(0, 5).map((item, index) => (index + 1) + ". " + item.title + "： " + item.detail).join("\n") : "現在読み込まれているデータでは、実装済みの基本診断項目に該当する問題は検出されていません。通信状態や未同期データまで正常と保証するものではありません。";
-    } else if (/退場|退出/.test(question)) {
-      answer = "受付記録上の退場は" + exitCount + "件、再入場は" + reentryCount + "件です。チケット状態では退場済みが" + ticketStats.exited + "枚です。再入場記録は入場者数に重複加算しないよう、別種別として扱っています。";
-    } else if (/時間|混雑|ピーク|集中/.test(question)) {
-      const counts = new Map<number, number>();
-      for (const record of receptionRecords) {
-        if (record.type !== "entry") continue;
-        const timestamp = Date.parse(record.timestamp);
-        if (Number.isFinite(timestamp)) {
-          const hour = new Date(timestamp).getHours();
-          counts.set(hour, (counts.get(hour) ?? 0) + 1);
-        }
-      }
-      const peak = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-      answer = peak ? "読み込み済みの入場記録では、最も件数が多い時間帯は" + String(peak[0]).padStart(2, "0") + "時台（" + peak[1] + "件）です。これは記録済みデータの集計であり、未同期の受付記録は含まれない可能性があります。" : "時間帯を分析できる入場記録がありません。受付記録が読み込まれ、時刻が保存されると時間帯別に集計できます。";
-    } else if (/まとめ|状況|概要|分析/.test(question)) {
-      answer = "「" + event.eventName + "」の概要です。\nイベント状態：" + statusLabel[event.eventStatus] + "\nチケット：" + ticketStats.total + "枚（未使用 " + ticketStats.unused + "枚）\n会場内：" + ticketStats.inside + "人\n退場済み：" + ticketStats.exited + "人\n受付記録：" + receptionRecords.length + "件（入場 " + entryCount + "・退場 " + exitCount + "・再入場 " + reentryCount + "）\n基本診断の確認項目：" + findingCount + "件";
-    } else {
-      answer = "現在はイベント情報、入場者数、チケットの利用状況、受付エラー、時間帯別の受付状況について回答できます。例えば「未使用チケットは何枚？」「受付で問題はある？」「混雑した時間帯は？」と質問してください。";
-    }
-    setAiAssistantMessages(current => [...current, { role: "user", text: question }, { role: "assistant", text: answer }].slice(-20));
-    setAiAssistantQuestion("");
-  };
-
   const generateAiEventReport = () => {
     if (!event.eventId) {
       setAiReportText("イベントが選択されていません。イベント管理から対象イベントを選択してください。");
@@ -2808,17 +2766,6 @@ function NavIcon({type}:{type:string}){
             <h4>今回の運営で改善できそうな点</h4>
             <div className="ai-operational-insights">{aiOperationalInsights.map((insight, index) => <article className={"ai-operational-insight " + insight.priority} key={insight.title}><span>{index + 1}</span><div><strong>{insight.title}</strong><p>{insight.detail}</p></div></article>)}</div>
           </section>
-          <div className="ai-assistant-quick-prompts">
-            {["現在の入場者数は？", "未使用チケットは何枚？", "受付で問題はある？", "混雑した時間帯は？"].map(prompt => <button key={prompt} type="button" onClick={() => setAiAssistantQuestion(prompt)}>{prompt}</button>)}
-          </div>
-          <div className="ai-assistant-messages" aria-live="polite">
-            {aiAssistantMessages.length === 0 ? <div className="ai-assistant-welcome"><strong>イベント運営について質問できます</strong><span>例：入場者数、チケット状況、受付記録、診断結果、時間帯別の混雑状況</span></div> : aiAssistantMessages.map((message, index) => <div className={"ai-assistant-message " + message.role} key={index}><span>{message.role === "user" ? "あなた" : "アシスタント"}</span><p>{message.text}</p></div>)}
-          </div>
-          <form className="ai-assistant-form" onSubmit={e => { e.preventDefault(); answerAiAssistant(aiAssistantQuestion); }}>
-            <input value={aiAssistantQuestion} onChange={e => setAiAssistantQuestion(e.target.value)} placeholder="イベントについて質問…" aria-label="AIアシスタントへの質問" />
-            <button className="primary-action" type="submit" disabled={!aiAssistantQuestion.trim()}>送信</button>
-          </form>
-          <p className="ai-lab-note">回答は現在読み込まれているデータに基づきます。外部AIによる自由生成ではないため、対応していない質問には対応可能な質問例を案内します。</p>
         </div>}
         {aiLabPanel === "AIイベント終了レポート" && <div className="ai-lab-detail-content ai-report-content">
           <p>イベントの集計・受付記録・基本診断から、終了レポートの下書きを作成します。作成後に内容を確認してから利用してください。</p>
@@ -2862,7 +2809,7 @@ function NavIcon({type}:{type:string}){
       </section>}
       {aiLabMenuOpen && <div className="ai-lab-glass-menu" role="menu" aria-label="AI受付分析メニュー">
         <div className="ai-lab-menu-title"><span className="ai-lab-eyebrow">AI TEST LAB</span><strong>AI受付分析</strong><small>端末内で動作する試験機能</small></div>
-        {(["AIイベント分析アシスタント", "AIイベント終了レポート", "受付分析", "システム診断", "改善提案", "警告履歴"] as const).map((item, index) => <button key={item} role="menuitem" className="ai-lab-menu-item" onClick={() => { setAiLabPanel(item); setAiLabMenuOpen(false); if (item === "AIイベント分析アシスタント" && aiAssistantMessages.length === 0) setAiAssistantMessages([{ role: "assistant", text: "イベントの入退場推移・時間帯別の受付状況・過去イベントとの比較・改善案を確認できます。質問欄から個別の内容も質問できます。" }]); if (item === "AIイベント終了レポート") setAiReportText(""); }}>
+        {(["AIイベント分析アシスタント", "AIイベント終了レポート", "受付分析", "システム診断", "改善提案", "警告履歴"] as const).map((item, index) => <button key={item} role="menuitem" className="ai-lab-menu-item" onClick={() => { setAiLabPanel(item); setAiLabMenuOpen(false); if (item === "AIイベント終了レポート") setAiReportText(""); }}>
           <span className="ai-lab-menu-icon">{["✧", "▤", "▥", "⌁", "✦", "◉"][index]}</span><span>{item}</span><span className="ai-lab-menu-chevron">›</span>
         </button>)}
       </div>}
