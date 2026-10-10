@@ -211,6 +211,12 @@ export async function loadEventTickets(eventId: string): Promise<Ticket[]> {
   const snapshot = await getDocs(collection(db, "events", eventId, "tickets"));
   return snapshot.docs.map(item => item.data() as Ticket);
 }
+
+export async function loadEventReceptionRecords(eventId: string): Promise<ReceptionRecord[]> {
+  const db = getFirebaseDb();
+  const snapshot = await getDocs(collection(db, "events", eventId, "receptionRecords"));
+  return snapshot.docs.map(item => item.data() as ReceptionRecord);
+}
 export async function loadAnalysis(eventId: string): Promise<AnalysisRecord[]> {
   const db = getFirebaseDb();
   const snapshot = await getDocs(collection(db, "events", eventId, "analysis"));
