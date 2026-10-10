@@ -1250,19 +1250,23 @@ export default function App() {
       }
 
       if (existing) {
-        const updatedExisting: ManagedTerminal = {
-          ...existing,
-          name: appSettings.deviceName || existing.name || "管理端末",
-          lastSeen: new Date().toISOString(),
-        };
-        await saveTerminal(updatedExisting);
+        let displayedTerminal = existing;
+        const desiredName = appSettings.deviceName || existing.name || "管理端末";
+        if ((existing.managementApproved ?? existing.approved) === true && desiredName !== existing.name) {
+          try {
+            const savedName = await updateManagedTerminalName(firebaseDeviceId, desiredName);
+            displayedTerminal = { ...existing, name: savedName.name };
+          } catch (reason) {
+            console.warn("既存管理端末の名前はサーバーに保存されませんでした", reason);
+          }
+        }
         localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
         localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
-        setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? updatedExisting : terminal));
+        setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? displayedTerminal : terminal));
         setForceTerminalRegistration(false);
         setSelectedTerminalId(firebaseDeviceId);
         setTerminalNotice(
-          existing.managementApproved ?? existing.approved
+          (existing.managementApproved ?? existing.approved) === true
             ? "この管理端末は登録済みです。"
             : "この管理端末は申請済みです。管理者の承認を待ってください。"
         );
