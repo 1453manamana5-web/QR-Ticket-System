@@ -628,13 +628,14 @@ export const recordReception = onCall(async (call) => {
 
   const installationRef = db.doc("terminalInstallations/" + uid);
   const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
   const eventRef = db.doc("events/" + eventId);
   const ticketRef = db.doc("events/" + eventId + "/tickets/" + ticketId);
   const recordRef = db.doc("events/" + eventId + "/receptionRecords/" + recordId);
 
   await db.runTransaction(async (tx) => {
-    const [installationSnap, terminalSnap, eventSnap, ticketSnap, recordSnap] = await Promise.all([
-      tx.get(installationRef), tx.get(terminalRef), tx.get(eventRef),
+    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap] = await Promise.all([
+      tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(eventRef),
       tx.get(ticketRef), tx.get(recordRef),
     ]);
 
@@ -642,12 +643,15 @@ export const recordReception = onCall(async (call) => {
       installationSnap.get("authUid") === uid &&
       installationSnap.get("approved") === true &&
       installationSnap.get("terminalId") === terminalId;
+    const ownerMatches = ownerSnap.exists &&
+      ownerSnap.get("ownerUid") === uid &&
+      ownerSnap.get("enabled") === true;
     const terminalAllowsReception = terminalSnap.exists &&
       terminalSnap.get("approved") === true &&
       (terminalSnap.get("receptionApproved") === true ||
         (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
       (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both");
-    if (!installationMatches || !terminalAllowsReception) {
+    if (!installationMatches || !ownerMatches || !terminalAllowsReception) {
       throw new HttpsError("permission-denied", "この端末は受付記録を保存する権限がありません。");
     }
     if (!eventSnap.exists || !ticketSnap.exists ||
