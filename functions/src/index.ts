@@ -409,10 +409,6 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   if (!terminalSnap.exists) {
     return { terminalId, receptionApproved: false, released: false };
   }
-  if (terminalSnap.get("admin") === true) {
-    throw new HttpsError("failed-precondition", "管理者端末の登録状態はこの操作では変更できません。");
-  }
-
   const role = terminalSnap.get("role");
   const managementApproved = terminalSnap.get("managementApproved") === true;
   const patch: Record<string, unknown> = {
