@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Firestore rules tests
+        run: npm run test:rules
+
       - name: Typecheck
         run: npm run typecheck
 
