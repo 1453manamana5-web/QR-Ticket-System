@@ -309,7 +309,7 @@ export const approveTerminalRegistration = onCall(async (call) => {
         ownerSnap.get("ownerUid") !== targetUid) {
       throw new HttpsError("already-exists", "この端末IDは別の所有者に登録されています。");
     }
-    if ((role === "reception" || role === "both") && installationSnap.exists &&
+    if (installationSnap.exists &&
         installationSnap.get("terminalId") !== targetTerminalId) {
       throw new HttpsError("already-exists", "この端末環境は別の端末に登録済みです。");
     }
@@ -329,14 +329,15 @@ export const approveTerminalRegistration = onCall(async (call) => {
       enabled: true,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
-    if (role === "reception" || role === "both") {
-      tx.set(installationRef, {
-        terminalId: targetTerminalId,
-        authUid: targetUid,
-        approved: true,
-        registrationApprovedAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
-    }
+    // Record a trusted installation for every approved role. Firestore rules
+    // use this server-issued mapping to distinguish management clients from
+    // reception-only clients.
+    tx.set(installationRef, {
+      terminalId: targetTerminalId,
+      authUid: targetUid,
+      approved: true,
+      registrationApprovedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
   });
   return { terminalId: targetTerminalId, approved: true, role };
 });
@@ -669,7 +670,7 @@ export const recordReception = onCall(async (call) => {
     const currentStatus = ticket.currentStatus;
     const allowed =
       (type === "entry" && currentStatus === "unused") ||
-      (type === "reentry" && currentStatus === "inside") ||
+      (type === "reentry" && currentStatus === "exited") ||
       (type === "exit" && currentStatus === "inside");
     if (!allowed) {
       throw new HttpsError("failed-precondition", "チケットの現在状態と受付内容が一致しません。最新データを確認してください。");
