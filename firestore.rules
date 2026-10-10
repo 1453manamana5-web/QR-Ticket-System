@@ -26,6 +26,20 @@ service cloud.firestore {
         );
     }
 
+    function approvedReceptionTerminal() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
+        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
+        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
+        && (
+          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
+          || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
+        );
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow read, write: if false;
@@ -46,11 +60,11 @@ service cloud.firestore {
     // Event and ticket reads are available to authenticated clients. Direct
     // management writes require a trusted management-terminal installation.
     match /events/{eventId} {
-      allow read: if signedIn();
+      allow read: if approvedManagementTerminal() || approvedReceptionTerminal();
       allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
-        allow read: if signedIn();
+        allow read: if approvedManagementTerminal();
         // Reception ticket status changes go through recordReception (Admin SDK).
         allow create, update, delete: if approvedManagementTerminal();
       }
