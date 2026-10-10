@@ -51,3 +51,17 @@ export async function getTerminalInstallationStatus(): Promise<{ approved: boole
   const result = await callable();
   return result.data;
 }
+
+
+/** Releases reception permission only for the current authenticated installation. */
+export async function releaseOwnReceptionRegistration(
+  terminalId: string,
+): Promise<{ terminalId: string; receptionApproved: false; released: boolean }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string },
+    { terminalId: string; receptionApproved: false; released: boolean }
+  >(functionsClient(), "releaseOwnReceptionRegistration");
+  const result = await callable({ terminalId });
+  return result.data;
+}
