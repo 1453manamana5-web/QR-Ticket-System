@@ -24,11 +24,17 @@ async function main() {
   const db = getFirestore();
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + ownerUid);
 
   await db.runTransaction(async tx => {
-    const [terminal, owner] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
+    const [terminal, owner, installation] = await Promise.all([
+      tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef),
+    ]);
     if (terminal.exists) throw new Error("Terminal already exists; refusing to overwrite it.");
     if (owner.exists) throw new Error("Owner mapping already exists; refusing to overwrite it.");
+    if (installation.exists) {
+      throw new Error("Installation mapping already exists; refusing to overwrite it.");
+    }
     tx.create(terminalRef, {
       terminalId,
       name: terminalName || "管理端末",
@@ -57,7 +63,7 @@ async function main() {
     });
     // Firestore Rules use this trusted installation mapping to authorize
     // management data writes from the first admin's authenticated browser.
-    tx.create(db.doc("terminalInstallations/" + ownerUid), {
+    tx.create(installationRef, {
       terminalId,
       authUid: ownerUid,
       approved: true,
