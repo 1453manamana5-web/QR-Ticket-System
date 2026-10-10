@@ -1505,57 +1505,99 @@ export default function App() {
       setAiReportText("イベントが選択されていません。イベント管理から対象イベントを選択してください。");
       return;
     }
+
     const entryRecords = receptionRecords.filter(record => record.type === "entry");
     const exitRecords = receptionRecords.filter(record => record.type === "exit");
     const reentryRecords = receptionRecords.filter(record => record.type === "reentry");
-    const hourly = new Map<number, number>();
-    entryRecords.forEach(record => {
-      const timestamp = Date.parse(record.timestamp);
-      if (Number.isFinite(timestamp)) {
-        const hour = new Date(timestamp).getHours();
-        hourly.set(hour, (hourly.get(hour) ?? 0) + 1);
-      }
+    const validTimedRecords = receptionRecords
+      .map(record => ({ record, timestamp: Date.parse(record.timestamp) }))
+      .filter(item => Number.isFinite(item.timestamp));
+    const invalidTimestampCount = receptionRecords.length - validTimedRecords.length;
+    const hourly = new Map<number, { entry: number; exit: number; reentry: number }>();
+    validTimedRecords.forEach(({ record, timestamp }) => {
+      const hour = new Date(timestamp).getHours();
+      const bucket = hourly.get(hour) ?? { entry: 0, exit: 0, reentry: 0 };
+      if (record.type === "entry") bucket.entry++;
+      else if (record.type === "exit") bucket.exit++;
+      else if (record.type === "reentry") bucket.reentry++;
+      hourly.set(hour, bucket);
     });
-    const peak = [...hourly.entries()].sort((a, b) => b[1] - a[1])[0];
+    const hourlyRows = [...hourly.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([hour, counts]) => String(hour).padStart(2, "0") + "時台：入場 " + counts.entry + "件／退場 " + counts.exit + "件／再入場 " + counts.reentry + "件");
+    const peak = [...hourly.entries()].sort((a, b) => b[1].entry - a[1].entry)[0];
+    const firstRecord = validTimedRecords.length ? new Date(Math.min(...validTimedRecords.map(item => item.timestamp))) : null;
+    const lastRecord = validTimedRecords.length ? new Date(Math.max(...validTimedRecords.map(item => item.timestamp))) : null;
     const invalidCount = tickets.filter(ticket => !ticket.valid).length;
     const warnings = aiLabDiagnostics.length
-      ? aiLabDiagnostics.map((item, index) => (index + 1) + ". " + item.title + "： " + item.detail).join("\n")
+      ? aiLabDiagnostics.map((item, index) => (index + 1) + ". " + item.title + "：" + item.detail).join("\n")
       : "現在読み込まれているデータでは、実装済みの基本診断項目に該当する問題は検出されていません。";
-    const suggestions = aiLabSuggestions.map((item, index) => (index + 1) + ". " + item.title + "： " + item.detail).join("\n");
+    const suggestions = aiOperationalInsights
+      .map((item, index) => (index + 1) + ". [" + (item.priority === "high" ? "優先度：高" : item.priority === "medium" ? "優先度：中" : "確認・良好") + "] " + item.title + "：" + item.detail)
+      .join("\n");
+    const previousComparison = aiPreviousSnapshot
+      ? [
+          "比較対象イベント：" + aiPreviousSnapshot.eventName + "（" + (aiPreviousSnapshot.eventDate || "開催日不明") + "）",
+          "チケット総数：" + aiPreviousSnapshot.total + "枚（今回との差 " + (ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : "") + (ticketStats.total - aiPreviousSnapshot.total) + "枚）",
+          "入場中：" + aiPreviousSnapshot.inside + "人（今回との差 " + (ticketStats.inside - aiPreviousSnapshot.inside >= 0 ? "+" : "") + (ticketStats.inside - aiPreviousSnapshot.inside) + "人）",
+          "退場済み：" + aiPreviousSnapshot.exited + "人（今回との差 " + (ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : "") + (ticketStats.exited - aiPreviousSnapshot.exited) + "人）",
+          aiPreviousSnapshot.source === "records"
+            ? "受付記録：入場 " + aiPreviousSnapshot.entryRecords + "件／退場 " + aiPreviousSnapshot.exitRecords + "件／再入場 " + aiPreviousSnapshot.reentryRecords + "件"
+            : "受付記録の比較：過去イベントの保存済み分析のみを使用（生の受付記録は未取得）",
+          aiPreviousSnapshot.source === "records" && aiPreviousSnapshot.peakHour
+            ? "過去イベントの入場ピーク：" + String(aiPreviousSnapshot.peakHour[0]).padStart(2, "0") + "時台（" + aiPreviousSnapshot.peakHour[1] + "件）"
+            : ""
+        ].filter(Boolean).join("\n")
+      : "比較対象となる過去イベントのデータはありません。";
     const generatedAt = new Date().toLocaleString("ja-JP");
     const report = [
-      "QR受付管理システム｜イベント終了レポート（下書き）",
+      "QR受付管理システム｜イベント終了レポート（確認用下書き）",
       "作成日時：" + generatedAt,
       "",
-      "■ イベント概要",
+      "■ 1. イベント概要",
       "イベント名：" + event.eventName,
       "開催日：" + (event.eventDate || "未設定"),
       "イベントID：" + event.eventId,
       "イベント状態：" + statusLabel[event.eventStatus],
       "",
-      "■ チケット・来場状況（現在読み込み済みのデータ）",
+      "■ 2. チケット状況",
       "総チケット数：" + ticketStats.total + "枚",
+      "有効チケット：" + (tickets.length - invalidCount) + "枚",
       "未使用：" + ticketStats.unused + "枚",
       "入場中：" + ticketStats.inside + "人",
       "退場済み：" + ticketStats.exited + "人",
       "チケット状態上の入場済み合計：" + (ticketStats.inside + ticketStats.exited) + "人",
       "無効チケット：" + invalidCount + "枚",
       "",
-      "■ 受付記録",
-      "入場：" + entryRecords.length + "件",
-      "退場：" + exitRecords.length + "件",
-      "再入場：" + reentryRecords.length + "件",
+      "■ 3. 受付記録の集計",
+      "入場記録：" + entryRecords.length + "件",
+      "退場記録：" + exitRecords.length + "件",
+      "再入場記録：" + reentryRecords.length + "件",
       "受付記録合計：" + receptionRecords.length + "件",
-      "最も入場記録が多い時間帯：" + (peak ? String(peak[0]).padStart(2, "0") + "時台（" + peak[1] + "件）" : "集計可能な記録なし"),
+      "時刻を集計できた記録：" + validTimedRecords.length + "件",
+      "時刻が不正・未設定の記録：" + invalidTimestampCount + "件",
+      "記録上の最初の受付時刻：" + (firstRecord ? firstRecord.toLocaleString("ja-JP") : "集計可能な記録なし"),
+      "記録上の最後の受付時刻：" + (lastRecord ? lastRecord.toLocaleString("ja-JP") : "集計可能な記録なし"),
+      "入場記録が最も多い時間帯：" + (peak && peak[1].entry > 0 ? String(peak[0]).padStart(2, "0") + "時台（" + peak[1].entry + "件）" : "集計可能な入場記録なし"),
       "",
-      "■ システム診断",
+      "■ 4. 時間帯別の受付状況（端末のローカル時刻）",
+      hourlyRows.length ? hourlyRows.join("\n") : "時間帯別に集計できる記録はありません。",
+      "",
+      "■ 5. 過去イベントとの比較",
+      previousComparison,
+      "",
+      "■ 6. システム診断",
       warnings,
       "",
-      "■ 次回への改善提案",
-      suggestions,
+      "■ 7. 次回に向けた改善候補",
+      suggestions || "現時点で改善候補はありません。記録に表れない課題がないか、当日の担当者にも確認してください。",
       "",
-      "■ データに関する注意",
-      "このレポートは作成時点でこの管理画面に読み込まれているデータを使用した下書きです。端末間の未同期記録が含まれていない可能性があります。数値と提案を確認し、必要に応じて修正してから正式な報告に使用してください。",
+      "■ 8. 集計上の注意",
+      "・本レポートは生成時点で管理画面に読み込まれているデータを集計しています。全端末の同期完了を保証するものではありません。",
+      "・入場・退場・再入場は受付記録の件数です。ユニークな来場者数そのものを示すとは限りません。",
+      "・チケット状態の人数と受付記録件数は、再入場や運用状況などにより一致しない場合があります。",
+      "・過去イベントとの比較は、開催規模・運用方法・同期状態が同程度かを確認したうえで解釈してください。",
+      "・改善候補はアプリ内のルールベース判定です。内容と数値を確認・編集してから正式な報告に使用してください。"
     ].join("\n");
     setAiReportText(report);
   };
