@@ -110,7 +110,6 @@ export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
 let managementNetworkSpeedCache: number | null = null;
 let managementNetworkSpeedMeasuredAt = 0;
 const MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
-const MANAGEMENT_NETWORK_PROBE_SIZE_BYTES = 32768;
 
 function getManagementBrowserDownlink(): number | null {
   if (typeof navigator === "undefined") return null;
@@ -123,10 +122,6 @@ function getManagementBrowserDownlink(): number | null {
     ?? (navigator as Navigator & { webkitConnection?: { downlink?: number } }).webkitConnection;
   const downlink = connection?.downlink;
   return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
-}
-
-function createManagementNetworkProbe(): string {
-  return "0123456789abcdef".repeat(MANAGEMENT_NETWORK_PROBE_SIZE_BYTES / 16);
 }
 
 async function measureManagementNetworkSpeed(
