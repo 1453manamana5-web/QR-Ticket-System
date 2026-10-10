@@ -9,7 +9,7 @@ This package provides authenticated callable Functions and trusted migration uti
 - `requestTerminalHandoff`, `listTerminalHandoffRequests`, `decideTerminalHandoff`, and `completeTerminalHandoff`: implement expiring, one-time handoff requests with owner checks and rate limiting.
 - `getTerminalInstallationStatus`: verifies the server-issued installation mapping and the terminal's current reception approval.
 - `updateTerminalHeartbeat`: validates the authenticated installation before updating operational status fields.
-- `recordReception`: validates terminal authorization, event/ticket identity, ticket validity, and entry/exit/re-entry state before atomically saving a reception record and ticket status.
+- `recordReception`: validates the server-issued installation binding, enabled trusted owner mapping, current reception approval, event/ticket identity, ticket validity, and entry/exit/re-entry state before atomically saving a reception record and ticket status. A handed-off installation may have a different Auth UID from the original owner, but only if the server has explicitly bound that UID to the same terminal.
 - `revokeTerminalReception`, `releaseOwnReceptionRegistration`, and `deleteManagedTerminal`: perform protected registration changes on the server.
 - `scripts/bootstrap-first-admin.ts`: one-time bootstrap for a genuinely new project; refuses to overwrite existing records.
 - `scripts/migrate-terminal-owners.ts`: trusted migration for existing approved management terminals, with dry-run and conflict checks.
@@ -39,4 +39,4 @@ Review the project ID, terminal ID, UID, and output. Only after independent veri
 
 ## Production blocker
 
-Do not deploy or merge this branch as production-ready until the existing Firebase project and its live rules have been reviewed, the migration has been tested in a non-production Firebase project, and end-to-end checks have verified management approval, reception approval, heartbeat updates, entry/exit/re-entry, and revocation. Current CI is not a substitute for those checks. Keep the pull request in draft and do not deploy rules or Functions from this workflow.
+Do not deploy or merge this branch as production-ready until the existing Firebase project and its live rules have been reviewed, the migration has been tested in a non-production Firebase project, and end-to-end checks have verified management approval, reception approval, heartbeat updates, entry/exit/re-entry, revocation, and reception writes from a handed-off installation whose Auth UID differs from the original owner. Current CI is not a substitute for those checks. Keep the pull request in draft and do not deploy rules or Functions from this workflow.
