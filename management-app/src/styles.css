@@ -3965,59 +3965,18 @@ body:has(.ticket-screen),
 }
 
 
-/* Liquid Glass sidebar: long-press and drag to reorder navigation items. */
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button{
-  position:relative;
-  touch-action:pan-y;
+/* Liquid Glass sidebar: vertical swipe to preview and open navigation items. */
+.app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button{
+  touch-action:pan-x;
   user-select:none;
   -webkit-user-select:none;
 }
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button:not(:disabled){
-  cursor:grab;
+.app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button.nav-swipe-preview{
+  background:linear-gradient(135deg,rgba(255,255,255,.42),rgba(255,255,255,.20));
+  border-color:rgba(255,255,255,.82);
+  box-shadow:0 10px 26px rgba(18,30,62,.16),inset 0 1px 0 rgba(255,255,255,.88);
+  transform:translateX(3px) scale(1.015);
 }
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-item-dragging{
-  z-index:5;
-  cursor:grabbing;
-  opacity:.92;
-  transform:scale(1.035);
-  background:linear-gradient(135deg,rgba(255,255,255,.36),rgba(255,255,255,.19));
-  border-color:rgba(255,255,255,.76);
-  box-shadow:0 14px 32px rgba(8,16,42,.24),inset 0 1px 0 rgba(255,255,255,.6);
-}
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-drop-before::before,
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-drop-after::after{
-  content:"";
-  position:absolute;
-  left:10px;right:10px;
-  height:3px;
-  border-radius:99px;
-  background:rgba(255,255,255,.98);
-  box-shadow:0 0 0 3px rgba(161,190,255,.22),0 0 15px rgba(255,255,255,.82);
-  pointer-events:none;
-}
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-drop-before::before{top:-3px}
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-drop-after::after{bottom:-3px}
-.sidebar-reorder-grip{
-  flex:none;
-  margin-left:auto;
-  padding-left:6px;
-  color:rgba(255,255,255,.60);
-  font-size:19px;
-  line-height:1;
-  opacity:0;
-  transition:opacity .18s ease,color .18s ease;
-}
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button:hover .sidebar-reorder-grip,
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button:focus-visible .sidebar-reorder-grip{
-  opacity:1;
-  color:rgba(255,255,255,.92);
-}
-.app-shell.liquid-glass-enabled .sidebar-nav-reorder-enabled .sidebar-group-items button.nav-item-dragging .sidebar-reorder-grip{
-  opacity:1;
-}
-@media(hover:none){
-  .sidebar-reorder-grip{opacity:.62}
-}
-@media(prefers-reduced-motion:reduce){
-  .sidebar-reorder-grip{transition:none}
+.app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button{
+  transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
 }
