@@ -128,3 +128,19 @@ export async function setTerminalSubAdmin(
   const result = await callable({ managerTerminalId, targetTerminalId, enabled });
   return result.data;
 }
+
+
+export async function updateTerminalHeartbeat(
+  terminalId: string,
+  mode: "入口受付" | "出口受付" | "停止",
+  syncPendingCount?: number,
+  networkMbps?: number | null,
+): Promise<{ terminalId: string; status: "online" }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string; mode: "入口受付" | "出口受付" | "停止"; syncPendingCount?: number; networkMbps?: number | null },
+    { terminalId: string; status: "online" }
+  >(functionsClient(), "updateTerminalHeartbeat");
+  const result = await callable({ terminalId, mode, syncPendingCount, networkMbps: networkMbps ?? undefined });
+  return result.data;
+}
