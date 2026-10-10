@@ -62,8 +62,3 @@ test("clients cannot create, update, or delete terminal documents directly", asy
   // Reading terminal status remains necessary for the management/reception UI.
   await assertSucceeds(getDoc(doc(db, "terminals", "T-ABCDEFGH")));
 });
-
-  });
-  const db = env.authenticatedContext("anonymous-user-1").firestore();
-  await assertFails(deleteDoc(doc(db, "terminals", "T-ABCDEFGH")));
-});
