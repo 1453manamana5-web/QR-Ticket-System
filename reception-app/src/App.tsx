@@ -4,7 +4,7 @@ import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
 import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
-import {requestTerminalHandoff,completeTerminalHandoff} from "./terminalHandoff";
+import {requestTerminalHandoff,completeTerminalHandoff,getTerminalInstallationStatus} from "./terminalHandoff";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
@@ -475,12 +475,16 @@ export default function App(){
             setHandoffBusy(true);setHandoffNotice("");
             try{
               const result=await completeTerminalHandoff(handoffRequestId);
+              const serverStatus=await getTerminalInstallationStatus();
+              if(!serverStatus.approved || serverStatus.terminalId!==result.terminalId){
+                throw new Error("SERVER_INSTALLATION_NOT_APPROVED");
+              }
               localStorage.setItem("qr-ticket-terminal-id",result.terminalId);
               localStorage.removeItem("qr-ticket-handoff-request-id");
               setHandoffRequestId("");
               const registration=await getTerminalRegistration();
               setTerminalRegistration(registration);
-              setHandoffNotice(registration?.approved?"引き継ぎが完了しました。登録済み端末として認識しました。":"引き継ぎは承認されましたが、受付権限が確認できません。管理画面で状態を確認してください。");
+              setHandoffNotice(registration?.approved?"引き継ぎが完了しました。サーバー確認済みの登録端末として認識しました。":"引き継ぎは承認されましたが、受付権限が確認できません。管理画面で状態を確認してください。");
               if(registration?.approved)setScreen("auth");
             }catch(reason){
               console.error("端末引き継ぎの完了確認に失敗しました",reason);
