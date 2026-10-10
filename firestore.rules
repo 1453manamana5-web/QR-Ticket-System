@@ -77,6 +77,15 @@ service cloud.firestore {
       }
     }
 
+    // Event bundles are fetched by an opaque auth token. Authenticated clients may
+    // fetch a known bundle, but only approved management installations may publish
+    // or replace bundles. Do not allow collection listing from reception clients.
+    match /eventBundles/{authToken} {
+      allow get: if signedIn();
+      allow list: if approvedManagementTerminal();
+      allow create, update, delete: if approvedManagementTerminal();
+    }
+
     // Device/app settings can only be modified by approved management terminals.
     match /devices/{deviceId} {
       allow read: if signedIn();
