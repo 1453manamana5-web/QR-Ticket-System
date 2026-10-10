@@ -5,7 +5,7 @@ import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from
 import TicketDesigner from "./TicketDesigner";
 import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,releaseOwnReceptionRegistration,deleteManagedTerminalOnServer,setTerminalSubAdmin as setTerminalSubAdminOnServer,updateManagedTerminalName,setManagedTerminalMode,type PendingHandoffRequest} from "./terminalHandoff";
 import {ensureInstallationAuth} from "./firebaseClient";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "",
