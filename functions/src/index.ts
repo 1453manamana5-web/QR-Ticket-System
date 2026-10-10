@@ -801,3 +801,37 @@ export const setManagedTerminalMode = onCall(async (call) => {
   });
   return { terminalId: targetTerminalId, mode, updatedAt };
 });
+
+/** Delete an event and all nested operational records using trusted server credentials. */
+export const deleteManagedEvent = onCall(async (call) => {
+  const uid = requireUid(call);
+  const rawEventId = call.data?.eventId;
+  if (typeof rawEventId !== "string" || !rawEventId.trim() ||
+      rawEventId.length > 160 || rawEventId.includes("/")) {
+    throw new HttpsError("invalid-argument", "イベントIDが正しくありません。");
+  }
+  const eventId = rawEventId.trim();
+  const installationSnap = await db.doc("terminalInstallations/" + uid).get();
+  if (!installationSnap.exists || installationSnap.get("authUid") !== uid ||
+      installationSnap.get("approved") !== true) {
+    throw new HttpsError("permission-denied", "承認済みの管理端末から実行してください。");
+  }
+  const terminalId = installationSnap.get("terminalId");
+  if (typeof terminalId !== "string" || !terminalId || terminalId.includes("/")) {
+    throw new HttpsError("permission-denied", "管理端末の登録情報が正しくありません。");
+  }
+  const terminalSnap = await db.doc("terminals/" + terminalId).get();
+  if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
+      terminalSnap.get("managementApproved") !== true ||
+      (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
+    throw new HttpsError("permission-denied", "イベント削除の権限がありません。");
+  }
+  const eventRef = db.doc("events/" + eventId);
+  const eventSnap = await eventRef.get();
+  if (!eventSnap.exists) {
+    return { eventId, deleted: false };
+  }
+  await db.recursiveDelete(eventRef);
+  return { eventId, deleted: true };
+});
+
