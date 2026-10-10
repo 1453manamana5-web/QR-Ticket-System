@@ -225,7 +225,7 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
   const owner = await db.doc("terminalOwners/" + terminalId).get();
   const terminal = await db.doc("terminals/" + terminalId).get();
   if (!owner.exists || owner.get("enabled") !== true || !terminal.exists ||
-      (terminal.get("receptionApproved") !== true && terminal.get("approved") !== true)) {
+      !(terminal.get("receptionApproved") === true || (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true))) {
     return { approved: false, terminalId: null };
   }
 
