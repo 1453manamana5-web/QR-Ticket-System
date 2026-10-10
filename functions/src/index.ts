@@ -24,10 +24,10 @@ function readId(value: unknown, field: string): string {
 }
 
 /**
- * Phase-one server API for handoff. This deliberately requires terminal.ownerUid,
- * which must be populated through a trusted migration/registration flow before
- * this feature can be enabled. A public terminalId is never accepted as proof
- * of ownership.
+ * Ownership is stored separately in terminalOwners/{terminalId}. That collection
+ * must be writable only by trusted Admin SDK code; clients must never be able to
+ * create or update ownership mappings. Existing terminals need a trusted
+ * migration before this flow can be enabled.
  */
 export const requestTerminalHandoff = onCall(async (call) => {
   const requesterUid = requireUid(call);
@@ -39,12 +39,19 @@ export const requestTerminalHandoff = onCall(async (call) => {
   const now = Date.now();
 
   await db.runTransaction(async (tx) => {
-    const [terminalSnap, rateLimitSnap] = await Promise.all([
+    const ownerRef = db.doc(`terminalOwners/${terminalId}`);
+    const [terminalSnap, ownerSnap, rateLimitSnap] = await Promise.all([
       tx.get(terminalRef),
+      tx.get(ownerRef),
       tx.get(rateLimitRef),
     ]);
 
-    if (!terminalSnap.exists || terminalSnap.get("approved") !== true) {
+    if (
+      !terminalSnap.exists ||
+      terminalSnap.get("approved") !== true ||
+      !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true
+    ) {
       // Avoid confirming whether an arbitrary ID exists or is registered.
       throw new HttpsError("not-found", "引き継ぎ対象を確認できません。");
     }
@@ -73,12 +80,17 @@ export const requestTerminalHandoff = onCall(async (call) => {
 export const listTerminalHandoffRequests = onCall(async (call) => {
   const ownerUid = requireUid(call);
   const terminalId = readId(call.data?.terminalId, "端末ID");
-  const terminalSnap = await db.doc(`terminals/${terminalId}`).get();
+  const [terminalSnap, ownerSnap] = await Promise.all([
+    db.doc(`terminals/${terminalId}`).get(),
+    db.doc(`terminalOwners/${terminalId}`).get(),
+  ]);
 
   if (
     !terminalSnap.exists ||
-    terminalSnap.get("ownerUid") !== ownerUid ||
-    terminalSnap.get("approved") !== true
+    terminalSnap.get("approved") !== true ||
+    !ownerSnap.exists ||
+    ownerSnap.get("enabled") !== true ||
+    ownerSnap.get("ownerUid") !== ownerUid
   ) {
     throw new HttpsError("permission-denied", "この端末の申請を確認する権限がありません。");
   }
@@ -117,12 +129,18 @@ export const decideTerminalHandoff = onCall(async (call) => {
 
     const terminalId = requestSnap.get("terminalId") as string;
     const terminalRef = db.doc(`terminals/${terminalId}`);
-    const terminalSnap = await tx.get(terminalRef);
+    const ownerRef = db.doc(`terminalOwners/${terminalId}`);
+    const [terminalSnap, ownerSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+    ]);
 
     if (
       !terminalSnap.exists ||
-      terminalSnap.get("ownerUid") !== ownerUid ||
-      terminalSnap.get("approved") !== true
+      terminalSnap.get("approved") !== true ||
+      !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true ||
+      ownerSnap.get("ownerUid") !== ownerUid
     ) {
       throw new HttpsError("permission-denied", "この申請を処理する権限がありません。");
     }
