@@ -31,39 +31,16 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
-  const db = getFirebaseDb();
   const terminalId = getTerminalIdForRegistration();
-  const reference = doc(db, "terminals", terminalId);
-  const existing = await getDoc(reference);
-  const data = existing.exists() ? existing.data() : {};
-  const existingRole = data.role === "management" || data.role === "reception" || data.role === "both"
-    ? data.role
-    : "reception";
-  const role = existingRole === "management" || existingRole === "both" ? "both" : "reception";
-  // 受付を使うたびに、現在の端末状態に関係なく新しい承認申請として扱う。
-  // 同じ端末・同じFirebaseアカウントでも、受付権限を自動で引き継がない。
-  const receptionApproved = false;
-  // 受付の承認待ち状態は管理端末側の承認状態と分離する。
-  // 同じ端末が「管理＋受付」の両方を持つ場合、受付申請だけで管理画面を承認待ちにしない。
-  const status = data.managementApproved === true
-    ? (data.status === "online" || data.status === "offline" ? data.status : "offline")
-    : ("pending" as const);
-
-  await setDoc(reference, {
+  // 受付申請はサーバー側で未承認状態として登録する。
+  // 既存の管理権限・承認フラグをブラウザから変更しない。
+  const { registerTerminalApplication } = await import("./terminalHandoff");
+  await registerTerminalApplication(
     terminalId,
-    name: name.trim() || (typeof data.name === "string" ? data.name : "受付端末"),
-    type: data.type === "Web / PC" ? "Web / PC" : "Web / iPad",
-    role,
-    mode: "停止" as const,
-    status,
-    approved: data.managementApproved === true,
-    managementApproved: data.managementApproved === true,
-    receptionApproved,
-    lastSeen: new Date().toISOString(),
-    networkMbps: typeof data.networkMbps === "number" ? data.networkMbps : null,
-    battery: typeof data.battery === "number" ? data.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+    name.trim() || "受付端末",
+    "Web / iPad",
+    "reception",
+  );
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
