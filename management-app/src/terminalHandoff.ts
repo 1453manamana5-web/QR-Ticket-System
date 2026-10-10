@@ -57,3 +57,30 @@ export async function approveTerminalRegistration(
   const result = await callable({ managerTerminalId, targetTerminalId });
   return result.data;
 }
+
+
+export async function revokeTerminalReception(
+  managerTerminalId: string,
+  targetTerminalId: string,
+): Promise<{ terminalId: string; receptionApproved: false }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { managerTerminalId: string; targetTerminalId: string },
+    { terminalId: string; receptionApproved: false }
+  >(functionsClient(), "revokeTerminalReception");
+  const result = await callable({ managerTerminalId, targetTerminalId });
+  return result.data;
+}
+
+export async function deleteManagedTerminalOnServer(
+  managerTerminalId: string,
+  targetTerminalId: string,
+): Promise<{ terminalId: string; deleted: boolean }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { managerTerminalId: string; targetTerminalId: string },
+    { terminalId: string; deleted: boolean }
+  >(functionsClient(), "deleteManagedTerminal");
+  const result = await callable({ managerTerminalId, targetTerminalId });
+  return result.data;
+}
