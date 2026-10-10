@@ -196,7 +196,9 @@ export const completeTerminalHandoff = onCall(async (call) => {
       tx.get(terminalRef),
       tx.get(ownerRef),
     ]);
+    const terminalRole = terminalSnap.get("role");
     const terminalAllowsReception = terminalSnap.exists &&
+      (terminalRole === "reception" || terminalRole === "both") &&
       (terminalSnap.get("receptionApproved") === true ||
         (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true));
     if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
@@ -240,7 +242,9 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
 
   const owner = await db.doc("terminalOwners/" + terminalId).get();
   const terminal = await db.doc("terminals/" + terminalId).get();
+  const terminalRole = terminal.get("role");
   if (!owner.exists || owner.get("enabled") !== true || !terminal.exists ||
+      (terminalRole !== "reception" && terminalRole !== "both") ||
       !(terminal.get("receptionApproved") === true || (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true))) {
     return { approved: false, terminalId: null };
   }
