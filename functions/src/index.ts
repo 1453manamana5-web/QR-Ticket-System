@@ -281,3 +281,86 @@ export const approveTerminalRegistration = onCall(async (call) => {
   await db.doc("terminals/" + targetTerminalId).update(patch);
   return { terminalId: targetTerminalId, approved: true, role };
 });
+
+
+/** Revoke reception access without letting the browser edit approval flags directly. */
+export const revokeTerminalReception = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+
+  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+  ]);
+  if (!managerSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+
+  const role = targetSnap.get("role");
+  const patch: Record<string, unknown> = {
+    receptionApproved: false,
+    approved: targetSnap.get("managementApproved") === true,
+    updatedAt: new Date().toISOString(),
+    approvalUpdatedAt: FieldValue.serverTimestamp(),
+    approvalUpdatedByUid: uid,
+  };
+  if (role === "both") patch.role = "management";
+  else if (role === "reception") patch.role = "reception";
+  await db.doc("terminals/" + targetTerminalId).update(patch);
+  return { terminalId: targetTerminalId, receptionApproved: false };
+});
+
+/** Delete another terminal only through a trusted admin/sub-admin server check. */
+export const deleteManagedTerminal = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "現在使用中の管理端末は削除できません。");
+  }
+
+  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+  ]);
+  if (!managerSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists) return { terminalId: targetTerminalId, deleted: false };
+
+  const isAdmin = managerSnap.get("admin") === true;
+  const targetRole = targetSnap.get("role");
+  if (!isAdmin && (targetRole === "management" || targetRole === "both")) {
+    throw new HttpsError("permission-denied", "副管理者は管理端末を削除できません。");
+  }
+
+  const batch = db.batch();
+  batch.delete(db.doc("terminals/" + targetTerminalId));
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  const targetOwner = await targetOwnerRef.get();
+  if (targetOwner.exists) batch.delete(targetOwnerRef);
+  const pending = await db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", targetTerminalId).get();
+  pending.docs.forEach((doc) => batch.delete(doc.ref));
+  await batch.commit();
+
+  const installations = await db.collection("terminalInstallations")
+    .where("terminalId", "==", targetTerminalId).get();
+  const chunks = installations.docs;
+  for (let i = 0; i < chunks.length; i += 400) {
+    const cleanup = db.batch();
+    chunks.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
+    await cleanup.commit();
+  }
+  return { terminalId: targetTerminalId, deleted: true };
+});
