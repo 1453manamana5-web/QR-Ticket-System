@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner from "./TicketDesigner";
-import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,deleteManagedTerminalOnServer,type PendingHandoffRequest} from "./terminalHandoff";
+import {listTerminalHandoffRequests,decideTerminalHandoff,approveTerminalRegistration,revokeTerminalReception,releaseOwnReceptionRegistration,deleteManagedTerminalOnServer,type PendingHandoffRequest} from "./terminalHandoff";
 import {ensureInstallationAuth} from "./firebaseClient";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -1073,7 +1073,7 @@ export default function App() {
     );
 
     try {
-      await revokeTerminalReception(firebaseDeviceId, firebaseDeviceId);
+      await releaseOwnReceptionRegistration(firebaseDeviceId);
       setSelectedTerminalId(null);
       setTerminalNotice("サーバーでこの端末の受付を解除しました。");
     } catch (reason) {
