@@ -1,0 +1,92 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Client apps must never manage trusted ownership or server-issued handoff state.
+    match /terminalOwners/{terminalId} {
+      allow read, write: if false;
+    }
+
+    match /terminalInstallations/{uid} {
+      allow read, write: if false;
+    }
+
+    match /terminalHandoffRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /terminalHandoffRateLimits/{uid} {
+      allow read, write: if false;
+    }
+
+    // Event data is available only to authenticated Firebase clients.
+    // Role-based management access requires a later server-verified admin claim.
+    match /events/{eventId} {
+      allow read, create, update, delete: if signedIn();
+
+      match /tickets/{ticketId} {
+        allow read, create, update, delete: if signedIn();
+      }
+
+      match /receptionRecords/{recordId} {
+        allow read, create, update, delete: if signedIn();
+      }
+
+      match /analysis/{analysisId} {
+        allow read, create, update, delete: if signedIn();
+      }
+
+      match /members/{memberId} {
+        allow read, create, update, delete: if signedIn();
+      }
+
+      match /settings/{settingId} {
+        allow read, create, update, delete: if signedIn();
+      }
+    }
+
+    // App settings are currently stored in devices/{deviceId}.
+    // Authentication is required, but per-device ownership is not yet enforced.
+    match /devices/{deviceId} {
+      allow read, create, update, delete: if signedIn();
+    }
+
+    // Terminal status can be read by signed-in app instances. Clients may create
+    // an unapproved terminal and update operational fields, but cannot change
+    // approval/administrator fields from the client.
+    function approvalFieldsUnchanged() {
+      return request.resource.data.get('approved', false) == resource.data.get('approved', false)
+        && request.resource.data.get('managementApproved', false) == resource.data.get('managementApproved', false)
+        && request.resource.data.get('receptionApproved', false) == resource.data.get('receptionApproved', false)
+        && request.resource.data.get('admin', false) == resource.data.get('admin', false);
+    }
+
+    match /terminals/{terminalId} {
+      allow read, list: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.get('terminalId', '') == terminalId
+        && request.resource.data.get('approved', false) == false
+        && request.resource.data.get('managementApproved', false) == false
+        && request.resource.data.get('receptionApproved', false) == false
+        && request.resource.data.get('admin', false) == false;
+
+      allow update: if signedIn()
+        && request.resource.data.get('terminalId', '') == terminalId
+        && approvalFieldsUnchanged();
+
+      // Client-side terminal deletion is intentionally disabled until a trusted
+      // server-side removal flow is implemented.
+      allow delete: if false;
+    }
+
+    // Default-deny for every path not explicitly listed above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
