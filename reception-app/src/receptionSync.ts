@@ -111,70 +111,31 @@ function createNetworkProbe(): string {
 }
 
 async function measureNetworkSpeed(
-  db: ReturnType<typeof getFirebaseDb>,
-  reference: ReturnType<typeof doc>,
+  _db: ReturnType<typeof getFirebaseDb>,
+  _reference: ReturnType<typeof doc>,
 ): Promise<number | null> {
   const now = Date.now();
-  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) {
-    return networkSpeedCache;
-  }
-
+  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) return networkSpeedCache;
+  // Do not write probe payloads into the terminal document. Use browser-provided
+  // estimates where available; otherwise keep the value unknown.
   const browserDownlink = getBrowserDownlink();
-  if (browserDownlink !== null) {
-    networkSpeedCache = browserDownlink;
-    networkSpeedMeasuredAt = now;
-    return browserDownlink;
-  }
-
-  try {
-    const probe = createNetworkProbe();
-    const startedAt = performance.now();
-    await setDoc(reference, {
-      networkProbe: probe,
-      networkProbeAt: new Date().toISOString(),
-    }, { merge: true });
-    await getDocFromServer(reference);
-
-    const elapsedMs = Math.max(1, performance.now() - startedAt);
-    const roundTripBytes = probe.length * 2;
-    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
-    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
-
-    networkSpeedCache = normalized;
-    networkSpeedMeasuredAt = Date.now();
-    return normalized;
-  } catch (reason) {
-    console.warn("通信速度の測定に失敗しました", reason);
-    return networkSpeedCache;
-  }
+  networkSpeedCache = browserDownlink;
+  networkSpeedMeasuredAt = now;
+  return browserDownlink;
 }
 
 export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
-  const db = getFirebaseDb();
   const pendingCount = typeof syncPendingCount === "number"
     ? syncPendingCount
     : (await getPendingSyncItems()).length;
+  const db = getFirebaseDb();
   const reference = doc(db, "terminals", terminalId);
   const existing = await getDoc(reference);
-  const data = existing.exists() ? existing.data() : {};
+  if (!existing.exists()) throw new Error("TERMINAL_NOT_REGISTERED");
   const networkMbps = await measureNetworkSpeed(db, reference);
-
-  await setDoc(reference, {
-    terminalId,
-    name: typeof data.name === "string" ? data.name : `受付端末 ${terminalId.slice(-4)}`,
-    type: "Web / iPad",
-    role: data.role === "management" || data.role === "both" ? data.role : "reception",
-    mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
-    status: "online",
-    approved: data.managementApproved === true || data.receptionApproved === true || data.approved === true,
-    managementApproved: data.managementApproved === true,
-    receptionApproved: data.receptionApproved === true,
-    syncPendingCount: pendingCount,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof data.networkMbps === "number" ? data.networkMbps : null),
-    battery: typeof data.battery === "number" ? data.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  const { updateTerminalHeartbeat } = await import("./terminalHandoff");
+  const modeLabel = mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止";
+  await updateTerminalHeartbeat(terminalId, modeLabel, pendingCount, networkMbps);
   return networkMbps;
 }
 
