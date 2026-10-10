@@ -1449,26 +1449,58 @@ export default function App() {
   const aiOperationalInsights = useMemo(() => {
     const insights: Array<{ title: string; detail: string; priority: "high" | "medium" | "good" }> = [];
     if (!event.eventId) return [{ title: "イベントを選択", detail: "分析対象のイベントを選択してください。", priority: "medium" as const }];
+    const entries = receptionRecords.filter(record => record.type === "entry");
+    const exits = receptionRecords.filter(record => record.type === "exit");
+    const reentries = receptionRecords.filter(record => record.type === "reentry");
+    const validTimedEntries = entries.filter(record => Number.isFinite(Date.parse(record.timestamp)));
     if (receptionRecords.length === 0) {
-      insights.push({ title: "受付記録が不足しています", detail: "受付記録がないため、時間帯別の混雑や入退場の推移は分析できません。受付データの同期を確認してください。", priority: "medium" });
+      insights.push({ title: "受付記録が不足しています", detail: "時間帯別の混雑や入退場の推移を判断できません。Firebaseへの同期状況と対象イベントが正しいか確認してください。", priority: "medium" });
     } else {
+      if (validTimedEntries.length !== entries.length) {
+        insights.push({ title: "時刻を判定できない入場記録があります", detail: "入場記録" + (entries.length - validTimedEntries.length) + "件は時刻が不正または未設定のため、時間帯別集計から除外しています。端末の時刻・記録形式・同期データを確認してください。", priority: "medium" });
+      }
+      const totalTimedEntries = validTimedEntries.length;
       if (aiPeakHour && aiPeakHour.entry > 0) {
-        insights.push({ title: "入場のピークは" + String(aiPeakHour.hour).padStart(2, "0") + "時台", detail: aiPeakHour.entry + "件の入場記録が集中しています。この時間帯の受付端末数やスタッフ配置を次回の計画時に見直す候補です。", priority: "medium" });
+        const share = totalTimedEntries > 0 ? Math.round(aiPeakHour.entry / totalTimedEntries * 100) : 0;
+        const peakIndex = aiHourlyAnalysis.findIndex(item => item.hour === aiPeakHour.hour);
+        const nextHour = aiHourlyAnalysis.find(item => item.hour === (aiPeakHour.hour + 1) % 24);
+        const twoHourTotal = aiPeakHour.entry + (nextHour?.entry ?? 0);
+        const twoHourShare = totalTimedEntries > 0 ? Math.round(twoHourTotal / totalTimedEntries * 100) : 0;
+        insights.push({
+          title: "入場ピーク：" + String(aiPeakHour.hour).padStart(2, "0") + "時台",
+          detail: "この時間帯は入場記録" + aiPeakHour.entry + "件（時刻が判定できる入場の" + share + "%）です。" +
+            (share >= 40 ? "入場がこの時間帯に偏っています。受付レーン・担当者をピーク前に増やす運用を検討してください。" : "この時間帯だけに極端に集中しているとは限りません。") +
+            " 次の1時間も含めると" + twoHourTotal + "件（" + twoHourShare + "%）です。",
+          priority: share >= 40 ? "high" : "medium"
+        });
+        if (peakIndex >= 0 && nextHour && twoHourShare >= 65 && share < 40) {
+          insights.push({ title: "連続する2時間に入場が集中", detail: String(aiPeakHour.hour).padStart(2, "0") + "時台から次の1時間に入場の" + twoHourShare + "%が集まっています。開始時間を分散できるか、入口の案内・列整理を見直す候補です。", priority: "medium" });
+        }
       }
-      const totalEntries = receptionRecords.filter(record => record.type === "entry").length;
-      const totalExits = receptionRecords.filter(record => record.type === "exit").length;
+      const totalEntries = entries.length;
+      const totalExits = exits.length;
       if (totalEntries > 0 && totalExits === 0) {
-        insights.push({ title: "退場記録がありません", detail: "入場記録は" + totalEntries + "件ありますが退場記録は0件です。退場受付を運用していないイベントか、記録が同期されていないか確認してください。", priority: "medium" });
+        insights.push({ title: "退場記録がありません", detail: "入場記録は" + totalEntries + "件、退場記録は0件です。退場受付を運用していないイベントか、記録が同期されていないか確認してください。", priority: "medium" });
       } else if (totalExits > totalEntries) {
-        insights.push({ title: "退場記録が入場記録を上回っています", detail: "入場" + totalEntries + "件に対して退場" + totalExits + "件です。途中から記録を開始した場合などもあるため、同期状況と集計対象を確認してください。", priority: "high" });
+        insights.push({ title: "退場記録が入場記録を上回っています", detail: "入場" + totalEntries + "件に対して退場" + totalExits + "件です。途中から記録を開始した可能性もあるため、同期状況と集計対象を確認してください。", priority: "high" });
+      } else if (totalEntries > 0 && totalExits > 0) {
+        const ratio = Math.round(totalExits / totalEntries * 100);
+        if (ratio >= 80) insights.push({ title: "退場記録の割合が高めです", detail: "退場記録は入場記録の" + ratio + "%です。退場受付の運用状況や、同一チケットの重複記録がないか確認してください。人数の実態を直接示す値ではない点に注意してください。", priority: "medium" });
       }
+      if (reentries.length > 0) insights.push({ title: "再入場を別集計", detail: "再入場記録は" + reentries.length + "件です。再入場は入場総数に重複加算せず、入場ピークの分析でも通常入場とは分けて扱っています。", priority: "good" });
     }
     const invalidCount = tickets.filter(ticket => !ticket.valid).length;
     if (invalidCount > 0) insights.push({ title: "無効チケット" + invalidCount + "枚を確認", detail: "意図した無効化か、誤操作や発行ミスがないかをチケット一覧で確認してください。", priority: "medium" });
+    if (aiPreviousSnapshot?.source === "records" && aiPreviousSnapshot.entryRecords !== null && aiPreviousSnapshot.entryRecords > 0 && receptionRecords.length > 0) {
+      const currentEntries = entries.length;
+      const delta = currentEntries - aiPreviousSnapshot.entryRecords;
+      const pct = Math.round(Math.abs(delta) / aiPreviousSnapshot.entryRecords * 100);
+      insights.push({ title: "過去イベントとの入場記録比較", detail: "比較対象「" + aiPreviousSnapshot.eventName + "」に対し、入場記録は" + (delta > 0 ? "+" : "") + delta + "件（" + (delta > 0 ? "+" : delta < 0 ? "-" : "") + pct + "%）です。" + (delta > 0 ? "受付需要が増えた可能性があるため、ピーク時間帯の人員配置を検討してください。" : delta < 0 ? "記録件数は少なくなっています。開催規模や同期完了状況が同程度か確認してから比較してください。" : "記録件数は同じです。時間帯別の集中度も合わせて確認してください。"), priority: Math.abs(delta) / aiPreviousSnapshot.entryRecords >= 0.3 ? "medium" : "good" });
+    }
     if (aiLabDiagnostics.length > 0) insights.push({ title: "診断項目" + aiLabDiagnostics.length + "件", detail: "システム診断で検知した項目を確認し、同期やチケットデータの不整合がないか点検してください。", priority: "high" });
     if (insights.length === 0) insights.push({ title: "基本チェック上の目立つ課題は未検出", detail: "読み込み済みの記録に基づく結果です。未同期データやスタッフの体感など、記録に現れない課題も確認してください。", priority: "good" });
-    return insights.slice(0, 5);
-  }, [event.eventId, receptionRecords, tickets, aiLabDiagnostics, aiPeakHour]);
+    return insights.slice(0, 6);
+  }, [event.eventId, event.eventName, receptionRecords, tickets, aiLabDiagnostics, aiPeakHour, aiHourlyAnalysis, aiPreviousSnapshot]);
 
   const answerAiAssistant = (rawQuestion: string) => {
     const question = rawQuestion.trim();
