@@ -1,57 +1,64 @@
-import { after, before, test } from "node:test";
-import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, setDoc, updateDoc, deleteDoc, getDoc } from "firebase/firestore";
+import { readFile } from "node:fs/promises";
+import { after, before, beforeEach, test } from "node:test";
+import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import { deleteDoc, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 
-const projectId = "qr-ticket-rules-test";
 let env;
-
 before(async () => {
   env = await initializeTestEnvironment({
-    projectId,
-    firestore: { rules: (await import("node:fs/promises")).readFile(new URL("./firestore.rules", import.meta.url), "utf8").then(x => x) },
+    projectId: "qr-ticket-rules-test",
+    firestore: {
+      rules: await readFile(new URL("./firestore.rules", import.meta.url), "utf8"),
+      host: "127.0.0.1",
+      port: 8080,
+    },
   });
 });
-
-after(async () => {
-  await env.cleanup();
-});
+beforeEach(async () => env.clearFirestore());
+after(async () => env.cleanup());
 
 test("rejects access when unauthenticated", async () => {
   const db = env.unauthenticatedContext().firestore();
   await assertFails(getDoc(doc(db, "events", "event-1")));
-  await assertFails(setDoc(doc(db, "events", "event-1"), { name: "test" }));
+  await assertFails(setDoc(doc(db, "events", "event-1"), { eventId: "event-1" }));
 });
 
 test("authenticated clients can access event and ticket data", async () => {
-  const db = env.authenticatedContext("user-1").firestore();
-  await assertSucceeds(setDoc(doc(db, "events", "event-1"), { name: "test" }));
-  await assertSucceeds(setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), { used: false }));
+  const db = env.authenticatedContext("anonymous-user-1").firestore();
+  await assertSucceeds(setDoc(doc(db, "events", "event-1"), { eventId: "event-1" }));
+  await assertSucceeds(getDoc(doc(db, "events", "event-1")));
+  await assertSucceeds(setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), {
+    ticketId: "ticket-1", eventId: "event-1", currentStatus: "unused",
+  }));
 });
 
 test("clients cannot access trusted handoff collections", async () => {
   const db = env.authenticatedContext("anonymous-user-1").firestore();
-  await assertFails(setDoc(doc(db, "terminalOwners", "T-ABCDEFGH"), { ownerUid: "anonymous-user-1" }));
+  await assertFails(getDoc(doc(db, "terminalOwners", "T-ABCDEFGH")));
+  await assertFails(setDoc(doc(db, "terminalOwners", "T-ABCDEFGH"), { ownerUid: "anonymous-user-1", enabled: true }));
   await assertFails(setDoc(doc(db, "terminalInstallations", "anonymous-user-1"), { terminalId: "T-ABCDEFGH" }));
-  await assertFails(setDoc(doc(db, "terminalHandoffRequests", "request-1"), { terminalId: "T-ABCDEFGH" }));
+  await assertFails(setDoc(doc(db, "terminalHandoffRequests", "request-12345678"), { status: "approved" }));
   await assertFails(setDoc(doc(db, "terminalHandoffRateLimits", "anonymous-user-1"), { count: 1 }));
 });
 
 test("clients cannot create approved or administrator terminals", async () => {
   const db = env.authenticatedContext("anonymous-user-1").firestore();
   await assertFails(setDoc(doc(db, "terminals", "T-ABCDEFGH"), {
-    terminalId: "T-ABCDEFGH", approved: true, managementApproved: false,
-    receptionApproved: false, admin: false, subAdmin: false, role: "management",
-  }));
-  await assertFails(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
-    terminalId: "T-IJKLMNOP", approved: false, managementApproved: false,
-    receptionApproved: false, admin: false, subAdmin: true, role: "reception",
+    terminalId: "T-ABCDEFGH", approved: true, managementApproved: true,
+    receptionApproved: true, admin: true,
   }));
   await assertFails(setDoc(doc(db, "terminals", "T-QRSTUVWX"), {
     terminalId: "T-QRSTUVWX", approved: false, managementApproved: false,
-    receptionApproved: false, admin: false, subAdmin: false, role: "unknown",
+    receptionApproved: false, admin: false, subAdmin: true,
+    role: "reception",
   }));
-  await assertSucceeds(setDoc(doc(db, "terminals", "T-YZABCDEF"), {
+  await assertFails(setDoc(doc(db, "terminals", "T-YZABCDEF"), {
     terminalId: "T-YZABCDEF", approved: false, managementApproved: false,
+    receptionApproved: false, admin: false, subAdmin: false,
+    role: "unknown",
+  }));
+  await assertSucceeds(setDoc(doc(db, "terminals", "T-IJKLMNOP"), {
+    terminalId: "T-IJKLMNOP", approved: false, managementApproved: false,
     receptionApproved: false, admin: false, subAdmin: false,
     role: "reception", name: "受付端末",
   }));
