@@ -2,31 +2,38 @@
 
 ## Goal
 
-Allow a browser/PWA installation to request the use of an already registered terminal identity when Safari and the iOS Home Screen web app have separate storage, without allowing a terminal ID alone to impersonate that terminal.
+Allow Safari and the iOS Home Screen web app to request the use of an existing terminal identity without allowing a public terminal ID alone to impersonate that terminal.
 
-## Required flow
+## Server-side phase 1 added on `secure-terminal-handoff`
 
-1. The new browser context enters the public terminal ID.
-2. It creates a pending handoff request; it receives no reception privileges and must not overwrite the terminal record.
-3. The existing registered context displays the request and explicitly approves or rejects it.
-4. Approval is bound to the specific pending request, expires, and can be consumed once.
-5. The new context receives a separate installation credential after approval. A public terminal ID is an identifier, not a credential.
-6. The server validates the approval and binds the new installation to the terminal. Clients must not be able to set their own approved status or approve their own request.
-7. The existing context can revoke the new installation. Audit timestamps and request state are retained.
+The `functions/` package now defines authenticated callable endpoints:
 
-## Security blocker in the current repository
+- `requestTerminalHandoff`: creates a five-minute pending request and enforces a short per-user cooldown.
+- `listTerminalHandoffRequests`: lists pending requests only after verifying the caller against a trusted terminal-owner mapping.
+- `decideTerminalHandoff`: binds approval/rejection to a pending, unexpired request and checks the caller's ownership server-side.
+- `completeTerminalHandoff`: allows the requesting Firebase Auth UID to consume an approval once and creates the installation record using the Admin SDK.
 
-Both apps currently use the Firebase Web SDK directly and do not initialize Firebase Authentication. Terminal approval is represented by fields in the `terminals/{terminalId}` document. The repository has no checked-in Firestore Security Rules or Cloud Functions deployment configuration. The management client checks its own terminal record before approving, but a client-side check is not an authorization boundary.
+Ownership is intentionally stored separately in `terminalOwners/{terminalId}`. That collection must be populated through a trusted admin migration and must never be writable by client apps.
 
-Therefore, adding only a request document or an approval button would not securely implement this feature. Before enabling the flow, add server-enforced authorization (Firebase Authentication plus restrictive Firestore Rules and/or trusted Cloud Functions), migrate existing management terminals to an authenticated owner identity, and verify that clients cannot write approval fields directly.
+## Not yet production-ready
+
+This is a backend foundation, not a complete live feature. The web apps have not yet been integrated with Firebase Authentication or the callable endpoints, and the receiving app does not yet check `terminalInstallations/{uid}` before enabling reception. Existing terminals also have not been migrated to trusted owner mappings. Do not deploy or enable this flow until all of the following are completed:
+
+1. Set up Firebase Authentication in both apps and persist an authenticated UID per browser installation.
+2. Populate `terminalOwners/{terminalId}` through a trusted administrator-controlled migration. Each document must contain `ownerUid` and `enabled: true`.
+3. Add and emulator-test Firestore Security Rules preventing clients from writing owner mappings, handoff requests, rate-limit records, installation records, and terminal approval/ownership fields. Preserve the current event/ticket/reception data paths.
+4. Integrate the callables into the reception and management UI. Reception must verify the server-created installation record before granting access.
+5. Add an authenticated revoke flow for transferred installations.
+6. Run Emulator Suite tests for unauthenticated calls, wrong-owner approval, request replay, expiry, rate limiting, and direct Firestore writes.
 
 ## Acceptance tests
 
 - Entering a terminal ID alone never grants reception access.
 - A request appears only for the matching registered terminal.
-- Rejecting or letting a request expire leaves both registrations unchanged.
+- Only the trusted owner can approve or reject.
+- Rejecting or expiring a request leaves existing registration unchanged.
 - Approval is one-time and cannot be replayed.
-- A different client cannot directly set `approved`, `managementApproved`, or `receptionApproved`.
+- A client cannot directly set `approved`, `managementApproved`, `receptionApproved`, or owner mappings.
 - A new installation cannot modify the original installation's credentials.
 - Existing event/ticket/reception synchronization continues to work.
 - Safari and the Home Screen app on the same iPad can complete the explicit approval flow.
