@@ -65,3 +65,19 @@ export async function releaseOwnReceptionRegistration(
   const result = await callable({ terminalId });
   return result.data;
 }
+
+/** Submits an unapproved terminal application through the trusted server. */
+export async function registerTerminalApplication(
+  terminalId: string,
+  name: string,
+  type: "Web / iPad" | "Web / PC",
+  role: "management" | "reception" | "both",
+): Promise<{ terminalId: string; approved: false; status: "pending" }> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<
+    { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" },
+    { terminalId: string; approved: false; status: "pending" }
+  >(functionsClient(), "registerTerminalApplication");
+  const result = await callable({ terminalId, name, type, role });
+  return result.data;
+}
