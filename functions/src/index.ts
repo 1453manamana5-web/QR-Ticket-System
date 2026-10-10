@@ -186,7 +186,20 @@ export const completeTerminalHandoff = onCall(async (call) => {
     }
 
     const id = requestSnap.get("terminalId") as string;
-    const installationSnap = await tx.get(installationRef);
+    const terminalRef = db.doc("terminals/" + id);
+    const ownerRef = db.doc("terminalOwners/" + id);
+    const [installationSnap, terminalSnap, ownerSnap] = await Promise.all([
+      tx.get(installationRef),
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+    ]);
+    const terminalAllowsReception = terminalSnap.exists &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true));
+    if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
+        !terminalAllowsReception || !ownerSnap.exists || ownerSnap.get("enabled") !== true) {
+      throw new HttpsError("failed-precondition", "端末の受付承認が無効になったため、引き継ぎを完了できません。");
+    }
     if (installationSnap.exists && installationSnap.get("terminalId") !== id) {
       throw new HttpsError("failed-precondition", "この環境は別の端末に登録済みです。");
     }
