@@ -6,6 +6,10 @@ This package contains authenticated callable functions for the server-side part 
 - `listTerminalHandoffRequests`: only the authenticated owner of the target terminal can list pending requests.
 - `decideTerminalHandoff`: only that owner can approve/reject a pending, unexpired request.
 - `completeTerminalHandoff`: the requesting Firebase Auth UID can consume its approval once; the server creates the installation record.
+- `approveTerminalRegistration`: verifies the registered management owner server-side before approving a requested terminal role.
+- `revokeTerminalReception`: revokes reception approval through the trusted server.
+- `deleteManagedTerminal`: checks admin/sub-admin authority server-side, then removes a terminal and its owner/handoff/installation records.
+- `scripts/bootstrap-first-admin.ts`: trusted, one-time bootstrap for a new project that has no approved management terminal.
 
 ## Important: not enabled for production yet
 
@@ -19,3 +23,10 @@ The web apps have not yet been integrated with Firebase Authentication or these 
 6. Run Emulator Suite tests for unauthenticated calls, wrong-owner approval, request replay, expiry, rate limiting, and direct Firestore writes before deploying.
 
 The public terminal ID is an identifier only, not a secret or a login credential. A terminal ID by itself must never grant access.
+
+
+## First administrator
+
+For a new project only, use the trusted `bootstrap-first-admin` procedure in `docs/secure-terminal-handoff.md`. Never let a browser claim the first-admin role. The bootstrap requires Application Default Credentials, an explicit Firebase project ID, and the UID of the intended management app installation; it refuses to overwrite existing terminal or owner documents.
+
+The callable terminal approval, reception revocation, and deletion flows are committed but are not deployed. Existing direct terminal writes remain in parts of the apps, and event-level role authorization is not complete. Treat this branch as development work and do not deploy restrictive rules to production until the remaining client writes and emulator tests are addressed.
