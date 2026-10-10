@@ -197,6 +197,8 @@ export default function App() {
     }
   });
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [aiLabMenuOpen, setAiLabMenuOpen] = useState(false);
+  const [aiLabPanel, setAiLabPanel] = useState<"受付分析" | "システム診断" | "改善提案" | "警告履歴" | null>(null);
 
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
@@ -2121,6 +2123,43 @@ function NavIcon({type}:{type:string}){
           <button className="primary-action" onClick={createNewEvent}>イベントを作成</button>
         </div>
       </div>
+    </div>}
+
+    {appSettings.aiLabEnabled && <div className="ai-lab-widget">
+      {aiLabPanel && <section className="ai-lab-detail" role="dialog" aria-label={aiLabPanel}>
+        <div className="ai-lab-detail-heading">
+          <div><span className="ai-lab-eyebrow">ON-DEVICE ANALYSIS</span><h2>{aiLabPanel}</h2></div>
+          <button className="ai-lab-close" aria-label="閉じる" onClick={() => setAiLabPanel(null)}>×</button>
+        </div>
+        {aiLabPanel === "受付分析" && <div className="ai-lab-detail-content">
+          <div className="ai-lab-stat"><span>受付記録</span><strong>{receptionRecords.filter(record => record.type === "entry" || record.type === "exit").length}件</strong></div>
+          <div className="ai-lab-stat"><span>チケット総数</span><strong>{ticketStats.total}枚</strong></div>
+          <div className="ai-lab-stat"><span>入場中</span><strong>{ticketStats.inside}人</strong></div>
+          <p>現在端末で参照できるイベントデータを集計しています。複数端末の全記録が同期済みとは限りません。</p>
+        </div>}
+        {aiLabPanel === "システム診断" && <div className="ai-lab-detail-content">
+          <div className="ai-lab-diagnostic-row"><span>受付記録データ</span><strong>{event.eventId ? "イベント選択済み" : "イベント未選択"}</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>チケットデータ</span><strong>{tickets.length ? "データあり" : "データなし／未読込"}</strong></div>
+          <div className="ai-lab-diagnostic-row"><span>外部AI接続</span><strong>使用しない</strong></div>
+          <p>この初期版では画面から確認できる情報のみを表示します。読み取り時間や保存失敗の詳細診断は、計測ログの整備後に接続します。</p>
+        </div>}
+        {aiLabPanel === "改善提案" && <div className="ai-lab-detail-content">
+          <p>現時点では診断用ログの種類が限られているため、確実な改善提案を生成できるだけの根拠がありません。</p>
+          <div className="ai-lab-suggestion"><strong>次の改善ステップ</strong><span>読み取り処理時間・保存結果・通信エラーを記録し、イベントごとの傾向比較を有効にします。</span></div>
+        </div>}
+        {aiLabPanel === "警告履歴" && <div className="ai-lab-detail-content">
+          <div className="ai-lab-empty"><icon>✓</icon><strong>警告履歴はまだありません</strong><span>診断ルールの実装後、検知した警告がここに表示されます。</span></div>
+        </div>}
+      </section>}
+      {aiLabMenuOpen && <div className="ai-lab-glass-menu" role="menu" aria-label="AI受付分析メニュー">
+        <div className="ai-lab-menu-title"><span className="ai-lab-eyebrow">AI TEST LAB</span><strong>AI受付分析</strong><small>端末内で動作する試験機能</small></div>
+        {(["受付分析", "システム診断", "改善提案", "警告履歴"] as const).map((item, index) => <button key={item} role="menuitem" className="ai-lab-menu-item" onClick={() => { setAiLabPanel(item); setAiLabMenuOpen(false); }}>
+          <span className="ai-lab-menu-icon">{["▥", "⌁", "✧", "◉"][index]}</span><span>{item}</span><span className="ai-lab-menu-chevron">›</span>
+        </button>)}
+      </div>}
+      <button className={`ai-lab-fab ${aiLabMenuOpen ? "is-open" : ""}`} aria-label={aiLabMenuOpen ? "AI試験メニューを閉じる" : "AI試験メニューを開く"} aria-expanded={aiLabMenuOpen} onClick={() => { setAiLabMenuOpen(open => !open); setAiLabPanel(null); }}>
+        <span className="ai-lab-fab-glint" /><span className="ai-lab-fab-icon">✧</span>
+      </button>
     </div>}
   </div>;
 }
