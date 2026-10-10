@@ -62,7 +62,9 @@ service cloud.firestore {
       return request.resource.data.get('approved', false) == resource.data.get('approved', false)
         && request.resource.data.get('managementApproved', false) == resource.data.get('managementApproved', false)
         && request.resource.data.get('receptionApproved', false) == resource.data.get('receptionApproved', false)
-        && request.resource.data.get('admin', false) == resource.data.get('admin', false);
+        && request.resource.data.get('admin', false) == resource.data.get('admin', false)
+        && request.resource.data.get('subAdmin', false) == resource.data.get('subAdmin', false)
+        && request.resource.data.get('role', '') == resource.data.get('role', '');
     }
 
     match /terminals/{terminalId} {
@@ -73,7 +75,9 @@ service cloud.firestore {
         && request.resource.data.get('approved', false) == false
         && request.resource.data.get('managementApproved', false) == false
         && request.resource.data.get('receptionApproved', false) == false
-        && request.resource.data.get('admin', false) == false;
+        && request.resource.data.get('admin', false) == false
+        && request.resource.data.get('subAdmin', false) == false
+        && request.resource.data.get('role', '') in ['management', 'reception', 'both'];
 
       allow update: if signedIn()
         && request.resource.data.get('terminalId', '') == terminalId
