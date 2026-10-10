@@ -3980,3 +3980,21 @@ body:has(.ticket-screen),
 .app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button{
   transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
 }
+
+.terminal-handoff-card { margin-bottom: 20px; }
+.terminal-handoff-empty { margin: 10px 0 0; color: #5b6474; font-size: .92rem; }
+.terminal-handoff-list { display: grid; gap: 10px; margin-top: 14px; }
+.terminal-handoff-request { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid #dce2eb; border-radius: 12px; background: #fff; }
+.terminal-handoff-request > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.terminal-handoff-request span, .terminal-handoff-request small { color: #5b6474; font-size: .84rem; overflow-wrap: anywhere; }
+.terminal-handoff-actions { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 640px) {
+  .terminal-handoff-request { align-items: stretch; flex-direction: column; }
+  .terminal-handoff-actions { width: 100%; }
+  .terminal-handoff-actions button { flex: 1; }
+}
+
+.terminal-handoff-uid { display: grid; gap: 7px; margin-top: 12px; padding: 12px; border: 1px solid #dce2eb; border-radius: 10px; background: #f8fafc; }
+.terminal-handoff-uid span, .terminal-handoff-uid small { color: #5b6474; font-size: .82rem; }
+.terminal-handoff-uid code { overflow-wrap: anywhere; user-select: all; font-size: .88rem; color: #202735; }
+.terminal-handoff-uid button { justify-self: start; }

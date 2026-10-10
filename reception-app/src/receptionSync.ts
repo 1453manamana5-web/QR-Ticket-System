@@ -2,11 +2,19 @@ import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "fi
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
+import { getTerminalInstallationStatus } from "./terminalHandoff";
 
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
+  const terminalId = getTerminalIdForRegistration();
+  // A browser that completed handoff must re-validate its server-issued installation
+  // record on every registration check, including after reload or app relaunch.
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    const serverStatus = await getTerminalInstallationStatus();
+    if (!serverStatus.approved || serverStatus.terminalId !== terminalId) return null;
+  }
   const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "terminals", getTerminalIdForRegistration()));
+  const snapshot = await getDoc(doc(db, "terminals", terminalId));
   if (!snapshot.exists()) return null;
   const data = snapshot.data();
   if (data.role !== "reception" && data.role !== "both") return null;
@@ -60,14 +68,29 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
+  let revision = 0;
   return onSnapshot(doc(db, "terminals", getTerminalIdForRegistration()), snapshot => {
-    if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
-    const data = snapshot.data();
-    onChange({
-      approved: data.receptionApproved ?? data.approved === true,
-      status: data.status === "online" || data.status === "offline" ? data.status : "pending",
-      name: typeof data.name === "string" ? data.name : "受付端末",
-    });
+    const currentRevision = ++revision;
+    void (async () => {
+      // Keep the live subscription consistent with the initial registration check.
+      // This client-side marker is only a UX guard; Firestore Rules must enforce access.
+      if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+        const serverStatus = await getTerminalInstallationStatus();
+        if (currentRevision !== revision) return;
+        if (!serverStatus.approved || serverStatus.terminalId !== getTerminalIdForRegistration()) {
+          onChange(null);
+          return;
+        }
+      }
+      if (currentRevision !== revision) return;
+      if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
+      const data = snapshot.data();
+      onChange({
+        approved: data.receptionApproved ?? data.approved === true,
+        status: data.status === "online" || data.status === "offline" ? data.status : "pending",
+        name: typeof data.name === "string" ? data.name : "受付端末",
+      });
+    })().catch(onError);
   }, onError);
 }
 
