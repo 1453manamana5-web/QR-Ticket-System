@@ -4174,3 +4174,268 @@ body:has(.ticket-screen),
 @media(prefers-reduced-motion:reduce){
   .ticket-list-launch,.ticket-list-launch:hover{transition:none;transform:none}
 }
+
+
+/* Terminal management refresh: clear hierarchy, readable status cards, and optional glass styling */
+.terminal-management-screen {
+  gap: 18px;
+}
+.terminal-hero {
+  align-items: center;
+  padding: 25px 28px;
+  border-radius: 24px;
+  background: linear-gradient(125deg, #fff 0%, #f7f9fc 100%);
+}
+.terminal-hero > div:first-child small,
+.terminal-section-heading small {
+  color: #748197;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .14em;
+}
+.terminal-hero h2 {
+  margin: 7px 0;
+  font-size: clamp(28px, 2.3vw, 36px);
+  color: #171d29;
+}
+.terminal-hero p {
+  max-width: 680px;
+  color: #657187;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.terminal-hero-actions {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.terminal-hero-actions button {
+  min-height: 44px;
+  border-radius: 12px;
+  padding-inline: 15px;
+  white-space: nowrap;
+}
+.terminal-summary-grid {
+  gap: 14px;
+}
+.terminal-summary-card {
+  position: relative;
+  min-height: 112px;
+  box-sizing: border-box;
+  padding: 18px 20px;
+  border-radius: 20px;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.terminal-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgb(23 32 51/.08);
+}
+.terminal-summary-card small {
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.terminal-summary-card strong {
+  margin: 9px 0 4px;
+  font-size: clamp(28px, 2.5vw, 38px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.terminal-summary-card span {
+  font-size: 13px;
+}
+.terminal-own-card,
+.terminal-list-card,
+.terminal-lab-card {
+  padding: 22px;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid #e1e6ec;
+  box-shadow: 0 8px 26px rgb(23 32 51/.045);
+}
+.terminal-section-heading {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.terminal-section-heading h3 {
+  margin: 5px 0 6px;
+  font-size: 21px;
+  letter-spacing: -.02em;
+}
+.terminal-section-heading p {
+  max-width: 720px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.terminal-section-count {
+  padding: 8px 13px;
+  font-size: 12px;
+}
+.terminal-own-grid {
+  gap: 12px;
+}
+.terminal-own-grid > div,
+.terminal-name-editor {
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: #f7f9fc;
+}
+.terminal-own-grid span {
+  font-size: 11px;
+}
+.terminal-own-grid strong {
+  margin-top: 7px;
+  font-size: 14px;
+}
+.terminal-list {
+  gap: 12px;
+}
+.managed-terminal-card {
+  border-radius: 19px;
+  border: 1px solid #e0e6ee;
+  background: linear-gradient(145deg, #fff, #f9fbfd);
+  box-shadow: 0 5px 18px rgb(27 43 67/.045);
+  overflow: hidden;
+}
+.managed-terminal-main {
+  padding: 19px;
+  gap: 16px;
+}
+.managed-terminal-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 850;
+  background: #edf2f9;
+  color: #34445d;
+}
+.managed-terminal-title h4 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+.managed-terminal-title .terminal-mono {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.managed-terminal-meta {
+  gap: 12px;
+}
+.managed-terminal-meta > div {
+  padding-left: 13px;
+}
+.managed-terminal-meta span {
+  font-size: 10px;
+}
+.managed-terminal-meta strong {
+  margin-top: 5px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.managed-terminal-footer {
+  padding: 14px 18px;
+  gap: 14px;
+  border-top: 1px solid #e8edf3;
+  background: rgba(246,249,252,.72);
+}
+.managed-terminal-actions {
+  gap: 8px;
+}
+.managed-terminal-actions button {
+  min-height: 40px;
+  border-radius: 11px;
+  padding-inline: 14px;
+}
+.terminal-state-badge {
+  white-space: nowrap;
+}
+.liquid-glass-enabled .terminal-hero,
+.liquid-glass-enabled .terminal-summary-card,
+.liquid-glass-enabled .terminal-own-card,
+.liquid-glass-enabled .terminal-list-card,
+.liquid-glass-enabled .terminal-lab-card {
+  border: 1px solid rgba(255,255,255,.86);
+  background: linear-gradient(135deg, rgba(255,255,255,.78), rgba(231,239,255,.48));
+  box-shadow: 0 14px 38px rgba(37,52,83,.075), inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+.liquid-glass-enabled .terminal-hero {
+  background: linear-gradient(115deg, rgba(255,255,255,.84), rgba(225,235,255,.56), rgba(255,255,255,.62));
+}
+.liquid-glass-enabled .terminal-summary-card {
+  background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(235,241,255,.48));
+}
+.liquid-glass-enabled .managed-terminal-card {
+  border-color: rgba(255,255,255,.9);
+  background: linear-gradient(145deg, rgba(255,255,255,.82), rgba(232,239,251,.55));
+  box-shadow: 0 8px 24px rgba(37,52,83,.07), inset 0 1px 0 rgba(255,255,255,.92);
+}
+.liquid-glass-enabled .terminal-own-grid > div,
+.liquid-glass-enabled .terminal-name-editor,
+.liquid-glass-enabled .managed-terminal-footer {
+  background: rgba(255,255,255,.42);
+  border-color: rgba(255,255,255,.74);
+}
+@media (max-width: 1050px) {
+  .terminal-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .terminal-hero-actions {
+    justify-content: flex-start;
+  }
+  .terminal-own-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .terminal-hero,
+  .terminal-own-card,
+  .terminal-list-card,
+  .terminal-lab-card {
+    padding: 15px;
+    border-radius: 18px;
+  }
+  .terminal-hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+  .terminal-hero-actions button {
+    width: 100%;
+  }
+  .terminal-summary-grid {
+    gap: 9px;
+  }
+  .terminal-summary-card {
+    min-height: 100px;
+    padding: 14px;
+    border-radius: 16px;
+  }
+  .terminal-section-heading {
+    align-items: flex-start;
+  }
+  .terminal-own-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .managed-terminal-main {
+    padding: 14px;
+  }
+  .managed-terminal-footer {
+    padding: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-summary-card,
+  .terminal-summary-card:hover {
+    transition: none;
+    transform: none;
+  }
+}
