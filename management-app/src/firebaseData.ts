@@ -117,7 +117,7 @@ function getManagementBrowserDownlink(): number | null {
 
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
   const db = getFirebaseDb();
-  const existingSnapshot = await getDoc(db, "terminals", terminalId);
+  const existingSnapshot = await getDoc(doc(db, "terminals", terminalId));
   if (!existingSnapshot.exists()) throw new Error("TERMINAL_NOT_REGISTERED");
   const existing = existingSnapshot.data();
   const now = Date.now();
