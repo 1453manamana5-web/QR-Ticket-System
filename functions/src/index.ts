@@ -170,12 +170,13 @@ export const decideTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("permission-denied", "この申請を処理する権限がありません。");
     }
 
+    const expiresAt = requestSnap.get("expiresAt");
     if (
       requestSnap.get("status") !== "pending" ||
-      !(requestSnap.get("expiresAt") as Timestamp).toMillis ||
-      (requestSnap.get("expiresAt") as Timestamp).toMillis() <= Date.now()
+      !(expiresAt instanceof Timestamp) ||
+      expiresAt.toMillis() <= Date.now()
     ) {
-      throw new HttpsError("failed-precondition", "申請は処理済みか、有効期限が切れています。");
+      throw new HttpsError("failed-precondition", "申請は処理済みか、有効期限が切れているか、申請情報が不正です。");
     }
 
     tx.update(requestRef, {
@@ -201,11 +202,13 @@ export const completeTerminalHandoff = onCall(async (call) => {
 
   const terminalId = await db.runTransaction(async (tx) => {
     const requestSnap = await tx.get(requestRef);
+    const expiresAt = requestSnap.get("expiresAt");
     if (
       !requestSnap.exists ||
       requestSnap.get("requesterUid") !== requesterUid ||
       requestSnap.get("status") !== "approved" ||
-      (requestSnap.get("expiresAt") as Timestamp).toMillis() <= Date.now()
+      !(expiresAt instanceof Timestamp) ||
+      expiresAt.toMillis() <= Date.now()
     ) {
       throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
     }
