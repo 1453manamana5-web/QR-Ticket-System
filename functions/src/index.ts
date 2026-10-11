@@ -673,36 +673,38 @@ export const setTerminalSubAdmin = onCall(async (call) => {
     throw new HttpsError("failed-precondition", "自分自身を副管理者に設定できません。");
   }
 
-  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
-    db.doc("terminals/" + managerTerminalId).get(),
-    db.doc("terminalOwners/" + managerTerminalId).get(),
-    db.doc("terminals/" + targetTerminalId).get(),
-  ]);
-  if (!managerSnap.exists || !ownerSnap.exists ||
-      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      managerSnap.get("admin") !== true || managerSnap.get("approved") !== true ||
-      managerSnap.get("managementApproved") !== true ||
-      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both")) {
-    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
-  }
-  if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
-  if (targetSnap.get("admin") === true) {
-    throw new HttpsError("failed-precondition", "管理者端末の権限は変更できません。");
-  }
-  if (targetSnap.get("managementApproved") !== true ||
-      (targetSnap.get("role") !== "management" && targetSnap.get("role") !== "both")) {
-    throw new HttpsError("failed-precondition", "承認済みの管理端末のみ副管理者に設定できます。");
-  }
-
-  await db.doc("terminals/" + targetTerminalId).update({
-    subAdmin: enabled,
-    subAdminUpdatedAt: FieldValue.serverTimestamp(),
-    subAdminUpdatedByUid: uid,
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const ownerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(ownerRef), tx.get(targetRef),
+    ]);
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("admin") !== true || managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both")) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+    if (targetSnap.get("admin") === true) {
+      throw new HttpsError("failed-precondition", "管理者端末の権限は変更できません。");
+    }
+    if (targetSnap.get("managementApproved") !== true ||
+        (targetSnap.get("role") !== "management" && targetSnap.get("role") !== "both")) {
+      throw new HttpsError("failed-precondition", "承認済みの管理端末のみ副管理者に設定できます。");
+    }
+    tx.update(targetRef, {
+      subAdmin: enabled,
+      subAdminUpdatedAt: FieldValue.serverTimestamp(),
+      subAdminUpdatedByUid: uid,
+    });
   });
   return { terminalId: targetTerminalId, subAdmin: enabled };
 });
 
-
+/** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
 /** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
 export const recordReception = onCall(async (call) => {
   const uid = requireUid(call);
@@ -858,18 +860,21 @@ export const updateManagedTerminalName = onCall(async (call) => {
   }
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
-  const [terminalSnap, ownerSnap] = await Promise.all([terminalRef.get(), ownerRef.get()]);
-  if (!terminalSnap.exists || !ownerSnap.exists ||
-      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      terminalSnap.get("approved") !== true ||
-      terminalSnap.get("managementApproved") !== true ||
-      (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
-    throw new HttpsError("permission-denied", "この管理端末の名前を変更する権限がありません。");
-  }
-  await terminalRef.update({ name, updatedAt: new Date().toISOString() });
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
+    if (!terminalSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        terminalSnap.get("approved") !== true ||
+        terminalSnap.get("managementApproved") !== true ||
+        (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
+      throw new HttpsError("permission-denied", "この管理端末の名前を変更する権限がありません。");
+    }
+    tx.update(terminalRef, { name, updatedAt: new Date().toISOString() });
+  });
   return { terminalId, name };
 });
 
+/** Send a remote reception-mode command without rewriting terminal approval fields. */
 /** Send a remote reception-mode command without rewriting terminal approval fields. */
 export const setManagedTerminalMode = onCall(async (call) => {
   const uid = requireUid(call);
@@ -882,32 +887,33 @@ export const setManagedTerminalMode = onCall(async (call) => {
   if (managerTerminalId === targetTerminalId) {
     throw new HttpsError("failed-precondition", "自分自身へのリモート操作はできません。");
   }
-  const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
-    db.doc("terminals/" + managerTerminalId).get(),
-    db.doc("terminalOwners/" + managerTerminalId).get(),
-    db.doc("terminals/" + targetTerminalId).get(),
-  ]);
-  if (!managerSnap.exists || !managerOwnerSnap.exists ||
-      managerOwnerSnap.get("enabled") !== true || managerOwnerSnap.get("ownerUid") !== uid ||
-      managerSnap.get("approved") !== true ||
-      managerSnap.get("managementApproved") !== true ||
-      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
-      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
-    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
-  }
-  if (!targetSnap.exists || targetSnap.get("receptionApproved") !== true ||
-      targetSnap.get("approved") !== true || targetSnap.get("admin") === true) {
-    throw new HttpsError("failed-precondition", "対象は承認済みの受付端末ではありません。");
-  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
   const updatedAt = new Date().toISOString();
-  await db.doc("terminals/" + targetTerminalId).update({
-    desiredMode: mode,
-    desiredModeUpdatedAt: updatedAt,
-    updatedAt,
+  await db.runTransaction(async (tx) => {
+    const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(targetRef),
+    ]);
+    if (!managerSnap.exists || !managerOwnerSnap.exists ||
+        managerOwnerSnap.get("enabled") !== true || managerOwnerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists || targetSnap.get("receptionApproved") !== true ||
+        targetSnap.get("approved") !== true || targetSnap.get("admin") === true) {
+      throw new HttpsError("failed-precondition", "対象は承認済みの受付端末ではありません。");
+    }
+    tx.update(targetRef, { desiredMode: mode, desiredModeUpdatedAt: updatedAt, updatedAt });
   });
   return { terminalId: targetTerminalId, mode, updatedAt };
 });
 
+/** Delete an event and all nested operational records using trusted server credentials. */
 /** Delete an event and all nested operational records using trusted server credentials. */
 export const deleteManagedEvent = onCall(async (call) => {
   const uid = requireUid(call);
