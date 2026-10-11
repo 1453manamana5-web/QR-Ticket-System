@@ -1321,28 +1321,21 @@ export default function App() {
   };
 
   const registerOwnTerminal = async () => {
+    const existing = terminals.find(terminal => terminal.terminalId === firebaseDeviceId);
+    if (existing) {
+      setSelectedTerminalId(firebaseDeviceId);
+      setForceTerminalRegistration(false);
+      setTerminalNotice((existing.managementApproved ?? existing.approved) === true
+        ? "この管理端末は登録済みです。"
+        : "この管理端末は申請済みです。管理者の承認を待ってください。");
+      return;
+    }
+    const legacyTerminalId = localStorage.getItem("qr-ticket-device-id");
+    if (legacyTerminalId && legacyTerminalId !== firebaseDeviceId) {
+      setTerminalNotice("以前の端末IDが残っています。重複登録を防ぐため、旧端末IDの所有者移行を完了してから申請してください。");
+      return;
+    }
     try {
-      const remoteTerminals = await loadTerminals();
-      const existing = remoteTerminals.find(terminal => terminal.terminalId === firebaseDeviceId);
-      const legacyTerminalId = localStorage.getItem("qr-ticket-device-id");
-      const legacyExisting = legacyTerminalId && legacyTerminalId !== firebaseDeviceId
-        ? remoteTerminals.find(terminal => terminal.terminalId === legacyTerminalId)
-        : undefined;
-      if (legacyExisting && !existing) {
-        setTerminalNotice("旧端末IDの登録が見つかりました。安全な所有者移行手順が必要なため、旧端末は変更していません。");
-        return;
-      }
-      if (existing) {
-        localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
-        localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
-        setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? existing : terminal));
-        setForceTerminalRegistration(false);
-        setSelectedTerminalId(firebaseDeviceId);
-        setTerminalNotice((existing.managementApproved ?? existing.approved) === true
-          ? "この管理端末は登録済みです。"
-          : "この管理端末は申請済みです。管理者の承認を待ってください。");
-        return;
-      }
       const { registerTerminalApplication } = await import("./terminalHandoff");
       await registerTerminalApplication(firebaseDeviceId, appSettings.deviceName || "管理端末", "Web / iPad", "management");
       const terminal: ManagedTerminal = {
