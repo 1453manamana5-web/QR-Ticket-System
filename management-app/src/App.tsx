@@ -171,6 +171,18 @@ export default function App() {
   const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
   const navSwipeRef = useRef<{ startX: number; startY: number; current: string; moved: boolean } | null>(null);
   const navSuppressClickRef = useRef(false);
+  const sidebarDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  const handleSidebarPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button, a, input, textarea, select, [data-nav-label]")) return;
+    sidebarDragRef.current = { startX: event.clientX, startY: event.clientY };
+  };
+  const handleSidebarPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = sidebarDragRef.current;
+    sidebarDragRef.current = null;
+    if (!drag || Math.abs(event.clientX - drag.startX) < 48 || Math.abs(event.clientX - drag.startX) < Math.abs(event.clientY - drag.startY) * 1.25) return;
+    if (event.clientX < drag.startX && !sidebarCollapsed) setSidebarCollapsed(true);
+    if (event.clientX > drag.startX && sidebarCollapsed) setSidebarCollapsed(false);
+  };
   const [event, setEvent] = useState<Event>(baseEvent);
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
     try {
@@ -2725,21 +2737,16 @@ function NavIcon({type}:{type:string}){
   }
 
   return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-    <aside className="sidebar">
+    <aside
+      className="sidebar"
+      onPointerDown={handleSidebarPointerDown}
+      onPointerUp={handleSidebarPointerUp}
+      onPointerCancel={() => { sidebarDragRef.current = null; }}
+      aria-label="ナビゲーション。左へスライドすると折りたたみ、右へスライドすると展開します"
+    >
       <div className="brand">
         <div className="brand-mark">QR</div>
         <div className="brand-copy"><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
-        <button
-          type="button"
-          className="sidebar-collapse-toggle"
-          aria-label={sidebarCollapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
-          aria-expanded={!sidebarCollapsed}
-          title={sidebarCollapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
-          onClick={() => setSidebarCollapsed(value => !value)}
-        >
-          <span className="sidebar-collapse-icon" aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span>
-          <span className="sidebar-collapse-label">{sidebarCollapsed ? "展開" : "サイドバーを閉じる"}</span>
-        </button>
       </div>
       <div className="event-mini">
         <small>現在のイベント</small>
