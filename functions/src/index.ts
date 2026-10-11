@@ -939,7 +939,9 @@ export const setManagedTerminalMode = onCall(async (call) => {
         (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
       throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
     }
-    if (!targetSnap.exists || targetSnap.get("receptionApproved") !== true ||
+    const targetReceptionApproved = targetSnap.get("receptionApproved") === true ||
+      (targetSnap.get("receptionApproved") === undefined && targetSnap.get("approved") === true);
+    if (!targetSnap.exists || !targetReceptionApproved ||
         targetSnap.get("approved") !== true ||
         targetSnap.get("role") !== "reception" ||
         targetSnap.get("managementApproved") === true ||
