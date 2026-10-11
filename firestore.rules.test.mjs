@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
 
 let env;
 before(async () => {
@@ -57,6 +57,21 @@ test("approved reception installations can read event metadata but not ticket do
   const db = env.authenticatedContext("reception-reader").firestore();
   await assertSucceeds(getDoc(doc(db, "events", "event-1")));
   await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
+  await env.withSecurityRulesDisabled(async context => {
+    const trustedDb = context.firestore();
+    await setDoc(doc(trustedDb, "events", "event-1", "receptionRecords", "record-1"), { recordId: "record-1" });
+    await setDoc(doc(trustedDb, "events", "event-1", "analysis", "analysis-1"), { eventId: "event-1" });
+    await setDoc(doc(trustedDb, "events", "event-1", "members", "member-1"), { memberId: "member-1" });
+    await setDoc(doc(trustedDb, "events", "event-1", "settings", "reception"), { entryEnabled: true });
+    await setDoc(doc(trustedDb, "devices", "device-1"), { secretSetting: true });
+    await setDoc(doc(trustedDb, "terminals", "T-OTHER"), { terminalId: "T-OTHER", name: "別の端末" });
+  });
+  await assertFails(getDocs(collection(db, "events", "event-1", "receptionRecords")));
+  await assertFails(getDocs(collection(db, "events", "event-1", "analysis")));
+  await assertFails(getDocs(collection(db, "events", "event-1", "members")));
+  await assertFails(getDocs(collection(db, "events", "event-1", "settings")));
+  await assertFails(getDoc(doc(db, "devices", "device-1")));
+  await assertFails(getDocs(collection(db, "terminals")));
 });
 
 test("approved management installations can write event and ticket data", async () => {
@@ -75,6 +90,7 @@ test("approved management installations can write event and ticket data", async 
   await assertSucceeds(setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), {
     ticketId: "ticket-1", eventId: "event-1", currentStatus: "unused",
   }));
+  await assertSucceeds(getDocs(collection(db, "terminals")));
 });
 
 test("event bundles can be fetched by token but only approved management installations can publish", async () => {
