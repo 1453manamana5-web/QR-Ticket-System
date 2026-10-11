@@ -259,6 +259,13 @@ export const completeTerminalHandoff = onCall(async (call) => {
          installationSnap.get("authUid") !== requesterUid)) {
       throw new HttpsError("failed-precondition", "この環境の登録情報が一致しません。管理者による確認が必要です。");
     }
+    // Do not let a second, separately approved request overwrite an already
+    // active grant for the same installation. Multiple pending requests can
+    // exist across the cooldown window; consuming the first one must make the
+    // others unusable for this installation.
+    if (installationSnap.exists && installationSnap.get("approved") === true) {
+      throw new HttpsError("failed-precondition", "この端末環境はすでに登録済みです。再登録する場合は、先に受付登録を解除してください。");
+    }
     // A release invalidates handoff approvals created before the release time.
     // A new owner-approved request created after release remains valid.
     const releasedAt = installationSnap.get("releasedAt");
