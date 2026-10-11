@@ -6,13 +6,14 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 const STORES = {
   event: "event",
   tickets: "tickets",
   receptionRecords: "receptionRecords",
   syncQueue: "syncQueue",
+  receptionErrors: "receptionErrors",
 } as const;
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -56,6 +57,13 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(STORES.syncQueue)) {
         const store = database.createObjectStore(STORES.syncQueue, {keyPath: "recordId"});
         store.createIndex("status", "status", {unique: false});
+      }
+
+      if (!database.objectStoreNames.contains(STORES.receptionErrors)) {
+        const store = database.createObjectStore(STORES.receptionErrors, {keyPath: "errorId"});
+        store.createIndex("eventId", "eventId", {unique: false});
+        store.createIndex("category", "category", {unique: false});
+        store.createIndex("timestamp", "timestamp", {unique: false});
       }
     };
 
@@ -286,6 +294,54 @@ export async function markSyncStatus(
   });
 
   database.close();
+}
+
+
+export type ReceptionErrorCategory =
+  | "unknown_ticket"
+  | "invalid_ticket"
+  | "invalid_state"
+  | "save_failed"
+  | "camera_failed"
+  | "event_load_failed"
+  | "sync_failed";
+
+export type ReceptionErrorLog = {
+  errorId: string;
+  eventId: string;
+  terminalId: string;
+  category: ReceptionErrorCategory;
+  mode: "entry" | "exit";
+  timestamp: string;
+};
+
+export async function saveReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.receptionErrors, "readwrite");
+      transaction.objectStore(STORES.receptionErrors).put(log);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("受付エラーログを保存できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("受付エラーログの保存が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function getReceptionErrorLogs(): Promise<ReceptionErrorLog[]> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<ReceptionErrorLog[]>((resolve, reject) => {
+      const request = database.transaction(STORES.receptionErrors, "readonly")
+        .objectStore(STORES.receptionErrors).getAll();
+      request.onsuccess = () => resolve(request.result as ReceptionErrorLog[]);
+      request.onerror = () => reject(request.error ?? new Error("受付エラーログを読み込めませんでした"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function clearLocalEvent(): Promise<void> {
