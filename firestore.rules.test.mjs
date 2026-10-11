@@ -79,6 +79,25 @@ test("approved reception installations can read event metadata but not ticket do
   await assertFails(getDocs(collection(db, "terminals")));
 });
 
+test("approved legacy reception terminals without receptionApproved remain readable", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "legacy-reception"), {
+      terminalId: "T-LEGACY-RECEPTION", authUid: "legacy-reception", approved: true,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-LEGACY-RECEPTION"), {
+      terminalId: "T-LEGACY-RECEPTION", ownerUid: "legacy-reception", enabled: true,
+    });
+    // Older approved terminals may predate the explicit receptionApproved flag.
+    await setDoc(doc(db, "terminals", "T-LEGACY-RECEPTION"), {
+      terminalId: "T-LEGACY-RECEPTION", approved: true, role: "reception",
+    });
+    await setDoc(doc(db, "events", "event-legacy"), { eventId: "event-legacy" });
+  });
+  const db = env.authenticatedContext("legacy-reception").firestore();
+  await assertSucceeds(getDoc(doc(db, "events", "event-legacy")));
+});
+
 test("handed-off reception installations cannot inherit management access", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
