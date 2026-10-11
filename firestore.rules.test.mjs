@@ -59,6 +59,7 @@ test("approved reception installations can read event metadata but not ticket do
   });
   const db = env.authenticatedContext("reception-reader").firestore();
   await assertSucceeds(getDoc(doc(db, "events", "event-1")));
+  await assertFails(getDocs(collection(db, "events")));
   await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
   await assertSucceeds(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
   await assertFails(getDoc(doc(db, "terminals", "T-OTHER")));
