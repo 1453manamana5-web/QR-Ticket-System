@@ -28,10 +28,17 @@ export async function downloadCurrentFirebaseEventData(
     );
 
   // 管理アプリで明示的に公開対象に指定されたイベントだけを自動取得する。
-  // 対象が複数ある場合は誤配信を避けるため自動選択しない。
-  if (candidates.length !== 1) return null;
+  // 取得対象が0件・複数件の場合は、受付画面に原因を表示できるよう明示的に失敗させる。
+  if (candidates.length === 0) {
+    throw new Error("NO_PUBLISHED_EVENT");
+  }
+  if (candidates.length > 1) {
+    throw new Error("MULTIPLE_PUBLISHED_EVENTS");
+  }
   const current = candidates[0];
-  if (!current || typeof current.authToken !== "string") return null;
+  if (!current || typeof current.authToken !== "string") {
+    throw new Error("INVALID_PUBLISHED_EVENT");
+  }
 
   const payload: EventAuthPayload = {
     type: "qr-ticket-event-auth",
