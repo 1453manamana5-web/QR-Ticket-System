@@ -290,11 +290,12 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("invalid-argument", "自分自身は承認できません。");
   }
 
-  const [managerSnap, managerOwnerSnap, managerInstallationSnap, targetSnap] = await Promise.all([
+  const [managerSnap, managerOwnerSnap, managerInstallationSnap, targetSnap, applicationSnap] = await Promise.all([
     db.doc("terminals/" + managerTerminalId).get(),
     db.doc("terminalOwners/" + managerTerminalId).get(),
     db.doc("terminalInstallations/" + uid).get(),
     db.doc("terminals/" + targetTerminalId).get(),
+    db.doc("terminalApplications/" + targetTerminalId).get(),
   ]);
 
   if (!managerSnap.exists || !managerOwnerSnap.exists || !managerInstallationSnap.exists ||
@@ -329,9 +330,19 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
   }
 
-  const targetUid = targetSnap.get("requestedByUid");
+  // requestedByUid on the terminal document is not trusted by itself because
+  // the legacy live rules allowed direct client writes. Verify the server-owned
+  // application record before granting any role.
+  if (!applicationSnap.exists ||
+      applicationSnap.get("terminalId") !== targetTerminalId ||
+      applicationSnap.get("status") !== "pending" ||
+      applicationSnap.get("requestedByUid") !== targetSnap.get("requestedByUid") ||
+      applicationSnap.get("requestedRole") !== role) {
+    throw new HttpsError("failed-precondition", "信頼できる申請情報がありません。端末から申請をやり直してください。");
+  }
+  const targetUid = applicationSnap.get("requestedByUid");
   if (typeof targetUid !== "string" || targetUid.length < 1) {
-    throw new HttpsError("failed-precondition", "この申請は端末所有者を検証できません。安全な移行後に再申請してください。");
+    throw new HttpsError("failed-precondition", "申請者を確認できません。端末から申請をやり直してください。");
   }
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
@@ -339,15 +350,17 @@ export const approveTerminalRegistration = onCall(async (call) => {
   const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  const applicationRef = db.doc("terminalApplications/" + targetTerminalId);
   const installationRef = db.doc("terminalInstallations/" + targetUid);
   await db.runTransaction(async (tx) => {
-    const [freshManager, freshManagerOwner, freshManagerInstallation, freshTarget, ownerSnap, installationSnap] = await Promise.all([
+    const [freshManager, freshManagerOwner, freshManagerInstallation, freshTarget, ownerSnap, installationSnap, freshApplication] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
       tx.get(managerInstallationRef),
       tx.get(targetRef),
       tx.get(targetOwnerRef),
       tx.get(installationRef),
+      tx.get(applicationRef),
     ]);
     // Revalidate the acting manager inside the same transaction as the approval.
     // A permission revocation or ownership change after the initial reads must
@@ -366,8 +379,13 @@ export const approveTerminalRegistration = onCall(async (call) => {
     }
     if (!freshTarget.exists ||
         freshTarget.get("requestedByUid") !== targetUid ||
-        freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true) {
-      throw new HttpsError("failed-precondition", "申請内容が変更されています。再読み込みしてください。");
+        freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true ||
+        !freshApplication.exists ||
+        freshApplication.get("terminalId") !== targetTerminalId ||
+        freshApplication.get("requestedByUid") !== targetUid ||
+        freshApplication.get("requestedRole") !== freshTarget.get("role") ||
+        freshApplication.get("status") !== "pending") {
+      throw new HttpsError("failed-precondition", "申請内容が変更されています。端末から再申請してください。");
     }
     const freshRole = freshTarget.get("role");
     if (freshRole !== "management" && freshRole !== "reception" && freshRole !== "both") {
@@ -421,6 +439,11 @@ export const approveTerminalRegistration = onCall(async (call) => {
       approved: true,
       registrationApprovedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+    tx.update(applicationRef, {
+      status: "approved",
+      decidedAt: FieldValue.serverTimestamp(),
+      decidedByUid: uid,
+    });
   });
   return { terminalId: targetTerminalId, approved: true, role };
 });
@@ -636,8 +659,14 @@ export const registerTerminalApplication = onCall(async (call) => {
   }
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const applicationRef = db.doc("terminalApplications/" + terminalId);
   await db.runTransaction(async (tx) => {
-    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
+    const [terminalSnap, ownerSnap, applicationSnap] = await Promise.all([
+      tx.get(terminalRef), tx.get(ownerRef), tx.get(applicationRef),
+    ]);
+    if (applicationSnap.exists && applicationSnap.get("requestedByUid") !== uid) {
+      throw new HttpsError("already-exists", "この端末IDには別の申請情報が登録されています。管理者による確認が必要です。");
+    }
     if (ownerSnap.exists && ownerSnap.get("enabled") !== true) {
       throw new HttpsError("already-exists", "この端末IDには無効化された所有者情報が残っています。安全な所有権の引き継ぎ手続きが必要です。");
     }
@@ -666,6 +695,14 @@ export const registerTerminalApplication = onCall(async (call) => {
             ? (current.status === "online" ? "online" : "offline")
             : "pending",
           updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        tx.set(applicationRef, {
+          terminalId,
+          requestedByUid: uid,
+          requestedRole: "reception",
+          status: "pending",
+          requestedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
         return;
       }
@@ -699,6 +736,14 @@ export const registerTerminalApplication = onCall(async (call) => {
       requestedAt: FieldValue.serverTimestamp(),
       lastSeen: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    tx.set(applicationRef, {
+      terminalId,
+      requestedByUid: uid,
+      requestedRole,
+      status: "pending",
+      requestedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
   });
 
