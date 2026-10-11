@@ -78,6 +78,7 @@ test("approved reception installations can read event metadata but not ticket do
   await assertFails(getDocs(collection(db, "events", "event-1", "settings")));
   await assertFails(getDoc(doc(db, "devices", "device-1")));
   await assertFails(getDocs(collection(db, "terminals")));
+  await assertFails(setDoc(doc(db, "receptionErrors", "forged-error"), { errorId: "forged-error" }));
 });
 
 test("approved legacy reception terminals without receptionApproved remain readable", async () => {
