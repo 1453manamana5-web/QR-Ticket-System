@@ -81,7 +81,7 @@ test("approved reception installations cannot read event or ticket documents dir
   await assertFails(setDoc(doc(db, "receptionErrors", "forged-error"), { errorId: "forged-error" }));
 });
 
-test("approved legacy reception terminals without receptionApproved remain readable", async () => {
+test("legacy reception terminals without receptionApproved can fetch bundles but not event documents", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "legacy-reception"), {
@@ -95,12 +95,14 @@ test("approved legacy reception terminals without receptionApproved remain reada
       terminalId: "T-LEGACY-RECEPTION", approved: true, role: "reception",
     });
     await setDoc(doc(db, "events", "event-legacy"), { eventId: "event-legacy" });
+    await setDoc(doc(db, "eventBundles", "legacy-token"), { authToken: "legacy-token", event: { eventId: "event-legacy" }, tickets: [] });
   });
   const db = env.authenticatedContext("legacy-reception").firestore();
-  await assertSucceeds(getDoc(doc(db, "events", "event-legacy")));
+  await assertFails(getDoc(doc(db, "events", "event-legacy")));
+  await assertSucceeds(getDoc(doc(db, "eventBundles", "legacy-token")));
 });
 
-test("handed-off reception installations cannot inherit management access", async () => {
+test("handed-off reception installations cannot inherit management access or read event documents directly", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "handoff-reception"), {
@@ -123,7 +125,7 @@ test("handed-off reception installations cannot inherit management access", asyn
   });
 
   const db = env.authenticatedContext("handoff-reception").firestore();
-  await assertSucceeds(getDoc(doc(db, "events", "event-shared")));
+  await assertFails(getDoc(doc(db, "events", "event-shared")));
   await assertFails(getDoc(doc(db, "events", "event-shared", "tickets", "ticket-shared")));
   await assertFails(getDoc(doc(db, "events", "event-shared", "analysis", "private-analysis")));
 });
