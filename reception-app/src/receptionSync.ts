@@ -22,7 +22,7 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
       name: serverStatus.name ?? "受付端末",
     };
   }
-  if (!serverStatus.approved && serverStatus.status === "pending" && serverStatus.name) {
+  if (serverStatus.status === "pending" && serverStatus.name) {
     return { approved: false, status: "pending", name: serverStatus.name };
   }
   return null;
