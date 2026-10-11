@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
@@ -7,12 +7,8 @@ import { getTerminalInstallationStatus, releaseOwnReceptionRegistration, submitR
 
 
 export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
-  const db = getFirebaseDb();
-  // Store only error category and context; never include ticket QR payloads.
-  await setDoc(doc(db, "receptionErrors", log.errorId), {
-    ...log,
-    syncedAt: new Date().toISOString(),
-  });
+  const { submitReceptionError } = await import("./terminalHandoff");
+  await submitReceptionError(log);
 }
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
