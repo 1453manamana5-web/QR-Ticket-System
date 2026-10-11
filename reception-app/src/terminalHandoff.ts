@@ -1,4 +1,4 @@
-import type { ReceptionRecord } from "@qr-ticket-system/shared";
+import type { EventAuthPayload, ReceptionRecord } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -131,4 +131,15 @@ export async function submitReceptionError(log: ReceptionErrorLog): Promise<void
     "recordReceptionError",
   );
   await callable({ log });
+}
+
+/** Fetch only the currently published event metadata after server-side reception authorization. */
+export async function getCurrentReceptionEvent(): Promise<EventAuthPayload> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<void, EventAuthPayload>(
+    functionsClient(),
+    "getCurrentReceptionEvent",
+  );
+  const result = await callable();
+  return { type: "qr-ticket-event-auth", ...result.data };
 }
