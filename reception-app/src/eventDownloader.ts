@@ -1,6 +1,7 @@
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
+import { getCurrentReceptionEvent } from "./terminalHandoff";
 
 type EventBundle = {
   event: Event;
@@ -15,45 +16,15 @@ type EventBundle = {
 export async function downloadCurrentFirebaseEventData(
   terminalId: string,
 ): Promise<{ localEvent: LocalEventData; tickets: Ticket[]; authPayload: EventAuthPayload } | null> {
-  const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "events"));
-  const candidates = snapshot.docs
-    .map(item => item.data() as Event & { authToken?: unknown; receptionTarget?: unknown })
-    .filter(item =>
-      // receptionTarget が明示されたイベントを優先し、status の表記ゆれや
-      // 管理画面側の状態更新だけで受付データを見失わないようにする。
-      item.receptionTarget === true &&
-      item.eventStatus !== "finished" &&
-      typeof item.eventId === "string" &&
-      item.eventId.length > 0 &&
-      typeof item.eventName === "string" &&
-      item.eventName.length > 0 &&
-      typeof item.dataVersion === "number" &&
-      typeof item.authToken === "string" &&
-      item.authToken.length > 0
-    );
-
-  // 管理アプリで明示的に公開対象に指定されたイベントだけを自動取得する。
-  // 取得対象が0件・複数件の場合は、受付画面に原因を表示できるよう明示的に失敗させる。
-  if (candidates.length === 0) {
-    throw new Error("NO_PUBLISHED_EVENT");
+  let payload: EventAuthPayload;
+  try {
+    payload = await getCurrentReceptionEvent();
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : "";
+    if (message.includes("NO_PUBLISHED_EVENT")) throw new Error("NO_PUBLISHED_EVENT");
+    if (message.includes("MULTIPLE_PUBLISHED_EVENTS")) throw new Error("MULTIPLE_PUBLISHED_EVENTS");
+    throw reason;
   }
-  if (candidates.length > 1) {
-    throw new Error("MULTIPLE_PUBLISHED_EVENTS");
-  }
-  const current = candidates[0];
-  if (!current || typeof current.authToken !== "string") {
-    throw new Error("INVALID_PUBLISHED_EVENT");
-  }
-
-  const payload: EventAuthPayload = {
-    type: "qr-ticket-event-auth",
-    eventId: current.eventId,
-    eventName: current.eventName,
-    dataVersion: current.dataVersion,
-    authToken: current.authToken,
-  };
-
   const downloaded = await downloadEventData(payload, terminalId);
   return { ...downloaded, authPayload: payload };
 }
