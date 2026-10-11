@@ -13,6 +13,9 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
   useEffect(()=>{
     const scanner=new Html5Qrcode(readerId);
     let active=true;
+    let processing=false;
+    let lastDecodedText="";
+    let lastDecodedAt=0;
 
     void scanner.start(
       {facingMode:"environment"},
@@ -25,10 +28,15 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         aspectRatio:1
       },
       decodedText=>{
-        if(!active)return;
-        active=false;
+        if(!active||processing)return;
+        const now=Date.now();
+        // 同じQRを連続フレームで何度も受付しない。別のQRなら結果表示中でも受付可能。
+        if(decodedText===lastDecodedText&&now-lastDecodedAt<1800)return;
+        processing=true;
+        lastDecodedText=decodedText;
+        lastDecodedAt=now;
         onResultRef.current(decodedText);
-        void scanner.stop().catch(()=>undefined);
+        window.setTimeout(()=>{processing=false;},250);
       },
       ()=>undefined
     ).catch(()=>{
