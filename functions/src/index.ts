@@ -909,6 +909,55 @@ export const setTerminalSubAdmin = onCall(async (call) => {
 
 /** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
 /** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
+/** Return only the single explicitly published event for an approved reception installation. */
+export const getCurrentReceptionEvent = onCall(async (call) => {
+  const uid = requireUid(call);
+  const installation = await db.doc("terminalInstallations/" + uid).get();
+  if (!installation.exists || installation.get("authUid") !== uid || installation.get("approved") !== true) {
+    throw new HttpsError("permission-denied", "承認済みの受付端末ではありません。");
+  }
+  const terminalId = installation.get("terminalId");
+  if (typeof terminalId !== "string") {
+    throw new HttpsError("permission-denied", "受付端末の登録情報を確認できません。");
+  }
+  const [terminal, owner] = await Promise.all([
+    db.doc("terminals/" + terminalId).get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+  ]);
+  const role = terminal.get("role");
+  const receptionApproved = terminal.get("receptionApproved") === true ||
+    (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true);
+  if (!terminal.exists || terminal.get("approved") !== true ||
+      !receptionApproved || (role !== "reception" && role !== "both") ||
+      !owner.exists || owner.get("enabled") !== true) {
+    throw new HttpsError("permission-denied", "受付権限がありません。");
+  }
+
+  const snapshot = await db.collection("events").where("receptionTarget", "==", true).get();
+  const candidates = snapshot.docs
+    .map((item) => item.data())
+    .filter((item) =>
+      item.eventStatus !== "finished" &&
+      typeof item.eventId === "string" && item.eventId.length > 0 &&
+      typeof item.eventName === "string" && item.eventName.length > 0 &&
+      typeof item.dataVersion === "number" &&
+      typeof item.authToken === "string" && item.authToken.length > 0
+    );
+  if (candidates.length === 0) {
+    throw new HttpsError("failed-precondition", "NO_PUBLISHED_EVENT");
+  }
+  if (candidates.length > 1) {
+    throw new HttpsError("failed-precondition", "MULTIPLE_PUBLISHED_EVENTS");
+  }
+  const event = candidates[0];
+  return {
+    eventId: event.eventId as string,
+    eventName: event.eventName as string,
+    dataVersion: event.dataVersion as number,
+    authToken: event.authToken as string,
+  };
+});
+
 export const recordReception = onCall(async (call) => {
   const uid = requireUid(call);
   const input = call.data?.record;
