@@ -132,6 +132,14 @@ function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
 
 export default function App() {
   const [page, setPage] = useState("ホーム");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("qr-ticket-sidebar-collapsed") === "true"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("qr-ticket-sidebar-collapsed", String(sidebarCollapsed)); }
+    catch { /* storage may be unavailable; the toggle still works for this session */ }
+  }, [sidebarCollapsed]);
   const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number } | null>(null);
   const pageOpeningSequence = useRef(0);
   const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
@@ -2716,11 +2724,19 @@ function NavIcon({type}:{type:string}){
     </div>;
   }
 
-  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""}`}>
+  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">QR</div>
-        <div><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
+        <div className="brand-copy"><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
+        <button
+          type="button"
+          className="sidebar-collapse-toggle"
+          aria-label={sidebarCollapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+          aria-expanded={!sidebarCollapsed}
+          title={sidebarCollapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+          onClick={() => setSidebarCollapsed(value => !value)}
+        ><span aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span></button>
       </div>
       <div className="event-mini">
         <small>現在のイベント</small>
