@@ -4551,7 +4551,7 @@ body:has(.ticket-screen),
 @media(max-width:560px){.ai-report-heading{align-items:flex-start;flex-direction:column}.ai-report-heading h3{font-size:20px}.ai-report-insight-grid{grid-template-columns:1fr}.ai-report-panel{padding:14px}.ai-report-kpi{padding:13px}.ai-report-kpi strong{font-size:24px}}
 
 
-/* Give the event report enough room to display its dashboard layout */
-.ai-lab-detail:has(.ai-report-content){width:min(920px,calc(100vw - 40px));max-height:min(88vh,920px);padding:22px;overflow:auto}
+/* Give the event report enough room and keep its top edge inside the viewport */
+.ai-lab-detail:has(.ai-report-content){width:min(920px,calc(100vw - 40px));max-height:calc(100vh - 120px);padding:22px;overflow:auto;top:20px;bottom:auto}
 .ai-lab-detail:has(.ai-report-content) .ai-report-content{gap:16px}
-@media(max-width:700px){.ai-lab-detail:has(.ai-report-content){width:calc(100vw - 24px);right:0;max-height:88vh;padding:14px}.ai-lab-detail:has(.ai-report-content) .ai-report-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-lab-detail:has(.ai-report-content) .ai-report-panels{grid-template-columns:1fr}}
+@media(max-width:700px){.ai-lab-detail:has(.ai-report-content){width:calc(100vw - 24px);right:0;top:12px;bottom:auto;max-height:calc(100vh - 96px);padding:14px}.ai-lab-detail:has(.ai-report-content) .ai-report-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-lab-detail:has(.ai-report-content) .ai-report-panels{grid-template-columns:1fr}}
