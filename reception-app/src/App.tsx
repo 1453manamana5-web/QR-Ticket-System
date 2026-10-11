@@ -52,7 +52,14 @@ async function logReceptionError(
     console.error("受付エラーの端末内保存に失敗しました",reason);
   }
   if(navigator.onLine){
-    void syncReceptionErrorLog(log).catch(reason=>console.error("受付エラーのFirebase同期に失敗しました",reason));
+    void syncReceptionErrorLog(log).catch(async reason=>{
+      console.error("受付エラーのFirebase同期に失敗しました",reason);
+      try{
+        await saveReceptionErrorLog({...log,errorId:crypto.randomUUID(),category:"sync_failed",timestamp:new Date().toISOString()});
+      }catch(localReason){
+        console.error("同期失敗ログの端末内保存にも失敗しました",localReason);
+      }
+    });
   }
 }
 
@@ -160,6 +167,9 @@ export default function App(){
         setScreen("ready");
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
+        if(localEvent?.event.eventId){
+          void logReceptionError(localEvent.event.eventId,getTerminalId(),"entry","event_load_failed");
+        }
         if(cancelled)return;
         const code=reason instanceof Error?reason.message:"";
         if(code==="NO_PUBLISHED_EVENT"){
@@ -800,7 +810,10 @@ export default function App(){
                   key={scannerKey}
                   readerId="ticket-reader"
                   onResult={handleTicketScan}
-                  onError={message=>setResult({kind:"error",title:"カメラを起動できません",detail:message})}
+                  onError={message=>{
+                    setResult({kind:"error",title:"カメラを起動できません",detail:message});
+                    if(localEvent?.event.eventId)void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"camera_failed");
+                  }}
                 />}
               </div>
             </div>
