@@ -156,27 +156,19 @@ async function measureManagementNetworkSpeed(
 
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
   const db = getFirebaseDb();
-  const reference = doc(db, "terminals", terminalId);
-  const existingSnapshot = await getDoc(reference);
-  const existing = existingSnapshot.exists() ? existingSnapshot.data() : {};
-  const networkMbps = await measureManagementNetworkSpeed(reference);
-
-  await setDoc(reference, {
-    terminalId,
-    name: typeof existing.name === "string" ? existing.name : "管理端末",
-    type: existing.type === "Web / PC" ? "Web / PC" : "Web / iPad",
-    role: existing.role === "both" || existing.role === "reception" ? existing.role : "management",
-    mode: existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止",
-    status: "online",
-    approved: existing.managementApproved === true || existing.approved === true,
-    managementApproved: existing.managementApproved === true || existing.approved === true,
-    receptionApproved: existing.receptionApproved === true,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof existing.networkMbps === "number" ? existing.networkMbps : null),
-    battery: typeof existing.battery === "number" ? existing.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-
+  const existingSnapshot = await getDoc(doc(db, "terminals", terminalId));
+  if (!existingSnapshot.exists()) throw new Error("TERMINAL_NOT_REGISTERED");
+  const existing = existingSnapshot.data();
+  const now = Date.now();
+  let networkMbps: number | null = managementNetworkSpeedCache;
+  if (now - managementNetworkSpeedMeasuredAt >= MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS) {
+    networkMbps = getManagementBrowserDownlink();
+    managementNetworkSpeedCache = networkMbps;
+    managementNetworkSpeedMeasuredAt = now;
+  }
+  const { updateTerminalHeartbeat } = await import("./terminalHandoff");
+  const mode = existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止";
+  await updateTerminalHeartbeat(terminalId, mode, undefined, networkMbps);
   return networkMbps;
 }
 
