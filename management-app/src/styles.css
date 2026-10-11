@@ -4555,3 +4555,32 @@ body:has(.ticket-screen),
 .ai-lab-detail:has(.ai-report-content){width:min(920px,calc(100vw - 40px));max-height:calc(100vh - 120px);padding:22px;overflow:auto;top:20px;bottom:auto}
 .ai-lab-detail:has(.ai-report-content) .ai-report-content{gap:16px}
 @media(max-width:700px){.ai-lab-detail:has(.ai-report-content){width:calc(100vw - 24px);right:0;top:12px;bottom:auto;max-height:calc(100vh - 96px);padding:14px}.ai-lab-detail:has(.ai-report-content) .ai-report-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-lab-detail:has(.ai-report-content) .ai-report-panels{grid-template-columns:1fr}}
+
+
+/* Reveal the selected management screen from the sidebar item that opened it. */
+.management-main.page-opening {
+  transform-origin: var(--page-origin-x, 0px) var(--page-origin-y, 50%);
+  animation: sidebar-origin-reveal 620ms cubic-bezier(.18,.78,.2,1) both;
+  will-change: clip-path, opacity, transform;
+}
+@keyframes sidebar-origin-reveal {
+  0% {
+    clip-path: circle(0 at var(--page-origin-x, 0px) var(--page-origin-y, 50%));
+    opacity: .42;
+    transform: translateX(-8px) scale(.992);
+  }
+  55% { opacity: 1; }
+  100% {
+    clip-path: circle(160% at var(--page-origin-x, 0px) var(--page-origin-y, 50%));
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .management-main.page-opening {
+    animation: none;
+    clip-path: none;
+    opacity: 1;
+    transform: none;
+  }
+}
