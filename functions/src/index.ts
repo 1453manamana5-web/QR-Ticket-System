@@ -26,6 +26,15 @@ function readId(value: unknown, field: string): string {
   return value.trim();
 }
 
+// Legacy terminals without a generation start at zero. Invalid values fail closed.
+function readReceptionApprovalVersion(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new HttpsError("failed-precondition", "受付権限の世代情報が不正です。");
+  }
+  return value;
+}
+
 /**
  * Ownership is stored separately in terminalOwners/{terminalId}. That collection
  * must be writable only by trusted Admin SDK code; clients must never be able to
@@ -69,6 +78,9 @@ export const requestTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("not-found", "引き継ぎ対象を確認できません。");
     }
 
+    const receptionApprovalVersion = readReceptionApprovalVersion(
+      terminalSnap.get("receptionApprovalVersion"),
+    );
     const lastRequestedAt = rateLimitSnap.get("lastRequestedAt");
     if (lastRequestedAt instanceof Timestamp &&
         now - lastRequestedAt.toMillis() < REQUEST_COOLDOWN_MS) {
@@ -79,6 +91,7 @@ export const requestTerminalHandoff = onCall(async (call) => {
       terminalId,
       requesterUid,
       status: "pending",
+      receptionApprovalVersion,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt: Timestamp.fromMillis(now + REQUEST_TTL_MS),
     });
@@ -180,9 +193,12 @@ export const decideTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("permission-denied", "この申請を処理する権限がありません。");
     }
 
+    const requestVersion = readReceptionApprovalVersion(requestSnap.get("receptionApprovalVersion"));
+    const currentVersion = readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion"));
     const expiresAt = requestSnap.get("expiresAt");
     const createdAt = requestSnap.get("createdAt");
     if (
+      requestVersion !== currentVersion ||
       requestSnap.get("status") !== "pending" ||
       !(createdAt instanceof Timestamp) ||
       !(expiresAt instanceof Timestamp) ||
@@ -247,6 +263,12 @@ export const completeTerminalHandoff = onCall(async (call) => {
     if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
         !terminalAllowsReception || !ownerSnap.exists || ownerSnap.get("enabled") !== true) {
       throw new HttpsError("failed-precondition", "端末の受付承認が無効になったため、引き継ぎを完了できません。");
+    }
+    // An approval from before a revocation must never become usable again
+    // after reception is re-approved. Compare the captured generation first.
+    if (readReceptionApprovalVersion(requestSnap.get("receptionApprovalVersion")) !==
+        readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion"))) {
+      throw new HttpsError("failed-precondition", "受付権限の解除後に新しく申請してください。");
     }
     // Approval is valid only while the same owner who approved the request
     // still owns the terminal. This closes the gap if ownership changes between
@@ -542,12 +564,11 @@ export const revokeTerminalReception = onCall(async (call) => {
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const handoffRequestsQuery = db.collection("terminalHandoffRequests")
     .where("terminalId", "==", targetTerminalId);
-  await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap, handoffRequestsSnap] = await Promise.all([
+  const nextReceptionApprovalVersion = await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
       tx.get(targetRef),
-      tx.get(handoffRequestsQuery),
     ]);
     // Permission and ownership must still be valid at the exact time of revocation.
     if (!managerSnap.exists || !ownerSnap.exists ||
@@ -568,8 +589,10 @@ export const revokeTerminalReception = onCall(async (call) => {
       throw new HttpsError("failed-precondition", "対象端末の種別を確認できません。");
     }
     const now = new Date().toISOString();
+    const nextVersion = readReceptionApprovalVersion(targetSnap.get("receptionApprovalVersion")) + 1;
     const patch: Record<string, unknown> = {
       receptionApproved: false,
+      receptionApprovalVersion: nextVersion,
       approved: targetSnap.get("managementApproved") === true,
       mode: "停止",
       desiredMode: "停止",
@@ -580,19 +603,25 @@ export const revokeTerminalReception = onCall(async (call) => {
     };
     if (role === "both") patch.role = "management";
     tx.update(targetRef, patch);
-    // Cancel outstanding handoffs in the same transaction as revocation. This
-    // prevents an already-approved request from becoming usable if reception
-    // is re-approved before an after-transaction cleanup could run.
-    handoffRequestsSnap.docs
-      .filter((request) => request.get("status") === "pending" || request.get("status") === "approved")
-      .forEach((request) => {
-        tx.update(request.ref, {
-          status: "cancelled",
-          cancelledAt: FieldValue.serverTimestamp(),
-          cancelledByUid: uid,
-        });
-      });
+    // The generation increment invalidates old requests atomically. Cleanup
+    // happens afterward in bounded batches; it is not relied on for security.
+    return nextVersion;
   });
+  const requests = await handoffRequestsQuery.get();
+  const staleRequests = requests.docs.filter((request) => {
+    const status = request.get("status");
+    return (status === "pending" || status === "approved") &&
+      readReceptionApprovalVersion(request.get("receptionApprovalVersion")) !== nextReceptionApprovalVersion;
+  });
+  for (let i = 0; i < staleRequests.length; i += 400) {
+    const batch = db.batch();
+    staleRequests.slice(i, i + 400).forEach((request) => batch.update(request.ref, {
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledByUid: uid,
+    }));
+    await batch.commit();
+  }
   return { terminalId: targetTerminalId, receptionApproved: false };
 });
 /** Delete another terminal only through a trusted admin/sub-admin server check. */
@@ -695,11 +724,10 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     .where("terminalId", "==", terminalId);
 
   const result = await db.runTransaction(async (tx) => {
-    const [terminalSnap, ownerSnap, installationSnap, handoffRequestsSnap] = await Promise.all([
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
       tx.get(terminalRef),
       tx.get(ownerRef),
       tx.get(installationRef),
-      tx.get(handoffRequestsQuery),
     ]);
 
     const ownsTerminal = ownerSnap.exists &&
@@ -725,25 +753,16 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
       });
       // A recipient can cancel only its own pending/approved handoffs; it must
       // not revoke the shared terminal's reception approval for other devices.
-      handoffRequestsSnap.docs
-        .filter((request) =>
-          request.get("requesterUid") === uid &&
-          (request.get("status") === "pending" || request.get("status") === "approved"))
-        .forEach((request) => {
-          tx.update(request.ref, {
-            status: "cancelled",
-            cancelledAt: FieldValue.serverTimestamp(),
-            cancelledByUid: uid,
-          });
-        });
-      return { terminalId, receptionApproved: false, released: true };
+      return { terminalId, receptionApproved: false, released: true, ownerRelease: false };
     }
 
     const role = terminalSnap.get("role");
     const managementApproved = terminalSnap.get("managementApproved") === true;
     const now = new Date().toISOString();
+    const nextVersion = readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion")) + 1;
     const patch: Record<string, unknown> = {
       receptionApproved: false,
+      receptionApprovalVersion: nextVersion,
       approved: managementApproved,
       mode: "停止",
       desiredMode: "停止",
@@ -754,20 +773,28 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     };
     if (role === "both" && managementApproved) patch.role = "management";
     tx.update(terminalRef, patch);
-    // Revoke the terminal's reception permission and cancel every outstanding
-    // handoff atomically, so quick re-approval cannot revive a stale approval.
-    handoffRequestsSnap.docs
-      .filter((request) => request.get("status") === "pending" || request.get("status") === "approved")
-      .forEach((request) => {
-        tx.update(request.ref, {
-          status: "cancelled",
-          cancelledAt: FieldValue.serverTimestamp(),
-          cancelledByUid: uid,
-        });
-      });
-    return { terminalId, receptionApproved: false, released: true };
+    // Incrementing the generation immediately invalidates all prior requests.
+    return { terminalId, receptionApproved: false, released: true,
+      ownerRelease: true, nextReceptionApprovalVersion: nextVersion };
   });
 
+  const requests = await handoffRequestsQuery.get();
+  const staleRequests = requests.docs.filter((request) => {
+    const status = request.get("status");
+    return (status === "pending" || status === "approved") &&
+      (request.get("requesterUid") === uid ||
+       ("nextReceptionApprovalVersion" in result &&
+        readReceptionApprovalVersion(request.get("receptionApprovalVersion")) !== result.nextReceptionApprovalVersion));
+  });
+  for (let i = 0; i < staleRequests.length; i += 400) {
+    const batch = db.batch();
+    staleRequests.slice(i, i + 400).forEach((request) => batch.update(request.ref, {
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledByUid: uid,
+    }));
+    await batch.commit();
+  }
   return result;
 });
 
