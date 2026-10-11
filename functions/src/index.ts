@@ -290,15 +290,19 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("invalid-argument", "自分自身は承認できません。");
   }
 
-  const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
+  const [managerSnap, managerOwnerSnap, managerInstallationSnap, targetSnap] = await Promise.all([
     db.doc("terminals/" + managerTerminalId).get(),
     db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminalInstallations/" + uid).get(),
     db.doc("terminals/" + targetTerminalId).get(),
   ]);
 
-  if (!managerSnap.exists || !managerOwnerSnap.exists ||
+  if (!managerSnap.exists || !managerOwnerSnap.exists || !managerInstallationSnap.exists ||
       managerOwnerSnap.get("enabled") !== true ||
       managerOwnerSnap.get("ownerUid") !== uid ||
+      managerInstallationSnap.get("authUid") !== uid ||
+      managerInstallationSnap.get("terminalId") !== managerTerminalId ||
+      managerInstallationSnap.get("approved") !== true ||
       managerSnap.get("approved") !== true ||
       managerSnap.get("managementApproved") !== true ||
       (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
@@ -332,13 +336,15 @@ export const approveTerminalRegistration = onCall(async (call) => {
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   const installationRef = db.doc("terminalInstallations/" + targetUid);
   await db.runTransaction(async (tx) => {
-    const [freshManager, freshManagerOwner, freshTarget, ownerSnap, installationSnap] = await Promise.all([
+    const [freshManager, freshManagerOwner, freshManagerInstallation, freshTarget, ownerSnap, installationSnap] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
+      tx.get(managerInstallationRef),
       tx.get(targetRef),
       tx.get(targetOwnerRef),
       tx.get(installationRef),
@@ -346,9 +352,12 @@ export const approveTerminalRegistration = onCall(async (call) => {
     // Revalidate the acting manager inside the same transaction as the approval.
     // A permission revocation or ownership change after the initial reads must
     // not allow a stale administrator session to approve another terminal.
-    if (!freshManager.exists || !freshManagerOwner.exists ||
+    if (!freshManager.exists || !freshManagerOwner.exists || !freshManagerInstallation.exists ||
         freshManagerOwner.get("enabled") !== true ||
         freshManagerOwner.get("ownerUid") !== uid ||
+        freshManagerInstallation.get("authUid") !== uid ||
+        freshManagerInstallation.get("terminalId") !== managerTerminalId ||
+        freshManagerInstallation.get("approved") !== true ||
         freshManager.get("approved") !== true ||
         freshManager.get("managementApproved") !== true ||
         (freshManager.get("role") !== "management" && freshManager.get("role") !== "both") ||
@@ -380,6 +389,12 @@ export const approveTerminalRegistration = onCall(async (call) => {
          installationSnap.get("authUid") !== targetUid ||
          installationSnap.get("approved") !== true)) {
       throw new HttpsError("already-exists", "この端末環境の登録情報が一致しないか、無効化されています。安全な再登録手続きが必要です。");
+    }
+    // An installation record without its trusted owner mapping is not sufficient
+    // proof of ownership. This is especially important for legacy data created
+    // while the live Firestore rules were permissive.
+    if (installationSnap.exists && !ownerSnap.exists) {
+      throw new HttpsError("failed-precondition", "端末の所有者情報を確認できません。信頼できる移行手続きが必要です。");
     }
 
     const patch: Record<string, any> = {
