@@ -17,38 +17,31 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
   const terminalId = getTerminalIdForRegistration();
-  // A browser that completed handoff must re-validate its server-issued installation
-  // record on every registration check, including after reload or app relaunch.
-  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
-    const serverStatus = await getTerminalInstallationStatus();
-    if (!serverStatus.approved || serverStatus.terminalId !== terminalId) return null;
+  const serverStatus = await getTerminalInstallationStatus();
+  if (serverStatus.approved && serverStatus.terminalId === terminalId) {
+    localStorage.setItem("qr-ticket-terminal-handoff-verified", "true");
     return {
       approved: true,
       status: serverStatus.status ?? "offline",
       name: serverStatus.name ?? "受付端末",
     };
   }
-  const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "terminals", terminalId));
-  if (!snapshot.exists()) return null;
-  const data = snapshot.data();
-  if (data.role !== "reception" && data.role !== "both") return null;
-  return {
-    approved: data.receptionApproved ?? data.approved === true,
-    status: data.status === "online" || data.status === "offline" ? data.status : "pending",
-    name: typeof data.name === "string" ? data.name : "受付端末",
-  };
+  if (serverStatus.status === "pending" && serverStatus.name) {
+    return { approved: false, status: "pending", name: serverStatus.name };
+  }
+  return null;
 }
 
 export async function resetReceptionTerminalRegistration(): Promise<void> {
-  await releaseOwnReceptionRegistration(getTerminalIdForRegistration());
+  const serverStatus = await getTerminalInstallationStatus();
+  if (serverStatus.approved && serverStatus.terminalId) {
+    await releaseOwnReceptionRegistration(serverStatus.terminalId);
+  }
   localStorage.removeItem("qr-ticket-terminal-handoff-verified");
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
   const terminalId = getTerminalIdForRegistration();
-  // 受付申請はサーバー側で未承認状態として登録する。
-  // 既存の管理権限・承認フラグをブラウザから変更しない。
   const { registerTerminalApplication } = await import("./terminalHandoff");
   await registerTerminalApplication(
     terminalId,
@@ -59,45 +52,21 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
-  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const status = await getTerminalInstallationStatus();
-        if (cancelled) return;
-        if (!status.approved || status.terminalId !== getTerminalIdForRegistration()) {
-          onChange(null);
-          return;
-        }
-        onChange({
-          approved: true,
-          status: status.status ?? "offline",
-          name: status.name ?? "受付端末",
-        });
-      } catch (error) {
-        if (!cancelled) onError(error);
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }
-
-  // Handoff installations cannot read another owner's terminal document directly.
-  // Their status is served by getTerminalInstallationStatus above.
-  const db = getFirebaseDb();
-  return onSnapshot(doc(db, "terminals", getTerminalIdForRegistration()), snapshot => {
-    if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
-    const data = snapshot.data();
-    onChange({
-      approved: data.receptionApproved ?? data.approved === true,
-      status: data.status === "online" || data.status === "offline" ? data.status : "pending",
-      name: typeof data.name === "string" ? data.name : "受付端末",
-    });
-  }, onError);
+  let cancelled = false;
+  const refresh = async () => {
+    try {
+      const value = await getTerminalRegistration();
+      if (!cancelled) onChange(value);
+    } catch (error) {
+      if (!cancelled) onError(error);
+    }
+  };
+  void refresh();
+  const interval = window.setInterval(() => void refresh(), 5000);
+  return () => {
+    cancelled = true;
+    window.clearInterval(interval);
+  };
 }
 
 function getTerminalIdForRegistration(): string {
