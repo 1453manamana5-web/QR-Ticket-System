@@ -4557,23 +4557,28 @@ body:has(.ticket-screen),
 @media(max-width:700px){.ai-lab-detail:has(.ai-report-content){width:calc(100vw - 24px);right:0;top:12px;bottom:auto;max-height:calc(100vh - 96px);padding:14px}.ai-lab-detail:has(.ai-report-content) .ai-report-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-lab-detail:has(.ai-report-content) .ai-report-panels{grid-template-columns:1fr}}
 
 
-/* Reveal the selected management screen from the sidebar item that opened it. */
+/* The content unfolds out of the sidebar seam like a split-open panel. */
 .management-main.page-opening {
-  transform-origin: var(--page-origin-x, 0px) var(--page-origin-y, 50%);
-  animation: sidebar-origin-reveal 620ms cubic-bezier(.18,.78,.2,1) both;
+  transform-origin: left center;
+  animation: sidebar-split-unfold 680ms cubic-bezier(.2,.82,.22,1) both;
   will-change: clip-path, opacity, transform;
+  backface-visibility: hidden;
 }
-@keyframes sidebar-origin-reveal {
+@keyframes sidebar-split-unfold {
   0% {
-    clip-path: circle(0 at var(--page-origin-x, 0px) var(--page-origin-y, 50%));
-    opacity: .42;
-    transform: translateX(-8px) scale(.992);
+    clip-path: inset(0 100% 0 0 round 18px);
+    opacity: .35;
+    transform: perspective(1200px) rotateY(-8deg) translateX(-18px) scaleX(.97);
   }
-  55% { opacity: 1; }
+  42% {
+    opacity: .9;
+    clip-path: inset(0 48% 0 0 round 12px);
+    transform: perspective(1200px) rotateY(-3deg) translateX(-5px) scaleX(.99);
+  }
   100% {
-    clip-path: circle(160% at var(--page-origin-x, 0px) var(--page-origin-y, 50%));
+    clip-path: inset(0 0 0 0 round 0);
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: perspective(1200px) rotateY(0) translateX(0) scaleX(1);
   }
 }
 @media (prefers-reduced-motion: reduce) {
