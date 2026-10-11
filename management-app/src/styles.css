@@ -4649,3 +4649,51 @@ body:has(.ticket-screen),
   width: 30px;
   height: 30px;
 }
+
+
+/* Normalize the two navigation entries reported as oversized. */
+.app-shell .sidebar nav button[data-nav-label="イベント管理"],
+.app-shell .sidebar nav button[data-nav-label="チケット管理"],
+.app-shell .sidebar nav button[data-nav-label="イベント管理"]:hover,
+.app-shell .sidebar nav button[data-nav-label="チケット管理"]:hover,
+.app-shell .sidebar nav button[data-nav-label="イベント管理"].active,
+.app-shell .sidebar nav button[data-nav-label="チケット管理"].active {
+  box-sizing: border-box !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  max-height: 52px !important;
+  font-size: 15px !important;
+  line-height: normal !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  transform: none !important;
+  scale: none !important;
+}
+.app-shell .sidebar nav button[data-nav-label="イベント管理"] .sidebar-item-icon,
+.app-shell .sidebar nav button[data-nav-label="チケット管理"] .sidebar-item-icon {
+  width: 30px !important;
+  height: 30px !important;
+  flex: 0 0 30px !important;
+}
+@media (max-width: 900px) {
+  .app-shell.sidebar-collapsed .sidebar nav button[data-nav-label="イベント管理"],
+  .app-shell.sidebar-collapsed .sidebar nav button[data-nav-label="チケット管理"] {
+    height: 46px !important;
+    min-height: 46px !important;
+    max-height: 46px !important;
+  }
+}
+@media (max-width: 560px) {
+  .app-shell .sidebar nav button[data-nav-label="イベント管理"],
+  .app-shell .sidebar nav button[data-nav-label="チケット管理"] {
+    height: 46px !important;
+    min-height: 46px !important;
+    max-height: 46px !important;
+  }
+  .app-shell .sidebar nav button[data-nav-label="イベント管理"] .sidebar-item-icon,
+  .app-shell .sidebar nav button[data-nav-label="チケット管理"] .sidebar-item-icon {
+    width: 23px !important;
+    height: 23px !important;
+    flex-basis: 23px !important;
+  }
+}
