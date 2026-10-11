@@ -18,19 +18,18 @@ export async function downloadCurrentFirebaseEventData(
   const db = getFirebaseDb();
   const snapshot = await getDocs(collection(db, "events"));
   const candidates = snapshot.docs
-    .map(item => item.data() as Event & { authToken?: unknown; updatedAt?: unknown })
+    .map(item => item.data() as Event & { authToken?: unknown; receptionTarget?: unknown })
     .filter(item =>
+      item.receptionTarget === true &&
       (item.eventStatus === "active" || item.eventStatus === "ready") &&
       typeof item.eventId === "string" &&
       typeof item.authToken === "string" &&
       item.authToken.length > 0
-    )
-    .sort((a, b) => {
-      const aTime = typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) : 0;
-      const bTime = typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) : 0;
-      return bTime - aTime;
-    });
+    );
 
+  // 管理アプリで明示的に公開対象に指定されたイベントだけを自動取得する。
+  // 対象が複数ある場合は誤配信を避けるため自動選択しない。
+  if (candidates.length !== 1) return null;
   const current = candidates[0];
   if (!current || typeof current.authToken !== "string") return null;
 
