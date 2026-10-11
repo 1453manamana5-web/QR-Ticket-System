@@ -109,11 +109,26 @@ service cloud.firestore {
       }
     }
 
-    // Event bundles are fetched by an opaque auth token. Authenticated clients may
-    // fetch a known bundle, but only approved management installations may publish
-    // or replace bundles. Do not allow collection listing from reception clients.
+    // Reception may fetch only the bundle whose token is still published by
+    // its active event. This prevents a known, stale bundle token from exposing
+    // old ticket lists after an event has been unpublished or replaced.
+    function activeReceptionBundle(authToken) {
+      return resource.data.authToken == authToken
+        && resource.data.event.eventId is string
+        && exists(/databases/$(database)/documents/events/$(resource.data.event.eventId))
+        && get(/databases/$(database)/documents/events/$(resource.data.event.eventId)).data.authToken == authToken
+        && get(/databases/$(database)/documents/events/$(resource.data.event.eventId)).data.receptionTarget == true
+        && (
+          !get(/databases/$(database)/documents/events/$(resource.data.event.eventId)).data.keys().hasAny(["eventStatus"])
+          || get(/databases/$(database)/documents/events/$(resource.data.event.eventId)).data.eventStatus != "finished"
+        );
+    }
+
+    // Management can inspect bundles; reception can get only the active bundle
+    // explicitly selected by the server-published event metadata.
     match /eventBundles/{authToken} {
-      allow get: if approvedManagementTerminal() || approvedReceptionTerminal();
+      allow get: if approvedManagementTerminal()
+        || (approvedReceptionTerminal() && activeReceptionBundle(authToken));
       allow list: if approvedManagementTerminal();
       allow create, update, delete: if approvedManagementTerminal();
     }

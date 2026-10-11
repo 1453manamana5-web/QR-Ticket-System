@@ -154,6 +154,10 @@ test("approved management installations can write event and ticket data", async 
 
 test("only approved terminals can fetch event bundles and management terminals can publish", async () => {
   await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "events", "event-1"), {
+      eventId: "event-1", eventName: "公開中イベント", eventStatus: "ready",
+      dataVersion: 1, authToken: "opaque-token-1", receptionTarget: true,
+    });
     await setDoc(doc(context.firestore(), "eventBundles", "opaque-token-1"), {
       authToken: "opaque-token-1",
       event: { eventId: "event-1" },
@@ -187,6 +191,13 @@ test("only approved terminals can fetch event bundles and management terminals c
 
   const receptionDb = env.authenticatedContext("reception-user").firestore();
   await assertSucceeds(getDoc(doc(receptionDb, "eventBundles", "opaque-token-1")));
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "events", "event-1"), {
+      eventId: "event-1", eventName: "終了イベント", eventStatus: "finished",
+      dataVersion: 1, authToken: "opaque-token-1", receptionTarget: false,
+    });
+  });
+  await assertFails(getDoc(doc(receptionDb, "eventBundles", "opaque-token-1")));
   await assertFails(setDoc(doc(receptionDb, "eventBundles", "opaque-token-2"), {
     authToken: "opaque-token-2", event: { eventId: "event-2" }, tickets: [],
   }));
