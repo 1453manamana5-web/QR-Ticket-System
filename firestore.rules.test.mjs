@@ -49,6 +49,9 @@ test("approved reception installations can read event metadata but not ticket do
       terminalId: "T-RECEPTION-READ", approved: true, managementApproved: false,
       receptionApproved: true, role: "reception", requestedByUid: "reception-reader",
     });
+    await setDoc(doc(db, "terminalOwners", "T-RECEPTION-READ"), {
+      terminalId: "T-RECEPTION-READ", ownerUid: "reception-reader", enabled: true,
+    });
     await setDoc(doc(db, "events", "event-1"), { eventId: "event-1" });
     await setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), {
       ticketId: "ticket-1", eventId: "event-1", currentStatus: "unused",
@@ -140,6 +143,9 @@ test("only approved terminals can fetch event bundles and management terminals c
     await setDoc(doc(db, "terminals", "T-BUNDLE-RECEPTION"), {
       terminalId: "T-BUNDLE-RECEPTION", approved: true, managementApproved: false,
       receptionApproved: true, role: "reception",
+    });
+    await setDoc(doc(db, "terminalOwners", "T-BUNDLE-RECEPTION"), {
+      terminalId: "T-BUNDLE-RECEPTION", ownerUid: "reception-user", enabled: true,
     });
     await setDoc(doc(db, "terminalInstallations", "bundle-manager"), {
       terminalId: "T-BUNDLE-MANAGER", authUid: "bundle-manager", approved: true,
