@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,type ReceptionErrorCategory} from "./localDb";
+import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord,syncReceptionErrorLog} from "./receptionSync";
 
