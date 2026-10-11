@@ -1,8 +1,19 @@
 import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
+import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
 
+
+
+export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
+  const db = getFirebaseDb();
+  // エラー記録にはチケット番号やQRの生データを含めず、種類と発生状況だけを保存する。
+  await setDoc(doc(db, "receptionErrors", log.errorId), {
+    ...log,
+    syncedAt: new Date().toISOString(),
+  });
+}
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
   const db = getFirebaseDb();
