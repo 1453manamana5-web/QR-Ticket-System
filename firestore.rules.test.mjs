@@ -61,7 +61,7 @@ test("approved reception installations can read event metadata but not ticket do
   await assertSucceeds(getDoc(doc(db, "events", "event-1")));
   await assertFails(getDocs(collection(db, "events")));
   await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
-  await assertSucceeds(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
+  await assertFails(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
   await assertFails(getDoc(doc(db, "terminals", "T-OTHER")));
   await env.withSecurityRulesDisabled(async context => {
     const trustedDb = context.firestore();
