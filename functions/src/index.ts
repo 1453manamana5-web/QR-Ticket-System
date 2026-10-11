@@ -221,8 +221,10 @@ export const completeTerminalHandoff = onCall(async (call) => {
     if (requestSnap.get("decidedByUid") !== ownerSnap.get("ownerUid")) {
       throw new HttpsError("failed-precondition", "承認後に端末の所有者情報が変更されています。もう一度申請してください。");
     }
-    if (installationSnap.exists && installationSnap.get("terminalId") !== id) {
-      throw new HttpsError("failed-precondition", "この環境は別の端末に登録済みです。");
+    if (installationSnap.exists &&
+        (installationSnap.get("terminalId") !== id ||
+         installationSnap.get("authUid") !== requesterUid)) {
+      throw new HttpsError("failed-precondition", "この環境の登録情報が一致しません。管理者による確認が必要です。");
     }
 
     tx.set(installationRef, {
