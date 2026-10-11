@@ -2,7 +2,10 @@ import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
 /**
- * Trusted migration for existing approved management terminals.
+ * Trusted migration for existing approved management and reception terminals.
+ *
+ * Include every existing terminal that must remain authorized after the rules switch,
+ * including reception-only terminals. Use only independently verified owner UIDs.
  *
  * Required environment:
  *   GCLOUD_PROJECT=<exact Firebase project ID>
@@ -10,8 +13,10 @@ import { getFirestore } from "firebase-admin/firestore";
  * Optional:
  *   MIGRATION_DRY_RUN=true   validates mappings and prints the changes without writing.
  *
- * The owner UID must be independently verified from the intended management
- * installation. Never accept this mapping from a browser or user-supplied form.
+ * The owner UID must be independently verified as the Firebase Auth UID of the
+ * terminal's original registered installation. Do not trust requestedByUid or
+ * other Firestore fields alone: the live database rules may have allowed clients
+ * to edit them. Never accept this mapping from a browser or user-supplied form.
  */
 async function main() {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
@@ -62,11 +67,17 @@ async function main() {
       const data = terminal.data()!;
       // Match the Firestore Rules predicate exactly: migration must not
       // grant a trusted installation to a terminal that the rules would reject.
-      const approvedManagement = data.approved === true &&
-        data.managementApproved === true &&
-        (data.role === "management" || data.role === "both");
-      if (!approvedManagement) {
-        throw new Error(`Terminal ${entry.terminalId} is not an approved management terminal.`);
+      const role = data.role;
+      const approvedRole =
+        data.approved === true &&
+        ((role === "management" || role === "both") && data.managementApproved === true ||
+         (role === "reception" || role === "both") &&
+           (data.receptionApproved === true ||
+            (data.receptionApproved === undefined && data.approved === true)));
+      if (!approvedRole) {
+        throw new Error(
+          `Terminal ${entry.terminalId} is not an approved terminal with a supported role.`,
+        );
       }
 
       if (owner.exists) {
