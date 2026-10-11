@@ -52,13 +52,11 @@ async function logReceptionError(
     console.error("受付エラーの端末内保存に失敗しました",reason);
   }
   if(navigator.onLine){
-    void syncReceptionErrorLog(log).catch(async reason=>{
-      console.error("受付エラーのFirebase同期に失敗しました",reason);
-      try{
-        await saveReceptionErrorLog({...log,errorId:crypto.randomUUID(),category:"sync_failed",timestamp:new Date().toISOString()});
-      }catch(localReason){
-        console.error("同期失敗ログの端末内保存にも失敗しました",localReason);
-      }
+    void syncReceptionErrorLog(log).then(
+      ()=>markReceptionErrorLogSynced(log.errorId)
+    ).catch(reason=>{
+      // 未同期ログは端末内に残り、次の定期同期で再送される。
+      console.error("受付エラーのFirebase同期に失敗しました。後で再試行します",reason);
     });
   }
 }
