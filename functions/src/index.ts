@@ -214,6 +214,12 @@ export const completeTerminalHandoff = onCall(async (call) => {
         !terminalAllowsReception || !ownerSnap.exists || ownerSnap.get("enabled") !== true) {
       throw new HttpsError("failed-precondition", "端末の受付承認が無効になったため、引き継ぎを完了できません。");
     }
+    // Approval is valid only while the same owner who approved the request
+    // still owns the terminal. This closes the gap if ownership changes between
+    // the approval and completion steps.
+    if (requestSnap.get("decidedByUid") !== ownerSnap.get("ownerUid")) {
+      throw new HttpsError("failed-precondition", "承認後に端末の所有者情報が変更されています。もう一度申請してください。");
+    }
     if (installationSnap.exists && installationSnap.get("terminalId") !== id) {
       throw new HttpsError("failed-precondition", "この環境は別の端末に登録済みです。");
     }
