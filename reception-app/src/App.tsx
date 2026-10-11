@@ -135,6 +135,17 @@ export default function App(){
         setScreen("ready");
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
+        if(cancelled)return;
+        const code=reason instanceof Error?reason.message:"";
+        if(code==="NO_PUBLISHED_EVENT"){
+          setError("Firebase上に受付対象の公開イベントが見つかりません。管理アプリでイベントを公開し、受付対象に設定してください。");
+        }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
+          setError("受付対象の公開イベントが複数あります。管理アプリで受付対象を1件だけにしてください。");
+        }else if(code==="INVALID_PUBLISHED_EVENT"){
+          setError("公開イベントの情報が不足しています。管理アプリからイベントを再公開してください。");
+        }else{
+          setError("Firebaseからイベントを取得できませんでした。通信状態・Firestoreルール・イベントデータを確認してください。");
+        }
       }
     };
 
