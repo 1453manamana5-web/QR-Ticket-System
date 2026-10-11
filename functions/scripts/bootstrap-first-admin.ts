@@ -45,6 +45,7 @@ async function main() {
         terminalData.requestedByUid === ownerUid &&
         terminalData.requestedRole === "management" &&
         application.exists &&
+        application.get("terminalId") === terminalId &&
         application.get("requestedByUid") === ownerUid &&
         application.get("requestedRole") === "management" &&
         application.get("status") === "pending";
