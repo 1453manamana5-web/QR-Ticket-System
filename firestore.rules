@@ -77,7 +77,8 @@ service cloud.firestore {
     // Event and ticket reads are available to authenticated clients. Direct
     // management writes require a trusted management-terminal installation.
     match /events/{eventId} {
-      allow read: if approvedManagementTerminal() || approvedReceptionTerminal();
+      allow get: if approvedManagementTerminal() || approvedReceptionTerminal();
+      allow list: if approvedManagementTerminal();
       allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
