@@ -854,8 +854,11 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
     const managementActive = existing.approved === true &&
       existing.managementApproved === true &&
       (role === "management" || role === "both");
-    const receptionActive = existing.approved === true &&
-      existing.receptionApproved === true &&
+    // Match the legacy-compatible reception rule and recordReception check:
+    // older approved terminals may not have the receptionApproved field yet.
+    const receptionApproved = existing.receptionApproved === true ||
+      (existing.receptionApproved === undefined && existing.approved === true);
+    const receptionActive = existing.approved === true && receptionApproved &&
       (role === "reception" || role === "both");
     if (!terminalSnap.exists ||
         !((ownerMatches && (managementActive || receptionActive)) ||
