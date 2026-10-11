@@ -3972,10 +3972,10 @@ body:has(.ticket-screen),
   -webkit-user-select:none;
 }
 .app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button.nav-swipe-preview{
-  background:linear-gradient(135deg,rgba(255,255,255,.42),rgba(255,255,255,.20));
-  border-color:rgba(255,255,255,.82);
-  box-shadow:0 10px 26px rgba(18,30,62,.16),inset 0 1px 0 rgba(255,255,255,.88);
-  transform:translateX(3px) scale(1.015);
+  background:linear-gradient(135deg,rgba(255,255,255,.30),rgba(255,255,255,.14));
+  border-color:rgba(255,255,255,.58);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.48);
+  transform:none;
 }
 .app-shell.liquid-glass-enabled .sidebar-nav-swipe-enabled .sidebar-group-items button{
   transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
