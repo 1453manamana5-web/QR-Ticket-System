@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc } from "firebase/firestore";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -64,13 +64,8 @@ export async function publishEventBundle(
     publishedAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, "events", event.eventId), {
-    ...publishedEvent,
-    authToken,
-    receptionTarget: publishedEvent.eventStatus !== "finished",
-    updatedAt: bundle.publishedAt,
-  });
-
+  // 先にチケットを含む公開バンドルを保存し、その後イベント一覧のメタデータを更新する。
+  // merge:true にして、同時に保存される他のイベント管理情報を消さない。
   await setDoc(doc(db, "eventBundles", authToken), {
     event: publishedEvent,
     settings,
@@ -79,6 +74,25 @@ export async function publishEventBundle(
     authToken,
     publishedAt: bundle.publishedAt,
   });
+
+  const eventRef = doc(db, "events", event.eventId);
+  await setDoc(eventRef, {
+    ...publishedEvent,
+    authToken,
+    receptionTarget: publishedEvent.eventStatus !== "finished",
+    updatedAt: bundle.publishedAt,
+  }, { merge: true });
+
+  // 成功表示だけ先行しないよう、サーバー側に公開情報が残ったことを確認する。
+  const savedEvent = await getDocFromServer(eventRef);
+  const savedData = savedEvent.data();
+  if (
+    !savedEvent.exists() ||
+    savedData?.eventId !== event.eventId ||
+    savedData?.authToken !== authToken
+  ) {
+    throw new Error("EVENT_PUBLISH_VERIFICATION_FAILED");
+  }
 
   return bundle;
 }
