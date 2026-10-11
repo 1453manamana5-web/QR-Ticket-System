@@ -86,6 +86,9 @@ test("approved management installations can write event and ticket data", async 
       terminalId: "T-MANAGEMENT-01", approved: true, managementApproved: true,
       receptionApproved: false, role: "management",
     });
+    await setDoc(doc(db, "terminalOwners", "T-MANAGEMENT-01"), {
+      terminalId: "T-MANAGEMENT-01", ownerUid: "management-user", enabled: true,
+    });
   });
   const db = env.authenticatedContext("management-user").firestore();
   await assertSucceeds(setDoc(doc(db, "events", "event-1"), { eventId: "event-1" }));
@@ -109,6 +112,9 @@ test("event bundles can be fetched by token but only approved management install
     await setDoc(doc(db, "terminals", "T-BUNDLE-MANAGER"), {
       terminalId: "T-BUNDLE-MANAGER", approved: true, managementApproved: true,
       role: "management",
+    });
+    await setDoc(doc(db, "terminalOwners", "T-BUNDLE-MANAGER"), {
+      terminalId: "T-BUNDLE-MANAGER", ownerUid: "bundle-manager", enabled: true,
     });
   });
 
