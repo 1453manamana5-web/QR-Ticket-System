@@ -712,10 +712,14 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
 
     const role = terminalSnap.get("role");
     const managementApproved = terminalSnap.get("managementApproved") === true;
+    const now = new Date().toISOString();
     const patch: Record<string, unknown> = {
       receptionApproved: false,
       approved: managementApproved,
-      updatedAt: new Date().toISOString(),
+      mode: "停止",
+      desiredMode: "停止",
+      desiredModeUpdatedAt: now,
+      updatedAt: now,
       approvalUpdatedAt: FieldValue.serverTimestamp(),
       approvalUpdatedByUid: uid,
     };
