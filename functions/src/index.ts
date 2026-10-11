@@ -655,14 +655,15 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   // Cancel any older handoff approvals for this installation/terminal. The
   // releasedAt check in completeTerminalHandoff also closes the race with cleanup.
   if (result.released) {
-    const requests = await db.collection("terminalHandoffRequests")
+    const terminalRequests = await db.collection("terminalHandoffRequests")
       .where("terminalId", "==", terminalId)
-      .where("requesterUid", "==", uid)
-      .where("status", "in", ["pending", "approved"])
       .get();
-    for (let i = 0; i < requests.docs.length; i += 400) {
+    const staleRequests = terminalRequests.docs.filter((doc) =>
+      doc.get("requesterUid") === uid &&
+      (doc.get("status") === "pending" || doc.get("status") === "approved"));
+    for (let i = 0; i < staleRequests.length; i += 400) {
       const cleanup = db.batch();
-      requests.docs.slice(i, i + 400).forEach((doc) => cleanup.update(doc.ref, {
+      staleRequests.slice(i, i + 400).forEach((doc) => cleanup.update(doc.ref, {
         status: "cancelled",
         cancelledAt: FieldValue.serverTimestamp(),
       }));
