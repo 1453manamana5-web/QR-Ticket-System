@@ -128,7 +128,7 @@ export default function App(){
           eventId:localEvent.event.eventId,
           eventName:localEvent.event.eventName,
           dataVersion:localEvent.event.dataVersion,
-          authToken:"firebase"
+          authToken:downloaded.authPayload.authToken
         });
         setError("");
         setResult(null);
