@@ -4731,6 +4731,8 @@ body:has(.ticket-screen),
 }
 @media (max-width: 560px) {
   .app-shell {
+    display: flex;
+    flex-direction: column;
     height: 100vh;
     min-height: 0;
     overflow: hidden;
@@ -4738,13 +4740,17 @@ body:has(.ticket-screen),
   .app-shell .sidebar {
     position: relative;
     top: auto;
+    width: 100%;
     height: auto;
     min-height: 0;
+    flex: 0 0 auto;
     overflow: visible;
   }
   .app-shell .management-main {
-    height: calc(100vh - var(--mobile-sidebar-height, 150px));
+    width: 100%;
+    height: auto;
     min-height: 0;
+    flex: 1 1 auto;
     overflow-y: auto;
     margin: 0;
   }
