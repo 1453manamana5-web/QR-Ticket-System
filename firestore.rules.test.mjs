@@ -94,8 +94,19 @@ test("legacy reception terminals without receptionApproved can fetch bundles but
     await setDoc(doc(db, "terminals", "T-LEGACY-RECEPTION"), {
       terminalId: "T-LEGACY-RECEPTION", approved: true, role: "reception",
     });
-    await setDoc(doc(db, "events", "event-legacy"), { eventId: "event-legacy" });
-    await setDoc(doc(db, "eventBundles", "legacy-token"), { authToken: "legacy-token", event: { eventId: "event-legacy" }, tickets: [] });
+    await setDoc(doc(db, "events", "event-legacy"), {
+      eventId: "event-legacy",
+      eventName: "旧形式の受付端末向け公開イベント",
+      eventStatus: "ready",
+      dataVersion: 1,
+      authToken: "legacy-token",
+      receptionTarget: true,
+    });
+    await setDoc(doc(db, "eventBundles", "legacy-token"), {
+      authToken: "legacy-token",
+      event: { eventId: "event-legacy" },
+      tickets: [],
+    });
   });
   const db = env.authenticatedContext("legacy-reception").firestore();
   await assertFails(getDoc(doc(db, "events", "event-legacy")));
