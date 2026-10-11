@@ -281,7 +281,9 @@ export const approveTerminalRegistration = onCall(async (call) => {
   if (!managerSnap.exists || !managerOwnerSnap.exists ||
       managerOwnerSnap.get("enabled") !== true ||
       managerOwnerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("approved") !== true ||
       managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
       (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
@@ -374,7 +376,9 @@ export const revokeTerminalReception = onCall(async (call) => {
   ]);
   if (!managerSnap.exists || !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("approved") !== true ||
       managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
       (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
@@ -416,7 +420,9 @@ export const deleteManagedTerminal = onCall(async (call) => {
   ]);
   if (!managerSnap.exists || !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      managerSnap.get("approved") !== true ||
       managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
       (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
@@ -611,7 +617,9 @@ export const setTerminalSubAdmin = onCall(async (call) => {
   ]);
   if (!managerSnap.exists || !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      managerSnap.get("admin") !== true || managerSnap.get("managementApproved") !== true) {
+      managerSnap.get("admin") !== true || managerSnap.get("approved") !== true ||
+      managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both")) {
     throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
   }
   if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
@@ -782,7 +790,9 @@ export const updateManagedTerminalName = onCall(async (call) => {
   const [terminalSnap, ownerSnap] = await Promise.all([terminalRef.get(), ownerRef.get()]);
   if (!terminalSnap.exists || !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      terminalSnap.get("managementApproved") !== true) {
+      terminalSnap.get("approved") !== true ||
+      terminalSnap.get("managementApproved") !== true ||
+      (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
     throw new HttpsError("permission-denied", "この管理端末の名前を変更する権限がありません。");
   }
   await terminalRef.update({ name, updatedAt: new Date().toISOString() });
