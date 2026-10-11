@@ -501,7 +501,22 @@ export const deleteManagedTerminal = onCall(async (call) => {
     }
 
     tx.delete(targetRef);
-    if (targetOwnerSnap.exists) tx.delete(targetOwnerRef);
+    // Keep a disabled owner tombstone after deletion. Removing the mapping
+    // entirely would let a stale client reuse the same terminal ID and could
+    // make an installation left behind by interrupted cleanup valid again.
+    const previousOwnerUid = targetOwnerSnap.exists
+      ? targetOwnerSnap.get("ownerUid")
+      : targetSnap.get("requestedByUid");
+    tx.set(targetOwnerRef, {
+      terminalId: targetTerminalId,
+      ...(typeof previousOwnerUid === "string" && previousOwnerUid.length > 0
+        ? { ownerUid: previousOwnerUid }
+        : {}),
+      enabled: false,
+      deletedAt: FieldValue.serverTimestamp(),
+      deletedByUid: uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
     return true;
   });
   if (!deleted) return { terminalId: targetTerminalId, deleted: false };
@@ -601,8 +616,10 @@ export const registerTerminalApplication = onCall(async (call) => {
   const ownerRef = db.doc("terminalOwners/" + terminalId);
   await db.runTransaction(async (tx) => {
     const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
-    if (ownerSnap.exists && ownerSnap.get("enabled") === true &&
-        ownerSnap.get("ownerUid") !== uid) {
+    if (ownerSnap.exists && ownerSnap.get("enabled") !== true) {
+      throw new HttpsError("already-exists", "この端末IDには無効化された所有者情報が残っています。安全な所有権の引き継ぎ手続きが必要です。");
+    }
+    if (ownerSnap.exists && ownerSnap.get("ownerUid") !== uid) {
       throw new HttpsError("already-exists", "この端末IDは別の登録に使用されています。");
     }
     if (terminalSnap.exists) {
