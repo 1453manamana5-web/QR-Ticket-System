@@ -99,9 +99,11 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
   }
 }
 
-export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
+export async function saveTerminal(_terminal: TerminalRecord): Promise<void> {
+  // Terminal documents are server-write-only under firestore.rules. Keep this
+  // legacy export fail-closed so a future caller cannot silently attempt a
+  // client-side write that bypasses approval and ownership checks.
+  throw new Error("TERMINAL_WRITES_REQUIRE_SERVER_AUTHORIZATION");
 }
 
 
