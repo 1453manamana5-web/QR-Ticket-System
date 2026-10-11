@@ -337,7 +337,7 @@ export const approveTerminalRegistration = onCall(async (call) => {
       applicationSnap.get("terminalId") !== targetTerminalId ||
       applicationSnap.get("status") !== "pending" ||
       applicationSnap.get("requestedByUid") !== targetSnap.get("requestedByUid") ||
-      applicationSnap.get("requestedRole") !== role) {
+      applicationSnap.get("requestedRole") !== targetSnap.get("requestedRole")) {
     throw new HttpsError("failed-precondition", "信頼できる申請情報がありません。端末から申請をやり直してください。");
   }
   const targetUid = applicationSnap.get("requestedByUid");
@@ -383,7 +383,7 @@ export const approveTerminalRegistration = onCall(async (call) => {
         !freshApplication.exists ||
         freshApplication.get("terminalId") !== targetTerminalId ||
         freshApplication.get("requestedByUid") !== targetUid ||
-        freshApplication.get("requestedRole") !== freshTarget.get("role") ||
+        freshApplication.get("requestedRole") !== freshTarget.get("requestedRole") ||
         freshApplication.get("status") !== "pending") {
       throw new HttpsError("failed-precondition", "申請内容が変更されています。端末から再申請してください。");
     }
