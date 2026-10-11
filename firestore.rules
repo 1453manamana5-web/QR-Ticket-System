@@ -128,12 +128,9 @@ service cloud.firestore {
     // callable Functions so approval, ownership, heartbeat and role fields cannot
     // be forged by a signed-in browser.
     match /terminals/{terminalId} {
-      // Management may inspect registered terminals. Other clients may only
-      // read the application record created for their own authenticated UID.
-      // This avoids exposing other terminals' names, status, and control fields.
-      allow get: if approvedManagementTerminal()
-        || (signedIn() && resource.data.requestedByUid == request.auth.uid);
-      allow list: if approvedManagementTerminal();
+      // All terminal records are server-managed. Clients use callable status
+      // endpoints rather than reading terminal identity/control documents directly.
+      allow get, list: if approvedManagementTerminal();
       allow create, update, delete: if false;
     }
 
