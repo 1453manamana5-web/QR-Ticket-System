@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
+import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -184,6 +184,17 @@ export default function App() {
   const [newStartTime, setNewStartTime] = useState("10:00");
   const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
+  useEffect(() => {
+    if (!event.eventId) {
+      setBundle(null);
+      return;
+    }
+    let cancelled = false;
+    void loadPublishedEventBundle(event.eventId).then(savedBundle => {
+      if (!cancelled) setBundle(savedBundle);
+    }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
+    return () => { cancelled = true; };
+  }, [event.eventId]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
   const [historicalAnalysisData, setHistoricalAnalysisData] = useState<{
