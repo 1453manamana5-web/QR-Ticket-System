@@ -51,8 +51,12 @@ export async function publishEventBundle(
   await Promise.all(existingEvents.docs
     .filter(item => item.id !== event.eventId && item.data().receptionTarget === true)
     .map(item => setDoc(item.ref, { receptionTarget: false, updatedAt: new Date().toISOString() }, { merge: true })));
+  const publishedEvent: Event = {
+    ...event,
+    eventStatus: event.eventStatus === "finished" ? "finished" : "ready",
+  };
   const bundle: PublishedEventBundle = {
-    event,
+    event: publishedEvent,
     settings,
     tickets,
     ticketCount: tickets.length,
@@ -61,14 +65,14 @@ export async function publishEventBundle(
   };
 
   await setDoc(doc(db, "events", event.eventId), {
-    ...event,
+    ...publishedEvent,
     authToken,
-    receptionTarget: true,
+    receptionTarget: publishedEvent.eventStatus !== "finished",
     updatedAt: bundle.publishedAt,
   });
 
   await setDoc(doc(db, "eventBundles", authToken), {
-    event,
+    event: publishedEvent,
     settings,
     tickets,
     ticketCount: tickets.length,
