@@ -271,8 +271,6 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
   const uid = requireUid(call);
   const installation = await db.doc("terminalInstallations/" + uid).get();
   if (!installation.exists || installation.get("authUid") !== uid || installation.get("approved") !== true) {
-    // Pending applications are also returned to their own authenticated installation,
-    // so the registration screen can show "pending" without reading terminal documents.
     const applications = await db.collection("terminalApplications")
       .where("requestedByUid", "==", uid)
       .limit(5)
@@ -282,8 +280,9 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
       return {
         approved: false,
         terminalId: null,
-        name: typeof pending.get("name") === "string" ? pending.get("name") : "受付端末",
+        name: typeof pending.get("name") === "string" ? pending.get("name") : "端末",
         status: "pending",
+        role: pending.get("requestedRole") ?? null,
       };
     }
     return { approved: false, terminalId: null };
@@ -294,24 +293,33 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
     return { approved: false, terminalId: null };
   }
 
-  const owner = await db.doc("terminalOwners/" + terminalId).get();
-  const terminal = await db.doc("terminals/" + terminalId).get();
-  const terminalRole = terminal.get("role");
-  if (!owner.exists || owner.get("enabled") !== true || !terminal.exists ||
-      (terminalRole !== "reception" && terminalRole !== "both") ||
-      terminal.get("approved") !== true ||
-      !(terminal.get("receptionApproved") === true || (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true))) {
+  const [owner, terminal] = await Promise.all([
+    db.doc("terminalOwners/" + terminalId).get(),
+    db.doc("terminals/" + terminalId).get(),
+  ]);
+  if (!owner.exists || owner.get("enabled") !== true || owner.get("ownerUid") !== uid ||
+      !terminal.exists || terminal.get("approved") !== true) {
     return { approved: false, terminalId: null };
   }
 
+  const role = terminal.get("role");
+  const managementApproved = terminal.get("managementApproved") === true ||
+    (terminal.get("managementApproved") === undefined && terminal.get("approved") === true &&
+      (role === "management" || role === "both"));
+  const receptionApproved = terminal.get("receptionApproved") === true ||
+    (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true &&
+      (role === "reception" || role === "both"));
   const status = terminal.get("status");
   const desiredMode = terminal.get("desiredMode");
   const desiredModeUpdatedAt = terminal.get("desiredModeUpdatedAt");
   return {
     approved: true,
     terminalId,
-    name: typeof terminal.get("name") === "string" ? terminal.get("name") : "受付端末",
+    name: typeof terminal.get("name") === "string" ? terminal.get("name") : "端末",
     status: status === "online" || status === "offline" ? status : "pending",
+    role: role === "management" || role === "reception" || role === "both" ? role : null,
+    managementApproved,
+    receptionApproved,
     desiredMode: desiredMode === "入口受付" || desiredMode === "出口受付" || desiredMode === "停止" ? desiredMode : null,
     desiredModeUpdatedAt: typeof desiredModeUpdatedAt === "string" ? desiredModeUpdatedAt : null,
   };
