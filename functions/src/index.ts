@@ -271,6 +271,21 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
   const uid = requireUid(call);
   const installation = await db.doc("terminalInstallations/" + uid).get();
   if (!installation.exists || installation.get("authUid") !== uid || installation.get("approved") !== true) {
+    // Pending applications are also returned to their own authenticated installation,
+    // so the registration screen can show "pending" without reading terminal documents.
+    const applications = await db.collection("terminalApplications")
+      .where("requestedByUid", "==", uid)
+      .limit(5)
+      .get();
+    const pending = applications.docs.find((item) => item.get("status") === "pending");
+    if (pending) {
+      return {
+        approved: false,
+        terminalId: null,
+        name: typeof pending.get("name") === "string" ? pending.get("name") : "受付端末",
+        status: "pending",
+      };
+    }
     return { approved: false, terminalId: null };
   }
 
