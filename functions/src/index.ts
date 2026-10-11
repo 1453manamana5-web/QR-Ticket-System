@@ -181,10 +181,13 @@ export const decideTerminalHandoff = onCall(async (call) => {
     }
 
     const expiresAt = requestSnap.get("expiresAt");
+    const createdAt = requestSnap.get("createdAt");
     if (
       requestSnap.get("status") !== "pending" ||
+      !(createdAt instanceof Timestamp) ||
       !(expiresAt instanceof Timestamp) ||
-      expiresAt.toMillis() <= Date.now()
+      expiresAt.toMillis() <= Date.now() ||
+      createdAt.toMillis() > Date.now()
     ) {
       throw new HttpsError("failed-precondition", "申請は処理済みか、有効期限が切れているか、申請情報が不正です。");
     }
@@ -216,9 +219,12 @@ export const completeTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
     }
     const expiresAt = requestSnap.get("expiresAt");
+    const createdAt = requestSnap.get("createdAt");
     if (
       requestSnap.get("requesterUid") !== requesterUid ||
       requestSnap.get("status") !== "approved" ||
+      !(createdAt instanceof Timestamp) ||
+      createdAt.toMillis() > Date.now() ||
       !(expiresAt instanceof Timestamp) ||
       expiresAt.toMillis() <= Date.now()
     ) {
@@ -258,8 +264,9 @@ export const completeTerminalHandoff = onCall(async (call) => {
     const releasedAt = installationSnap.get("releasedAt");
     const requestCreatedAt = requestSnap.get("createdAt");
     if (installationSnap.exists && installationSnap.get("approved") === false &&
-        releasedAt instanceof Timestamp && requestCreatedAt instanceof Timestamp &&
-        releasedAt.toMillis() >= requestCreatedAt.toMillis()) {
+        releasedAt instanceof Timestamp &&
+        (!(requestCreatedAt instanceof Timestamp) ||
+         releasedAt.toMillis() >= requestCreatedAt.toMillis())) {
       throw new HttpsError("failed-precondition", "受付登録の解除後に新しく申請してください。");
     }
 
