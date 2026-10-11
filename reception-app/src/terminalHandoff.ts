@@ -43,9 +43,18 @@ export async function completeTerminalHandoff(requestId: string): Promise<{ term
 
 
 /** Reads the server-owned installation record; a terminal ID alone is not approval. */
-export async function getTerminalInstallationStatus(): Promise<{ approved: boolean; terminalId: string | null }> {
+export type TerminalInstallationStatus = {
+  approved: boolean;
+  terminalId: string | null;
+  name?: string;
+  status?: "online" | "offline" | "pending";
+  desiredMode?: "入口受付" | "出口受付" | "停止" | null;
+  desiredModeUpdatedAt?: string | null;
+};
+
+export async function getTerminalInstallationStatus(): Promise<TerminalInstallationStatus> {
   await ensureInstallationAuth();
-  const callable = httpsCallable<void, { approved: boolean; terminalId: string | null }>(
+  const callable = httpsCallable<void, TerminalInstallationStatus>(
     functionsClient(),
     "getTerminalInstallationStatus",
   );
