@@ -27,33 +27,70 @@ async function main() {
   const installationRef = db.doc("terminalInstallations/" + ownerUid);
 
   await db.runTransaction(async tx => {
-    const [terminal, owner, installation] = await Promise.all([
-      tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef),
+    const applicationRef = db.doc("terminalApplications/" + terminalId);
+    const [terminal, owner, installation, application] = await Promise.all([
+      tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef), tx.get(applicationRef),
     ]);
-    if (terminal.exists) throw new Error("Terminal already exists; refusing to overwrite it.");
     if (owner.exists) throw new Error("Owner mapping already exists; refusing to overwrite it.");
     if (installation.exists) {
       throw new Error("Installation mapping already exists; refusing to overwrite it.");
     }
-    tx.create(terminalRef, {
-      terminalId,
-      name: terminalName || "管理端末",
-      type: "Web / iPad",
-      role: "management",
-      mode: "停止",
-      desiredMode: "停止",
-      status: "online",
-      approved: true,
-      managementApproved: true,
-      receptionApproved: false,
-      admin: true,
-      subAdmin: false,
-      lastSeen: new Date().toISOString(),
-      networkMbps: null,
-      battery: null,
-      createdByTrustedBootstrap: true,
-      createdAt: new Date().toISOString(),
-    });
+
+    const terminalData = terminal.exists ? terminal.data() ?? {} : null;
+    if (terminalData) {
+      const matchingPendingApplication =
+        terminalData.approved === false &&
+        terminalData.managementApproved !== true &&
+        terminalData.requestedByUid === ownerUid &&
+        terminalData.requestedRole === "management" &&
+        application.exists &&
+        application.get("requestedByUid") === ownerUid &&
+        application.get("requestedRole") === "management" &&
+        application.get("status") === "pending";
+      if (!matchingPendingApplication) {
+        throw new Error("Existing terminal is not the matching pending first-admin application; refusing to overwrite it.");
+      }
+      tx.update(terminalRef, {
+        name: terminalName || (typeof terminalData.name === "string" ? terminalData.name : "管理端末"),
+        type: "Web / iPad",
+        role: "management",
+        mode: "停止",
+        desiredMode: "停止",
+        status: "online",
+        approved: true,
+        managementApproved: true,
+        receptionApproved: false,
+        admin: true,
+        subAdmin: false,
+        createdByTrustedBootstrap: true,
+        bootstrappedAt: new Date().toISOString(),
+      });
+      tx.delete(applicationRef);
+    } else {
+      if (application.exists) {
+        throw new Error("A terminal application exists without its terminal document; review it manually.");
+      }
+      tx.create(terminalRef, {
+        terminalId,
+        name: terminalName || "管理端末",
+        type: "Web / iPad",
+        role: "management",
+        mode: "停止",
+        desiredMode: "停止",
+        status: "online",
+        approved: true,
+        managementApproved: true,
+        receptionApproved: false,
+        admin: true,
+        subAdmin: false,
+        lastSeen: new Date().toISOString(),
+        networkMbps: null,
+        battery: null,
+        createdByTrustedBootstrap: true,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     tx.create(ownerRef, {
       terminalId,
       ownerUid,
@@ -61,8 +98,6 @@ async function main() {
       migratedAt: new Date().toISOString(),
       migrationSource: "trusted-first-admin-bootstrap",
     });
-    // Firestore Rules use this trusted installation mapping to authorize
-    // management data writes from the first admin's authenticated browser.
     tx.create(installationRef, {
       terminalId,
       authUid: ownerUid,
@@ -70,7 +105,7 @@ async function main() {
       registrationApprovedAt: new Date().toISOString(),
       createdByTrustedBootstrap: true,
     });
-  });
+  });;
 
   process.stdout.write("First admin terminal and trusted owner mapping created. Keep this output in your admin audit log.\n");
 }
