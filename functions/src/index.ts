@@ -981,6 +981,58 @@ export const recordReception = onCall(async (call) => {
 });
 
 /** Update operational heartbeat fields without exposing terminal authorization fields. */
+
+/** Store minimal reception error metadata through an approved installation. */
+export const recordReceptionError = onCall(async (call) => {
+  const uid = requireUid(call);
+  const input = call.data?.log;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new HttpsError("invalid-argument", "受付エラーログが正しくありません。");
+  }
+  const errorId = readId(input.errorId, "エラーID");
+  const eventId = readId(input.eventId, "イベントID");
+  const terminalId = readId(input.terminalId, "端末ID");
+  const categories = new Set([
+    "unknown_ticket", "invalid_ticket", "invalid_state", "save_failed",
+    "camera_failed", "event_load_failed", "sync_failed",
+  ]);
+  if (!categories.has(input.category) ||
+      (input.mode !== "entry" && input.mode !== "exit") ||
+      typeof input.timestamp !== "string" || !Number.isFinite(Date.parse(input.timestamp))) {
+    throw new HttpsError("invalid-argument", "受付エラーログの内容が正しくありません。");
+  }
+
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const errorRef = db.doc("receptionErrors/" + errorId);
+  await db.runTransaction(async (tx) => {
+    const [installationSnap, terminalSnap, ownerSnap, existingSnap] = await Promise.all([
+      tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(errorRef),
+    ]);
+    const authorized = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId &&
+      terminalSnap.exists &&
+      terminalSnap.get("approved") === true &&
+      (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both") &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
+      ownerSnap.exists && ownerSnap.get("enabled") === true;
+    if (!authorized) {
+      throw new HttpsError("permission-denied", "この端末は受付エラーログを保存する権限がありません。");
+    }
+    if (existingSnap.exists) return;
+    tx.create(errorRef, {
+      errorId, eventId, terminalId, category: input.category, mode: input.mode,
+      timestamp: input.timestamp, receivedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return { saved: true, errorId };
+});
+
+
 export const updateTerminalHeartbeat = onCall(async (call) => {
   const uid = requireUid(call);
   const terminalId = readId(call.data?.terminalId, "端末ID");
