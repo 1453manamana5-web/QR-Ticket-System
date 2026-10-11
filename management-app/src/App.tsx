@@ -457,6 +457,7 @@ export default function App() {
   const [handoffRequests, setHandoffRequests] = useState<Array<{requestId:string;createdAt:number|null;expiresAt:number}>>([]);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffAuthUid, setHandoffAuthUid] = useState("");
+  const [registrationAuthUid, setRegistrationAuthUid] = useState("");
   const [terminalNotice, setTerminalNotice] = useState("");
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
   const [terminalDataHydrated, setTerminalDataHydrated] = useState(false);
@@ -665,6 +666,14 @@ export default function App() {
       (terminal.role === "management" || terminal.role === "both") &&
       terminal.approved,
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void import("./firebaseClient").then(({ ensureInstallationAuth }) => ensureInstallationAuth())
+      .then(user => { if (!cancelled) setRegistrationAuthUid(user.uid); })
+      .catch(reason => console.error("管理端末の認証ID取得に失敗しました", reason));
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (ownManagementTerminalApproved) return;
@@ -1989,6 +1998,18 @@ export default function App() {
                 placeholder="例：入口受付 iPad"
               />
             </label>
+
+            <div className="terminal-registration-preview">
+              <div>
+                <span>この端末の認証ID（初回管理者設定用）</span>
+                <strong className="terminal-mono">{registrationAuthUid || "取得中…"}</strong>
+                <button className="secondary" type="button" disabled={!registrationAuthUid} onClick={() => {
+                  void navigator.clipboard.writeText(registrationAuthUid)
+                    .then(() => setTerminalNotice("認証IDをコピーしました。"))
+                    .catch(() => setTerminalNotice("認証IDをコピーできませんでした。画面のIDを手動でコピーしてください。"));
+                }}>認証IDをコピー</button>
+              </div>
+            </div>
 
             <div className="terminal-registration-flow">
               <div><b>1</b><span>端末情報を確認</span></div>
