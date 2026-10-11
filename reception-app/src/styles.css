@@ -3354,6 +3354,285 @@ body {
   background:rgba(130,10,10,.2);
 }
 
+
+/* Smart Reception redesign: professional, calm, tablet-first UI */
+.entry-reception-page {
+  --entry-blue: #175ea8;
+  --entry-blue-dark: #123e69;
+  --entry-text: #172b43;
+  --entry-sub-text: #62748a;
+  --entry-border: #d9e4ef;
+  padding: clamp(14px, 2.2vh, 24px) clamp(16px, 2.4vw, 34px) max(14px, env(safe-area-inset-bottom));
+  background: #f3f6fa;
+  color: #172b43;
+  transition: background-color 240ms ease, color 240ms ease;
+}
+.entry-reception-page .entry-background-circle { display: none; }
+.entry-reception-header {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding: 0 0 14px;
+  border-bottom: 1px solid #dbe5ef;
+  background: transparent;
+}
+.entry-header-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title mode" "meta mode";
+  align-items: center;
+  gap: 5px 20px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.entry-header-main h1 {
+  grid-area: title;
+  margin: 0;
+  color: #183b5d;
+  font-size: clamp(17px, 1.8vw, 24px);
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -.025em;
+}
+.entry-header-meta {
+  grid-area: meta;
+  gap: 10px;
+  color: #62748a;
+  font-size: clamp(11px, 1vw, 13px);
+}
+.entry-current-event-label {
+  color: #71839a;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.entry-current-event strong { color: #244766; font-weight: 750; }
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid #dce6ef;
+  border-radius: 999px;
+  background: #fff;
+  color: #415b73;
+  font-weight: 700;
+}
+.entry-reception-mode-switch {
+  grid-area: mode;
+  position: relative;
+  inset: auto;
+  width: clamp(150px, 17vw, 220px);
+  min-height: 56px;
+  border: 1px solid #cddbe8;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(24, 59, 93, .07);
+  transition: box-shadow 220ms ease, border-color 220ms ease, transform 220ms ease;
+}
+.entry-reception-mode-switch:hover { box-shadow: 0 6px 18px rgba(24, 59, 93, .12); }
+.entry-reception-mode-switch-face {
+  padding: 9px 13px;
+  gap: 10px;
+  color: #244766;
+}
+.entry-reception-mode-switch-face small { color: #71839a; font-size: 9px; letter-spacing: .12em; }
+.entry-reception-mode-switch-face strong { font-size: clamp(14px, 1.3vw, 17px); }
+.entry-reception-mode-switch.is-entry { border-color: #b8d8f5; }
+.entry-reception-mode-switch.is-entry .entry-reception-mode-switch-front { background: #eaf4ff; color: #155ca4; }
+.entry-reception-mode-switch.is-exit { border-color: #f0d59c; }
+.entry-reception-mode-switch.is-exit .entry-reception-mode-switch-back { background: #fff6df; color: #8a5b08; }
+.entry-reception-main {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: clamp(14px, 2.2vh, 24px) 0 0;
+}
+.entry-waiting-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: stretch;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+.entry-scanner-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid #d9e4ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(24, 59, 93, .07);
+}
+.entry-scanner-card-header {
+  min-height: 62px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e2eaf2;
+  background: #fff;
+}
+.entry-scanner-heading { gap: 12px; }
+.entry-scanner-heading-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: #eaf3fc;
+  color: #175ea8;
+}
+.entry-scanner-heading-copy small { color: #7a8da2; font-size: 10px; letter-spacing: .12em; }
+.entry-scanner-heading-copy strong { color: #203f5d; font-size: clamp(15px, 1.45vw, 19px); }
+.entry-scanner-ready {
+  padding: 7px 11px;
+  border: 1px solid #d5e9de;
+  border-radius: 999px;
+  background: #f1faf5;
+  color: #26764c;
+  font-size: 12px;
+  font-weight: 750;
+}
+.entry-scanner-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: clamp(12px, 2vw, 24px);
+  background: #f8fafc;
+}
+.camera-qr-scanner {
+  border: 1px solid #dce6ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(24, 59, 93, .025);
+}
+.camera-qr-scanner #ticket-reader,
+.camera-qr-scanner #ticket-reader__scan_region,
+.camera-qr-scanner #ticket-reader video {
+  border-radius: 12px;
+}
+.entry-scan-instruction {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid #dce6ef;
+  border-radius: 13px;
+  background: #fff;
+  color: #294965;
+  box-shadow: 0 2px 7px rgba(24, 59, 93, .035);
+}
+.entry-scan-instruction-number {
+  display: grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #eaf3fc;
+  color: #175ea8;
+  font-size: 13px;
+  font-weight: 800;
+}
+.entry-scan-instruction-copy strong { font-size: clamp(13px, 1.2vw, 16px); color: #294965; }
+.entry-scan-instruction-copy small { margin-top: 3px; color: #72849a; font-size: 12px; }
+.reception-start-panel { display: grid; place-items: center; min-height: 0; height: 100%; padding: clamp(18px, 3vh, 36px); }
+.reception-start-content { width: min(100%, 640px); text-align: center; }
+.reception-start-content .entry-result-icon {
+  display: grid; place-items: center;
+  width: 64px; height: 64px; margin: 0 auto 14px;
+  border-radius: 18px; background: #e9f4ff; color: #175ea8;
+  box-shadow: none; font-size: 30px;
+}
+.reception-start-content h2 { margin: 0; color: #1b3c5b; font-size: clamp(23px, 3vw, 34px); }
+.reception-start-content .entry-result-primary { margin: 10px 0 0; color: #3e5c77; font-size: clamp(15px, 1.5vw, 19px); }
+.reception-start-content .entry-result-secondary { margin: 8px 0 0; color: #71839a; font-size: clamp(12px, 1.15vw, 15px); }
+.reception-start-content button {
+  min-height: 48px; margin: 18px 5px 0; padding: 0 22px;
+  border-radius: 10px; font-weight: 750;
+  transition: transform 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
+}
+.reception-start-content button:hover { transform: translateY(-1px); }
+.reception-start-content button.primary {
+  border: 1px solid #175ea8;
+  background: #175ea8;
+  color: #fff;
+  box-shadow: 0 5px 12px rgba(23, 94, 168, .18);
+}
+.reception-start-content button.secondary { border: 1px solid #d5e1ed; background: #fff; color: #345a7c; }
+.entry-result-panel, .exit-result-panel {
+  border: 1px solid #d9e4ef;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(24, 59, 93, .09);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: opacity 220ms ease, transform 260ms ease;
+}
+.entry-reception-page.ticket-success { background: #f3f6fa; }
+.entry-reception-page.error { background: #f3f6fa; }
+.entry-ticket-success-icon { box-shadow: 0 8px 20px rgba(12, 133, 55, .16), 0 0 0 7px rgba(53, 213, 109, .08); }
+.exit-ticket-success-icon { box-shadow: 0 8px 20px rgba(3, 116, 133, .16), 0 0 0 7px rgba(48, 202, 220, .08); }
+.entry-ticket-success-title, .exit-ticket-success-title { font-size: clamp(48px, 6vw, 76px); letter-spacing: -.045em; }
+.entry-reception-page.error .entry-result-panel,
+.entry-reception-page.error .exit-result-panel {
+  background: #fff7f7;
+  border: 1px solid #f0caca;
+  box-shadow: 0 12px 32px rgba(160, 35, 35, .08);
+  color: #842c2c;
+}
+.entry-reception-page.error .entry-result-icon,
+.entry-reception-page.error .exit-result-icon {
+  background: #c83d3d;
+  border: 0;
+  box-shadow: none;
+}
+.entry-reception-page.error .entry-result-eyebrow,
+.entry-reception-page.error .exit-result-eyebrow,
+.entry-reception-page.error .entry-result-panel h2,
+.entry-reception-page.error .exit-result-panel h2,
+.entry-reception-page.error .entry-result-primary,
+.entry-reception-page.error .exit-result-primary,
+.entry-reception-page.error .entry-result-number,
+.entry-reception-page.error .exit-result-number,
+.entry-reception-page.error .entry-result-secondary,
+.entry-reception-page.error .exit-result-secondary { color: #842c2c !important; }
+.entry-reception-page.error .entry-result-number,
+.entry-reception-page.error .exit-result-number { background: #fceaea; }
+@media (max-width: 720px) {
+  .entry-reception-page { min-height: 0; padding: 12px 12px max(12px, env(safe-area-inset-bottom)); }
+  .entry-header-main { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .entry-header-main h1 { font-size: 15px; }
+  .entry-header-meta { flex-wrap: wrap; gap: 6px; font-size: 10px; }
+  .entry-reception-mode-switch { width: 126px; min-height: 50px; }
+  .entry-reception-mode-switch-face { gap: 6px; padding: 7px; }
+  .entry-reception-mode-switch-face strong { font-size: 12px; }
+  .entry-reception-main { padding-top: 12px; }
+  .entry-scanner-card-header { min-height: 54px; padding: 9px 11px; }
+  .entry-scanner-heading-icon { width: 34px; height: 34px; }
+  .entry-scanner-wrapper { padding: 10px; }
+  .entry-scan-instruction { padding: 10px; }
+  .reception-start-content button { width: min(100%, 340px); margin: 8px 0 0; }
+}
+@media (max-height: 700px) {
+  .entry-reception-page { min-height: 0; }
+  .entry-reception-header { padding-bottom: 8px; }
+  .entry-reception-main { padding-top: 10px; }
+  .entry-scanner-card-header { min-height: 48px; padding: 7px 12px; }
+  .entry-scan-instruction { padding: 8px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry-reception-page *, .entry-reception-page *::before, .entry-reception-page *::after {
+    animation-duration: .01ms !important; transition-duration: .01ms !important;
+  }
+}
+
+
+/* Secure terminal handoff UI */
 .reception-registration-handoff {
   display: grid;
   gap: 10px;
@@ -3362,17 +3641,20 @@ body {
   border-top: 1px solid rgba(120, 130, 150, 0.24);
   text-align: left;
 }
+
 .reception-registration-handoff h3 {
   margin: 0;
   font-size: 1rem;
   color: #202735;
 }
+
 .reception-registration-handoff p {
   margin: 0;
   font-size: 0.88rem;
   line-height: 1.55;
   color: #586174;
 }
+
 .reception-registration-handoff button {
   width: 100%;
 }
