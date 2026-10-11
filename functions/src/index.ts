@@ -832,8 +832,13 @@ export const deleteManagedEvent = onCall(async (call) => {
   if (typeof terminalId !== "string" || !terminalId || terminalId.includes("/")) {
     throw new HttpsError("permission-denied", "管理端末の登録情報が正しくありません。");
   }
-  const terminalSnap = await db.doc("terminals/" + terminalId).get();
-  if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
+  const [terminalSnap, ownerSnap] = await Promise.all([
+    db.doc("terminals/" + terminalId).get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+  ]);
+  if (!terminalSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      terminalSnap.get("approved") !== true ||
       terminalSnap.get("managementApproved") !== true ||
       (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
     throw new HttpsError("permission-denied", "イベント削除の権限がありません。");
