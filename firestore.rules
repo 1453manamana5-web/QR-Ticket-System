@@ -1,0 +1,150 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // A browser UID is not a role. Management writes require a server-issued
+    // installation grant and a currently approved management-capable terminal.
+    function managementTerminalId() {
+      return get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId;
+    }
+
+    function approvedManagementTerminal() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminalOwners/$(managementTerminalId()))
+        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.enabled == true
+        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.ownerUid == request.auth.uid
+        && exists(/databases/$(database)/documents/terminals/$(managementTerminalId()))
+        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.approved == true
+        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.managementApproved == true
+        && (
+          get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "management"
+          || get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "both"
+        );
+    }
+
+    function approvedReceptionTerminal() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
+        && get(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.enabled == true
+        && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
+        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
+        && (
+          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
+          || (
+            !get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.keys().hasAny(["receptionApproved"])
+            && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
+          )
+        )
+        && (
+          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
+          || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
+        );
+    }
+
+    // Client apps must never manage trusted ownership or server-issued handoff state.
+    match /terminalOwners/{terminalId} {
+      allow read, write: if false;
+    }
+
+    match /terminalInstallations/{uid} {
+      allow read, write: if false;
+    }
+
+    match /terminalHandoffRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /terminalHandoffRateLimits/{uid} {
+      allow read, write: if false;
+    }
+
+    // Pending terminal applications are written only by callable Functions.
+    // Clients must not forge applicant identity or approval state.
+    match /terminalApplications/{terminalId} {
+      allow read, write: if false;
+    }
+
+    // Event and ticket reads are available to authenticated clients. Direct
+    // management writes require a trusted management-terminal installation.
+    match /events/{eventId} {
+      allow read: if approvedManagementTerminal() || approvedReceptionTerminal();
+      allow create, update, delete: if approvedManagementTerminal();
+
+      match /tickets/{ticketId} {
+        allow read: if approvedManagementTerminal();
+        // Reception ticket status changes go through recordReception (Admin SDK).
+        allow create, update, delete: if approvedManagementTerminal();
+      }
+
+      match /receptionRecords/{recordId} {
+        allow read: if approvedManagementTerminal();
+        // Writes are only allowed through the server-validated recordReception callable.
+        allow create, update, delete: if false;
+      }
+
+      match /analysis/{analysisId} {
+        allow read: if approvedManagementTerminal();
+        allow create, update, delete: if approvedManagementTerminal();
+      }
+
+      match /members/{memberId} {
+        allow read: if approvedManagementTerminal();
+        allow create, update, delete: if approvedManagementTerminal();
+      }
+
+      match /settings/{settingId} {
+        allow read: if approvedManagementTerminal();
+        allow create, update, delete: if approvedManagementTerminal();
+      }
+    }
+
+    // Event bundles are fetched by an opaque auth token. Authenticated clients may
+    // fetch a known bundle, but only approved management installations may publish
+    // or replace bundles. Do not allow collection listing from reception clients.
+    match /eventBundles/{authToken} {
+      allow get: if approvedManagementTerminal() || approvedReceptionTerminal();
+      allow list: if approvedManagementTerminal();
+      allow create, update, delete: if approvedManagementTerminal();
+    }
+
+    // Device/app settings can only be modified by approved management terminals.
+    match /devices/{deviceId} {
+      allow read: if approvedManagementTerminal();
+      allow create, update, delete: if approvedManagementTerminal();
+    }
+
+    // Terminal documents are read by clients, but every write is routed through
+    // callable Functions so approval, ownership, heartbeat and role fields cannot
+    // be forged by a signed-in browser.
+    match /terminals/{terminalId} {
+      // Management may inspect registered terminals. Other clients may only
+      // read the application record created for their own authenticated UID.
+      // This avoids exposing other terminals' names, status, and control fields.
+      allow get: if approvedManagementTerminal()
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid);
+      allow list: if approvedManagementTerminal();
+      allow create, update, delete: if false;
+    }
+
+    // Error metadata is readable by management, but client writes use a callable.
+    match /receptionErrors/{errorId} {
+      allow read: if approvedManagementTerminal();
+      allow create, update, delete: if false;
+    }
+
+    // Default-deny for every path not explicitly listed above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
