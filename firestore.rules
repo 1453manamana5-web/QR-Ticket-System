@@ -68,6 +68,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Pending terminal applications are written only by callable Functions.
+    // Clients must not forge applicant identity or approval state.
+    match /terminalApplications/{terminalId} {
+      allow read, write: if false;
+    }
+
     // Event and ticket reads are available to authenticated clients. Direct
     // management writes require a trusted management-terminal installation.
     match /events/{eventId} {
