@@ -802,6 +802,8 @@ export default function App() {
 
     try {
       const result = await publishEventBundle(updatedEvent, settings, preparedTickets);
+      setEvent(result.event);
+      setEventHistory(current => current.map(item => item.eventId === result.event.eventId ? result.event : item));
       setBundle(result);
     } catch (reason) {
       console.error(reason);
