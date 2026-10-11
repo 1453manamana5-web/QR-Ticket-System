@@ -20,9 +20,15 @@ export async function downloadCurrentFirebaseEventData(
   const candidates = snapshot.docs
     .map(item => item.data() as Event & { authToken?: unknown; receptionTarget?: unknown })
     .filter(item =>
+      // receptionTarget が明示されたイベントを優先し、status の表記ゆれや
+      // 管理画面側の状態更新だけで受付データを見失わないようにする。
       item.receptionTarget === true &&
-      (item.eventStatus === "active" || item.eventStatus === "ready") &&
+      item.eventStatus !== "finished" &&
       typeof item.eventId === "string" &&
+      item.eventId.length > 0 &&
+      typeof item.eventName === "string" &&
+      item.eventName.length > 0 &&
+      typeof item.dataVersion === "number" &&
       typeof item.authToken === "string" &&
       item.authToken.length > 0
     );
