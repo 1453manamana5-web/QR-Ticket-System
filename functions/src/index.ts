@@ -482,11 +482,15 @@ export const revokeTerminalReception = onCall(async (call) => {
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
   const targetRef = db.doc("terminals/" + targetTerminalId);
+  const handoffRequestsQuery = db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", targetTerminalId)
+    .where("status", "in", ["pending", "approved"]);
   await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+    const [managerSnap, ownerSnap, targetSnap, handoffRequestsSnap] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
       tx.get(targetRef),
+      tx.get(handoffRequestsQuery),
     ]);
     // Permission and ownership must still be valid at the exact time of revocation.
     if (!managerSnap.exists || !ownerSnap.exists ||
@@ -519,6 +523,16 @@ export const revokeTerminalReception = onCall(async (call) => {
     };
     if (role === "both") patch.role = "management";
     tx.update(targetRef, patch);
+    // Cancel outstanding handoffs in the same transaction as revocation. This
+    // prevents an already-approved request from becoming usable if reception
+    // is re-approved before an after-transaction cleanup could run.
+    handoffRequestsSnap.docs.forEach((request) => {
+      tx.update(request.ref, {
+        status: "cancelled",
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancelledByUid: uid,
+      });
+    });
   });
   return { terminalId: targetTerminalId, receptionApproved: false };
 });
@@ -618,12 +632,16 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
   const installationRef = db.doc("terminalInstallations/" + uid);
+  const handoffRequestsQuery = db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", terminalId)
+    .where("status", "in", ["pending", "approved"]);
 
   const result = await db.runTransaction(async (tx) => {
-    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+    const [terminalSnap, ownerSnap, installationSnap, handoffRequestsSnap] = await Promise.all([
       tx.get(terminalRef),
       tx.get(ownerRef),
       tx.get(installationRef),
+      tx.get(handoffRequestsQuery),
     ]);
 
     const ownsTerminal = ownerSnap.exists &&
@@ -647,6 +665,17 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
         approved: false,
         releasedAt: FieldValue.serverTimestamp(),
       });
+      // A recipient can cancel only its own pending/approved handoffs; it must
+      // not revoke the shared terminal's reception approval for other devices.
+      handoffRequestsSnap.docs
+        .filter((request) => request.get("requesterUid") === uid)
+        .forEach((request) => {
+          tx.update(request.ref, {
+            status: "cancelled",
+            cancelledAt: FieldValue.serverTimestamp(),
+            cancelledByUid: uid,
+          });
+        });
       return { terminalId, receptionApproved: false, released: true };
     }
 
@@ -661,27 +690,18 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     };
     if (role === "both" && managementApproved) patch.role = "management";
     tx.update(terminalRef, patch);
+    // Revoke the terminal's reception permission and cancel every outstanding
+    // handoff atomically, so quick re-approval cannot revive a stale approval.
+    handoffRequestsSnap.docs.forEach((request) => {
+      tx.update(request.ref, {
+        status: "cancelled",
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancelledByUid: uid,
+      });
+    });
     return { terminalId, receptionApproved: false, released: true };
   });
 
-  // Cancel any older handoff approvals for this installation/terminal. The
-  // releasedAt check in completeTerminalHandoff also closes the race with cleanup.
-  if (result.released) {
-    const terminalRequests = await db.collection("terminalHandoffRequests")
-      .where("terminalId", "==", terminalId)
-      .get();
-    const staleRequests = terminalRequests.docs.filter((doc) =>
-      doc.get("requesterUid") === uid &&
-      (doc.get("status") === "pending" || doc.get("status") === "approved"));
-    for (let i = 0; i < staleRequests.length; i += 400) {
-      const cleanup = db.batch();
-      staleRequests.slice(i, i + 400).forEach((doc) => cleanup.update(doc.ref, {
-        status: "cancelled",
-        cancelledAt: FieldValue.serverTimestamp(),
-      }));
-      await cleanup.commit();
-    }
-  }
   return result;
 });
 
