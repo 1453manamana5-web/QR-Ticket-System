@@ -2736,7 +2736,10 @@ function NavIcon({type}:{type:string}){
           aria-expanded={!sidebarCollapsed}
           title={sidebarCollapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
           onClick={() => setSidebarCollapsed(value => !value)}
-        ><span aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span></button>
+        >
+          <span className="sidebar-collapse-icon" aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span>
+          <span className="sidebar-collapse-label">{sidebarCollapsed ? "展開" : "サイドバーを閉じる"}</span>
+        </button>
       </div>
       <div className="event-mini">
         <small>現在のイベント</small>
