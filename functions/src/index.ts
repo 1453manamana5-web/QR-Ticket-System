@@ -905,8 +905,11 @@ export const setManagedTerminalMode = onCall(async (call) => {
       throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
     }
     if (!targetSnap.exists || targetSnap.get("receptionApproved") !== true ||
-        targetSnap.get("approved") !== true || targetSnap.get("admin") === true) {
-      throw new HttpsError("failed-precondition", "対象は承認済みの受付端末ではありません。");
+        targetSnap.get("approved") !== true ||
+        targetSnap.get("role") !== "reception" ||
+        targetSnap.get("managementApproved") === true ||
+        targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("failed-precondition", "対象は承認済みの受付専用端末ではありません。");
     }
     tx.update(targetRef, { desiredMode: mode, desiredModeUpdatedAt: updatedAt, updatedAt });
   });
