@@ -2814,7 +2814,7 @@ function NavIcon({type}:{type:string}){
             <div><span className="ai-report-eyebrow">EVENT SUMMARY</span><h3>{event.eventName || "イベント終了レポート"}</h3><p>{event.eventDate || "開催日未設定"} ・ {event.eventId ? statusLabel[event.eventStatus] : "イベント未選択"}</p></div>
             <button className="primary-action" type="button" onClick={generateAiEventReport}>レポートを作成・更新</button>
           </div>
-          {event.eventId && <React.Fragment>
+          {event.eventId && <>
             <div className="ai-report-kpi-grid">
               <article className="ai-report-kpi"><span>総チケット数</span><strong>{ticketStats.total.toLocaleString("ja-JP")}</strong><small>枚</small></article>
               <article className="ai-report-kpi"><span>入場記録</span><strong>{receptionRecords.filter(record => record.type === "entry").length.toLocaleString("ja-JP")}</strong><small>件</small></article>
@@ -2855,7 +2855,7 @@ function NavIcon({type}:{type:string}){
               <h4>過去イベントとの比較</h4>
               {aiPreviousEventData.loading ? <p className="ai-report-empty">過去イベントの実データを読み込んでいます…</p> : aiPreviousSnapshot ? <div className="ai-report-comparison"><div><span>比較対象</span><strong>{aiPreviousSnapshot.eventName}</strong></div><div><span>チケット総数</span><strong>{aiPreviousSnapshot.total}枚</strong><small>今回との差 {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚</small></div><div><span>入場記録</span><strong>{aiPreviousSnapshot.entryRecords ?? "未取得"}件</strong><small>{aiPreviousSnapshot.source === "records" ? "今回 " + receptionRecords.filter(record => record.type === "entry").length + "件" : "保存済み分析から比較"}</small></div><div><span>退場済み</span><strong>{aiPreviousSnapshot.exited}枚</strong><small>今回との差 {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}枚</small></div></div> : <p className="ai-report-empty">比較対象となる過去イベントのデータがありません。</p>}
             </section>
-          </React.Fragment>}
+          </>}
           <section className="ai-report-panel ai-report-text-panel"><h4>レポート本文（編集可能）</h4><p className="ai-report-subtitle">数値を確認し、必要に応じて文章を修正してから保存してください。</p>
             {aiReportText ? <><textarea className="ai-report-textarea" aria-label="イベント終了レポート" value={aiReportText} onChange={e => setAiReportText(e.target.value)} rows={16} /><div className="ai-report-actions"><button className="secondary" type="button" onClick={() => { void navigator.clipboard?.writeText(aiReportText); }}>レポートをコピー</button><button className="primary-action" type="button" onClick={downloadAiReport}>テキストで保存</button></div></> : <p className="ai-report-empty">「レポートを作成・更新」を押すと、詳細な報告本文を生成します。</p>}
           </section>
