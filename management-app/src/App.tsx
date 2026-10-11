@@ -175,13 +175,19 @@ export default function App() {
   const handleSidebarPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || (event.target as HTMLElement).closest("button, a, input, textarea, select, [data-nav-label]")) return;
     sidebarDragRef.current = { startX: event.clientX, startY: event.clientY };
+    // Keep receiving pointer-up even if the sidebar moves or the pointer leaves its edge.
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* capture may be unavailable */ }
   };
   const handleSidebarPointerUp = (event: React.PointerEvent<HTMLElement>) => {
     const drag = sidebarDragRef.current;
     sidebarDragRef.current = null;
-    if (!drag || Math.abs(event.clientX - drag.startX) < 48 || Math.abs(event.clientX - drag.startX) < Math.abs(event.clientY - drag.startY) * 1.25) return;
-    if (event.clientX < drag.startX && !sidebarCollapsed) setSidebarCollapsed(true);
-    if (event.clientX > drag.startX && sidebarCollapsed) setSidebarCollapsed(false);
+    if (!drag) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    // Ignore vertical scrolling and short movements; only a clear horizontal swipe toggles.
+    if (Math.abs(deltaX) < 36 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15) return;
+    if (deltaX < 0 && !sidebarCollapsed) setSidebarCollapsed(true);
+    if (deltaX > 0 && sidebarCollapsed) setSidebarCollapsed(false);
   };
   const [event, setEvent] = useState<Event>(baseEvent);
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
