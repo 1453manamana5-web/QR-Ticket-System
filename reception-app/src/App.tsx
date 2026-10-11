@@ -1,9 +1,9 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent} from "./localDb";
+import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,type ReceptionErrorCategory} from "./localDb";
 import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
-import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord} from "./receptionSync";
+import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord,syncReceptionErrorLog} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
@@ -29,6 +29,31 @@ function EntryIcon(){
     <path d="M42 24H8M16 16l-8 8 8 8" />
     <path d="M28 10v28" />
   </svg>;
+}
+
+
+async function logReceptionError(
+  eventId:string,
+  terminalId:string,
+  mode:Mode,
+  category:ReceptionErrorCategory
+):Promise<void>{
+  const log={
+    errorId:crypto.randomUUID(),
+    eventId,
+    terminalId,
+    category,
+    mode,
+    timestamp:new Date().toISOString()
+  };
+  try{
+    await saveReceptionErrorLog(log);
+  }catch(reason){
+    console.error("受付エラーの端末内保存に失敗しました",reason);
+  }
+  if(navigator.onLine){
+    void syncReceptionErrorLog(log).catch(reason=>console.error("受付エラーのFirebase同期に失敗しました",reason));
+  }
 }
 
 export default function App(){
@@ -353,10 +378,12 @@ export default function App(){
     try{
       const ticket=await getTicket(ticketId);
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
         setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});
         return;
       }
       if(!ticket.valid){
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_ticket");
         setResult({kind:"error",title:"このチケットは無効です",detail:"管理アプリで無効になっているチケットです。"});
         return;
       }
@@ -366,6 +393,7 @@ export default function App(){
         const detail=mode==="entry"
           ?ticket.currentStatus==="inside"?"このチケットはすでに入場しています。":"このチケットは受付できません。"
           :ticket.currentStatus==="unused"?"このチケットはまだ入場していません。":"このチケットは受付できません。";
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_state");
         setResult({kind:"error",title:"受付できません",detail});
         return;
       }
@@ -395,7 +423,9 @@ export default function App(){
       });
       speakReception(receptionType);
       playSuccessSound();
-    }catch{
+    }catch(reason){
+      console.error("受付処理に失敗しました",reason);
+      void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed");
       setResult({
         kind:"error",
         title:"受付データを保存できませんでした",
