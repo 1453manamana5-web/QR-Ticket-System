@@ -38,7 +38,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.enabled == true
         && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
         && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
-        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
+        && (
+          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
+          || (
+            !get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.keys().hasAny(["receptionApproved"])
+            && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
+          )
+        )
         && (
           get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
           || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
