@@ -1,4 +1,5 @@
 import type { ReceptionRecord } from "@qr-ticket-system/shared";
+import type { ReceptionErrorLog } from "./localDb";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ensureInstallationAuth } from "./firebaseClient";
@@ -120,4 +121,14 @@ export async function submitReceptionRecord(
   >(functionsClient(), "recordReception");
   const result = await callable({ record });
   return result.data;
+}
+
+/** Saves minimal reception error metadata through the trusted server. */
+export async function submitReceptionError(log: ReceptionErrorLog): Promise<void> {
+  await ensureInstallationAuth();
+  const callable = httpsCallable<{ log: ReceptionErrorLog }, { saved: true; errorId: string }>(
+    functionsClient(),
+    "recordReceptionError",
+  );
+  await callable({ log });
 }
