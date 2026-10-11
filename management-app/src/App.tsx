@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 const baseEvent: Event = {
   eventId: "",
@@ -223,6 +223,8 @@ export default function App() {
   }, [event.eventId]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const [receptionErrors, setReceptionErrors] = useState<Awaited<ReturnType<typeof loadReceptionErrors>>>([]);
+  const [receptionErrorsLoading, setReceptionErrorsLoading] = useState(false);
   const [historicalAnalysisData, setHistoricalAnalysisData] = useState<{
     eventId: string;
     tickets: Ticket[];
@@ -509,6 +511,24 @@ export default function App() {
     }
     return () => unsubscribe?.();
   }, [event.eventId]);
+  useEffect(() => {
+    if (!event.eventId) {
+      setReceptionErrors([]);
+      setReceptionErrorsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReceptionErrorsLoading(true);
+    void loadReceptionErrors(event.eventId)
+      .then(records => { if (!cancelled) setReceptionErrors(records); })
+      .catch(reason => {
+        console.error("受付エラーログの読み込みに失敗しました", reason);
+        if (!cancelled) setReceptionErrors([]);
+      })
+      .finally(() => { if (!cancelled) setReceptionErrorsLoading(false); });
+    return () => { cancelled = true; };
+  }, [event.eventId]);
+
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     if (!event.eventId) {
@@ -2966,7 +2986,29 @@ function NavIcon({type}:{type:string}){
               </> : <p className="smart-reception-empty">時間帯を分析できる受付記録がまだありません。受付記録が同期されると、ここに混雑傾向を表示します。</p>}
             </section>;
           })()}
-          <p>分析対象はこの端末で参照できる記録です。複数端末の未同期記録や、受付に失敗して記録されなかったQR読み取りは含まれません。</p>
+          <section className="smart-reception-analysis">
+            <div className="smart-reception-analysis-heading"><div><small>RECEPTION ERRORS</small><h4>受付エラーの集計</h4></div><span>{receptionErrors.length}件</span></div>
+            {receptionErrorsLoading ? <p className="smart-reception-empty">エラーログを読み込んでいます…</p> : receptionErrors.length ? (() => {
+              const labels: Record<string,string> = {
+                unknown_ticket:"未登録・別イベントのチケット",
+                invalid_ticket:"無効化されたチケット",
+                invalid_state:"入退場状態の不一致",
+                save_failed:"受付データの保存失敗",
+                camera_failed:"カメラ起動・読み取り失敗",
+                event_load_failed:"イベントデータ取得失敗",
+                sync_failed:"受付データ同期失敗"
+              };
+              const counts = receptionErrors.reduce<Record<string,number>>((acc,record) => {
+                acc[record.category] = (acc[record.category] || 0) + 1;
+                return acc;
+              }, {});
+              return <div className="smart-reception-hourly-list">
+                {Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([category,count])=><div className="smart-reception-hour-row" key={category}><span>{labels[category] || category}</span><div className="smart-reception-hour-track"><i style={{width:(count/receptionErrors.length*100)+"%"}} /></div><strong>{count}件</strong></div>)}
+                <p className="smart-reception-insight">記録はFirebaseに同期されたエラーのみです。チケット番号やQRの生データは保存していません。</p>
+              </div>;
+            })() : <p className="smart-reception-empty">このイベントのエラーログはまだありません。受付アプリでエラーが発生し、Firebaseへ同期されるとここに集計されます。</p>}
+          </section>
+          <p>時間帯分析は同期済み受付記録、エラー分析は受付アプリから同期されたエラーログを対象にします。</p>
         </div>}
         {aiLabPanel === "システム診断" && <div className="ai-lab-detail-content">
           <div className="ai-lab-diagnostic-row"><span>イベント</span><strong>{event.eventId ? "選択済み" : "未選択"}</strong></div>
