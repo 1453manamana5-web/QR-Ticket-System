@@ -4,7 +4,8 @@ import { getFirestore } from "firebase-admin/firestore";
 /**
  * One-time, trusted first-admin bootstrap.
  * Run only from a trusted workstation with ADC for the intended Firebase project.
- * Refuses to overwrite either the terminal document or owner mapping.
+ * Promotes only a matching pending management application, or creates a new terminal;
+ * refuses unrelated terminals and any existing owner/installation mapping.
  */
 async function main() {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
