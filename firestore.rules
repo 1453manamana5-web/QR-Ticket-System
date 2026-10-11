@@ -34,6 +34,8 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
+        && get(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.enabled == true
         && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
         && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
         && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
