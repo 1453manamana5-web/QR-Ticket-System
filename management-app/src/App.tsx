@@ -132,6 +132,33 @@ function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
 
 export default function App() {
   const [page, setPage] = useState("ホーム");
+  const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number } | null>(null);
+  const pageOpeningSequence = useRef(0);
+  const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
+    if (nextPage === page) return;
+    const sourceElement = source ?? Array.from(document.querySelectorAll<HTMLElement>("[data-nav-label]"))
+      .find(element => element.dataset.navLabel === nextPage);
+    const mainElement = document.querySelector<HTMLElement>(".management-main");
+    if (sourceElement && mainElement) {
+      const sourceRect = sourceElement.getBoundingClientRect();
+      const mainRect = mainElement.getBoundingClientRect();
+      pageOpeningSequence.current += 1;
+      setPageOpeningOrigin({
+        x: sourceRect.left + sourceRect.width / 2 - mainRect.left,
+        y: sourceRect.top + sourceRect.height / 2 - mainRect.top,
+        sequence: pageOpeningSequence.current,
+      });
+    } else setPageOpeningOrigin(null);
+    setPage(nextPage);
+  };
+  useEffect(() => {
+    if (!pageOpeningOrigin) return;
+    const sequence = pageOpeningOrigin.sequence;
+    const timer = window.setTimeout(() => {
+      setPageOpeningOrigin(current => current?.sequence === sequence ? null : current);
+    }, 720);
+    return () => window.clearTimeout(timer);
+  }, [pageOpeningOrigin]);
   const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
   const navSwipeRef = useRef<{ startX: number; startY: number; current: string; moved: boolean } | null>(null);
   const navSuppressClickRef = useRef(false);
@@ -2703,7 +2730,7 @@ function NavIcon({type}:{type:string}){
           const swipe = navSwipeRef.current;
           if (!swipe) return;
           if (swipe.moved) {
-            setPage(swipe.current);
+            navigateFromSidebar(swipe.current);
             navSuppressClickRef.current = true;
             window.setTimeout(() => { navSuppressClickRef.current = false; }, 0);
           }
@@ -2737,7 +2764,7 @@ function NavIcon({type}:{type:string}){
                       navSuppressClickRef.current = false;
                       return;
                     }
-                    if (!item.comingSoon) setPage(item.label);
+                    if (!item.comingSoon) navigateFromSidebar(item.label, event.currentTarget);
                   }}
                 >
                   <span className="sidebar-item-icon"><NavIcon type={item.icon} /></span>
@@ -2750,7 +2777,13 @@ function NavIcon({type}:{type:string}){
         ))}
       </nav>
     </aside>
-    <main className="management-main">
+    <main
+      className={pageOpeningOrigin ? "management-main page-opening" : "management-main"}
+      style={pageOpeningOrigin ? ({
+        "--page-origin-x": `${pageOpeningOrigin.x}px`,
+        "--page-origin-y": `${pageOpeningOrigin.y}px`,
+      } as import("react").CSSProperties) : undefined}
+    >
       <header className="management-header">
         <div><small>管理画面</small><h1>{page}</h1></div>
         <div className="header-actions"><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>
