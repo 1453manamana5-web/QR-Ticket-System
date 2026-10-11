@@ -757,11 +757,19 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
     installationSnap.get("terminalId") === terminalId &&
     installationSnap.get("authUid") === uid &&
     installationSnap.get("approved") === true;
-  if (!terminalSnap.exists || (!ownerMatches && !installationMatches)) {
+  const existing = terminalSnap.data() ?? {};
+  const role = existing.role;
+  const managementActive = existing.approved === true &&
+    existing.managementApproved === true &&
+    (role === "management" || role === "both");
+  const receptionActive = existing.approved === true &&
+    existing.receptionApproved === true &&
+    (role === "reception" || role === "both");
+  if (!terminalSnap.exists ||
+      !((ownerMatches && (managementActive || receptionActive)) ||
+        (installationMatches && receptionActive))) {
     throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
   }
-
-  const existing = terminalSnap.data() ?? {};
   const patch: Record<string, unknown> = {
     status: "online",
     lastSeen: new Date().toISOString(),
