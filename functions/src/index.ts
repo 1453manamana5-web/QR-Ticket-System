@@ -811,41 +811,49 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
   }
 
   const terminalRef = db.doc("terminals/" + terminalId);
-  const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
-    terminalRef.get(),
-    db.doc("terminalOwners/" + terminalId).get(),
-    db.doc("terminalInstallations/" + uid).get(),
-  ]);
-  const ownerMatches = ownerSnap.exists && ownerSnap.get("enabled") === true &&
-    ownerSnap.get("ownerUid") === uid;
-  const installationMatches = installationSnap.exists &&
-    installationSnap.get("terminalId") === terminalId &&
-    installationSnap.get("authUid") === uid &&
-    installationSnap.get("approved") === true;
-  const existing = terminalSnap.data() ?? {};
-  const role = existing.role;
-  const managementActive = existing.approved === true &&
-    existing.managementApproved === true &&
-    (role === "management" || role === "both");
-  const receptionActive = existing.approved === true &&
-    existing.receptionApproved === true &&
-    (role === "reception" || role === "both");
-  if (!terminalSnap.exists ||
-      !((ownerMatches && (managementActive || receptionActive)) ||
-        (installationMatches && receptionActive))) {
-    throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
-  }
-  const patch: Record<string, unknown> = {
-    status: "online",
-    lastSeen: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  if (ownerMatches && existing.managementApproved === true) {
-    patch.mode = mode;
-  }
-  if (typeof syncPendingCount === "number") patch.syncPendingCount = syncPendingCount;
-  if (typeof networkMbps === "number") patch.networkMbps = networkMbps;
-  await terminalRef.update(patch);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+      tx.get(installationRef),
+    ]);
+    const ownerMatches = ownerSnap.exists && ownerSnap.get("enabled") === true &&
+      ownerSnap.get("ownerUid") === uid;
+    const installationMatches = installationSnap.exists &&
+      installationSnap.get("terminalId") === terminalId &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true;
+    const existing = terminalSnap.data() ?? {};
+    const role = existing.role;
+    const managementActive = existing.approved === true &&
+      existing.managementApproved === true &&
+      (role === "management" || role === "both");
+    const receptionActive = existing.approved === true &&
+      existing.receptionApproved === true &&
+      (role === "reception" || role === "both");
+    if (!terminalSnap.exists ||
+        !((ownerMatches && (managementActive || receptionActive)) ||
+          (installationMatches && receptionActive))) {
+      throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
+    }
+
+    // Keep authorization reads and the heartbeat write in one transaction so
+    // a concurrent revocation or ownership transfer invalidates this attempt.
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      status: "online",
+      lastSeen: now,
+      updatedAt: now,
+    };
+    if (ownerMatches && existing.managementApproved === true) {
+      patch.mode = mode;
+    }
+    if (typeof syncPendingCount === "number") patch.syncPendingCount = syncPendingCount;
+    if (typeof networkMbps === "number") patch.networkMbps = networkMbps;
+    tx.update(terminalRef, patch);
+  });
   return { terminalId, status: "online" };
 });
 
