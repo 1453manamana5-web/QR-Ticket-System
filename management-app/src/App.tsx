@@ -667,6 +667,35 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (ownManagementTerminalApproved) return;
+    let cancelled = false;
+    const refreshOwnAuthorization = async () => {
+      try {
+        const { getTerminalInstallationStatus } = await import("./terminalHandoff");
+        const status = await getTerminalInstallationStatus();
+        if (cancelled) return;
+        if (status.approved && status.managementApproved === true && status.terminalId === firebaseDeviceId) {
+          const remote = await loadTerminals();
+          if (cancelled) return;
+          setTerminals(remote);
+          setTerminalDataHydrated(true);
+          setTerminalNotice("管理端末の承認を確認しました。");
+        }
+      } catch (reason) {
+        // Pending installations cannot read the protected terminal collection.
+        // Keep the application screen active and retry through the callable status endpoint.
+        console.debug("管理端末の承認状態はまだ確認できません", reason);
+      }
+    };
+    void refreshOwnAuthorization();
+    const interval = window.setInterval(() => void refreshOwnAuthorization(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [firebaseDeviceId, ownManagementTerminalApproved]);
+
+  useEffect(() => {
     if (!terminalDataHydrated || !ownManagementTerminalApproved) return;
 
     const heartbeat = () => {
