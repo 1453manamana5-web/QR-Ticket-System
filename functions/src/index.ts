@@ -490,9 +490,11 @@ export const deleteManagedTerminal = onCall(async (call) => {
       throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
     }
     if (!targetSnap.exists) return false;
-    // Administrator terminals are never deletable, including by another admin.
-    if (targetSnap.get("admin") === true) {
-      throw new HttpsError("permission-denied", "管理者端末は削除できません。");
+    // Administrator and designated sub-administrator terminals are protected.
+    // The primary admin can first remove sub-admin status explicitly if that
+    // terminal genuinely needs to be decommissioned.
+    if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("permission-denied", "管理者・副管理者端末は削除できません。先に副管理者権限を解除してください。");
     }
 
     const isAdmin = managerSnap.get("admin") === true;
