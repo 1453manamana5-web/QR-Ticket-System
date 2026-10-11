@@ -3630,3 +3630,17 @@ body {
     animation-duration: .01ms !important; transition-duration: .01ms !important;
   }
 }
+
+
+/* スマート受付：結果表示中もカメラをマウントしたまま連続読み取りを維持する */
+.entry-reception-main { position: relative; }
+.entry-waiting-panel-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.entry-ticket-result,
+.exit-ticket-result { position: relative; z-index: 1; }
