@@ -76,25 +76,27 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
-  const ownTerminalId =
+  const managerTerminalId =
     typeof window !== "undefined"
       ? localStorage.getItem("qr-ticket-terminal-id") ??
         localStorage.getItem("qr-ticket-device-id")
       : null;
 
-  if (ownTerminalId !== null && terminalId === ownTerminalId) {
+  if (!managerTerminalId) {
+    throw new Error("MANAGEMENT_TERMINAL_ID_MISSING");
+  }
+  if (terminalId === managerTerminalId) {
     throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
   }
 
-  const db = getFirebaseDb();
-  const { deleteDoc, getDoc } = await import("firebase/firestore");
-  const targetRef = doc(db, "terminals", terminalId);
-  const targetSnapshot = await getDoc(targetRef);
-  if (targetSnapshot.exists() && targetSnapshot.data().admin === true) {
-    throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
+  // Terminal documents are server-write-only. The server revalidates the
+  // caller's management grant and protects administrator terminals, then
+  // leaves a disabled owner tombstone so a deleted ID cannot be re-registered.
+  const { deleteManagedTerminalOnServer } = await import("./terminalHandoff");
+  const result = await deleteManagedTerminalOnServer(managerTerminalId, terminalId);
+  if (!result.deleted) {
+    throw new Error("TERMINAL_NOT_FOUND");
   }
-
-  await deleteDoc(targetRef);
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
