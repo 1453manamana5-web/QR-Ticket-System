@@ -297,7 +297,7 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
     db.doc("terminalOwners/" + terminalId).get(),
     db.doc("terminals/" + terminalId).get(),
   ]);
-  if (!owner.exists || owner.get("enabled") !== true || owner.get("ownerUid") !== uid ||
+  if (!owner.exists || owner.get("enabled") !== true ||
       !terminal.exists || terminal.get("approved") !== true) {
     return { approved: false, terminalId: null };
   }
