@@ -467,38 +467,48 @@ export const deleteManagedTerminal = onCall(async (call) => {
     throw new HttpsError("failed-precondition", "現在使用中の管理端末は削除できません。");
   }
 
-  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
-    db.doc("terminals/" + managerTerminalId).get(),
-    db.doc("terminalOwners/" + managerTerminalId).get(),
-    db.doc("terminals/" + targetTerminalId).get(),
-  ]);
-  if (!managerSnap.exists || !ownerSnap.exists ||
-      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      managerSnap.get("approved") !== true ||
-      managerSnap.get("managementApproved") !== true ||
-      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
-      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
-    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
-  }
-  if (!targetSnap.exists) return { terminalId: targetTerminalId, deleted: false };
-  // Administrator terminals are never deletable, including by another admin.
-  if (targetSnap.get("admin") === true) {
-    throw new HttpsError("permission-denied", "管理者端末は削除できません。");
-  }
-
-  const isAdmin = managerSnap.get("admin") === true;
-  const targetRole = targetSnap.get("role");
-  if (!isAdmin && (targetRole === "management" || targetRole === "both")) {
-    throw new HttpsError("permission-denied", "副管理者は管理端末を削除できません。");
-  }
-
-  const batch = db.batch();
-  batch.delete(db.doc("terminals/" + targetTerminalId));
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
-  const targetOwner = await targetOwnerRef.get();
-  if (targetOwner.exists) batch.delete(targetOwnerRef);
-  await batch.commit();
+  const deleted = await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(targetRef),
+      tx.get(targetOwnerRef),
+    ]);
+    // Recheck the acting manager and target atomically to prevent stale
+    // permissions from authorizing a delete after a concurrent revocation.
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) return false;
+    // Administrator terminals are never deletable, including by another admin.
+    if (targetSnap.get("admin") === true) {
+      throw new HttpsError("permission-denied", "管理者端末は削除できません。");
+    }
 
+    const isAdmin = managerSnap.get("admin") === true;
+    const targetRole = targetSnap.get("role");
+    if (!isAdmin && (targetRole === "management" || targetRole === "both")) {
+      throw new HttpsError("permission-denied", "副管理者は管理端末を削除できません。");
+    }
+
+    tx.delete(targetRef);
+    if (targetOwnerSnap.exists) tx.delete(targetOwnerRef);
+    return true;
+  });
+  if (!deleted) return { terminalId: targetTerminalId, deleted: false };
+
+  // Cleanup is deliberately after the atomic revocation of the terminal and
+  // owner mapping. Any stale installation is denied by server checks even if
+  // a cleanup query is interrupted and needs to be retried.
   const pending = await db.collection("terminalHandoffRequests")
     .where("terminalId", "==", targetTerminalId).get();
   for (let i = 0; i < pending.docs.length; i += 400) {
@@ -516,7 +526,6 @@ export const deleteManagedTerminal = onCall(async (call) => {
   }
   return { terminalId: targetTerminalId, deleted: true };
 });
-
 
 /** Let an installation release only its own reception permission. */
 export const releaseOwnReceptionRegistration = onCall(async (call) => {
