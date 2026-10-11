@@ -31,7 +31,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         if(!active||processing)return;
         const now=Date.now();
         // 同じQRを連続フレームで何度も受付しない。別のQRなら結果表示中でも受付可能。
-        if(decodedText===lastDecodedText&&now-lastDecodedAt<1800)return;
+        if(decodedText===lastDecodedText&&now-lastDecodedAt<2800)return;
         processing=true;
         lastDecodedText=decodedText;
         lastDecodedAt=now;
