@@ -403,7 +403,7 @@ export default function App(){
       });
     }finally{
       setBusy(false);
-      window.setTimeout(()=>setScannerKey(value=>value+1),650);
+      // カメラは連続稼働するため、受付のたびに再生成しない。
     }
   },[localEvent,mode,busy]);
 
@@ -752,8 +752,7 @@ export default function App(){
     </header>
 
     <main className="entry-reception-main">
-      {!result && (
-        <section className="entry-waiting-panel">
+      <section className={result ? "entry-waiting-panel entry-waiting-panel-background" : "entry-waiting-panel"}>
           <div className="entry-scanner-card">
             <div className="entry-scanner-card-header">
               <div className="entry-scanner-heading">
@@ -784,8 +783,7 @@ export default function App(){
               <small>読み取り枠に入ると自動で受付します</small>
             </span>
           </div>
-        </section>
-      )}
+      </section>
 
       {result && (
         <section
