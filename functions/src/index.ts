@@ -35,6 +35,21 @@ function readReceptionApprovalVersion(value: unknown): number {
   return value;
 }
 
+function readTerminalReceptionApprovalVersion(value: unknown): number {
+  // Revocation must remain possible even if the stored counter is malformed.
+  // Resetting it to zero and incrementing still invalidates old generation-zero requests.
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return 0;
+  return value;
+}
+
+function isCurrentReceptionApprovalVersion(value: unknown, expected: number): boolean {
+  try {
+    return readReceptionApprovalVersion(value) === expected;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ownership is stored separately in terminalOwners/{terminalId}. That collection
  * must be writable only by trusted Admin SDK code; clients must never be able to
@@ -589,7 +604,7 @@ export const revokeTerminalReception = onCall(async (call) => {
       throw new HttpsError("failed-precondition", "対象端末の種別を確認できません。");
     }
     const now = new Date().toISOString();
-    const nextVersion = readReceptionApprovalVersion(targetSnap.get("receptionApprovalVersion")) + 1;
+    const nextVersion = readTerminalReceptionApprovalVersion(targetSnap.get("receptionApprovalVersion")) + 1;
     const patch: Record<string, unknown> = {
       receptionApproved: false,
       receptionApprovalVersion: nextVersion,
@@ -611,7 +626,7 @@ export const revokeTerminalReception = onCall(async (call) => {
   const staleRequests = requests.docs.filter((request) => {
     const status = request.get("status");
     return (status === "pending" || status === "approved") &&
-      readReceptionApprovalVersion(request.get("receptionApprovalVersion")) !== nextReceptionApprovalVersion;
+      !isCurrentReceptionApprovalVersion(request.get("receptionApprovalVersion"), nextReceptionApprovalVersion);
   });
   for (let i = 0; i < staleRequests.length; i += 400) {
     const batch = db.batch();
@@ -759,7 +774,7 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     const role = terminalSnap.get("role");
     const managementApproved = terminalSnap.get("managementApproved") === true;
     const now = new Date().toISOString();
-    const nextVersion = readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion")) + 1;
+    const nextVersion = readTerminalReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion")) + 1;
     const patch: Record<string, unknown> = {
       receptionApproved: false,
       receptionApprovalVersion: nextVersion,
@@ -784,7 +799,7 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     return (status === "pending" || status === "approved") &&
       (request.get("requesterUid") === uid ||
        ("nextReceptionApprovalVersion" in result &&
-        readReceptionApprovalVersion(request.get("receptionApprovalVersion")) !== result.nextReceptionApprovalVersion));
+        !isCurrentReceptionApprovalVersion(request.get("receptionApprovalVersion"), result.nextReceptionApprovalVersion)));
   });
   for (let i = 0; i < staleRequests.length; i += 400) {
     const batch = db.batch();
