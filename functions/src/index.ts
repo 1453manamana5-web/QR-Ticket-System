@@ -293,15 +293,21 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
     return { approved: false, terminalId: null };
   }
 
-  const [owner, terminal] = await Promise.all([
+  const [owner, terminal, applications] = await Promise.all([
     db.doc("terminalOwners/" + terminalId).get(),
     db.doc("terminals/" + terminalId).get(),
+    db.collection("terminalApplications").where("requestedByUid", "==", uid).limit(5).get(),
   ]);
   if (!owner.exists || owner.get("enabled") !== true ||
       !terminal.exists || terminal.get("approved") !== true) {
     return { approved: false, terminalId: null };
   }
 
+  const pendingReceptionApplication = applications.docs.some((item) =>
+    item.get("terminalId") === terminalId &&
+    item.get("requestedRole") === "reception" &&
+    item.get("status") === "pending"
+  );
   const role = terminal.get("role");
   const managementApproved = terminal.get("managementApproved") === true ||
     (terminal.get("managementApproved") === undefined && terminal.get("approved") === true &&
@@ -316,7 +322,7 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
     approved: true,
     terminalId,
     name: typeof terminal.get("name") === "string" ? terminal.get("name") : "端末",
-    status: status === "online" || status === "offline" ? status : "pending",
+    status: pendingReceptionApplication ? "pending" : (status === "online" || status === "offline" ? status : "pending"),
     role: role === "management" || role === "reception" || role === "both" ? role : null,
     managementApproved,
     receptionApproved,
