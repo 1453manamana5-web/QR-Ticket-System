@@ -197,7 +197,7 @@ export default function App(){
         setError("ローカルデータを確認できませんでした。");
       }
     })();
-  },[]);
+  },[terminalRegistration?.approved]);
 
   useEffect(()=>{
     if(!result)return;
