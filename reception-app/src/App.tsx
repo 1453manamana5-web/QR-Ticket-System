@@ -100,6 +100,15 @@ export default function App(){
           await markSyncStatus(item.recordId,"failed",item.retryCount+1).catch(()=>undefined);
         }
       }
+      const pendingErrors=await getPendingReceptionErrorLogs();
+      for(const log of pendingErrors){
+        try{
+          await syncReceptionErrorLog(log);
+          await markReceptionErrorLogSynced(log.errorId);
+        }catch(reason){
+          console.error("受付エラーログの再同期に失敗しました。次回再試行します",reason);
+        }
+      }
     }catch(reason){
       console.error("同期キューの読み込みに失敗しました",reason);
     }
