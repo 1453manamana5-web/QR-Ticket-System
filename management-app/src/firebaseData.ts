@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -240,10 +240,11 @@ export type ReceptionErrorRecord = {
 
 export async function loadReceptionErrors(eventId: string): Promise<ReceptionErrorRecord[]> {
   const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "receptionErrors"));
+  // イベントIDでサーバー側から絞り込み、他イベントのログを読み込まない。
+  const errorsQuery = query(collection(db, "receptionErrors"), where("eventId", "==", eventId));
+  const snapshot = await getDocs(errorsQuery);
   return snapshot.docs
     .map(item => item.data() as ReceptionErrorRecord)
-    .filter(item => item.eventId === eventId)
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 }
 
