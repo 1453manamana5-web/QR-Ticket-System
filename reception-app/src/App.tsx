@@ -4,7 +4,7 @@ import QrScanner from "./QrScanner";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,markSyncStatus,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,type ReceptionErrorCategory} from "./localDb";
 import {downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {requestTerminalHandoff,completeTerminalHandoff,getTerminalInstallationStatus} from "./terminalHandoff";
-import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord,syncReceptionErrorLog} from "./receptionSync";
+import {getTerminalRegistration,registerReceptionTerminal,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,syncReceptionRecord,syncReceptionErrorLog} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
@@ -308,19 +308,16 @@ export default function App(){
   };
 
   const resetTerminalRegistration = async () => {
-    if(busy)return;
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
-      await resetReceptionTerminalRegistration().catch(reason=>console.error("Firebase上の受付端末登録削除に失敗しました",reason));
-      localStorage.removeItem("qr-ticket-terminal-id");
-      const nextId=getTerminalId();
-      console.info("受付端末登録をリセットしました",nextId);
-      setTerminalRegistration(null);
-      setScreen("registration");
+      const registration = await getTerminalRegistration();
+      setTerminalRegistration(registration);
+      setError(registration?.approved ? "" : "まだ承認されていません。管理端末で承認後、もう一度確認してください。");
     } catch (reason) {
-      console.error("受付端末登録のリセットに失敗しました", reason);
-      setError("登録申請をリセットできませんでした。");
+      console.error("受付端末の承認状態確認に失敗しました", reason);
+      setError("承認状態を確認できませんでした。通信状態を確認してください。");
     } finally {
       setBusy(false);
     }
@@ -508,7 +505,7 @@ export default function App(){
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
           <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
-          <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
+          <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"確認中…":"承認状態を再確認"}</button>
         </>}
         <div className="reception-registration-handoff">
           <h3>登録済み端末を引き継ぐ</h3>
