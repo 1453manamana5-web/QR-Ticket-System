@@ -262,7 +262,7 @@ export default function App(){
     setBusy(true);
     setError("");
     try {
-      await resetReceptionTerminalRegistration().catch(reason=>console.error("Firebase上の受付端末登録削除に失敗しました",reason));
+      await resetReceptionTerminalRegistration();
       localStorage.removeItem("qr-ticket-terminal-id");
       const nextId=getTerminalId();
       console.info("受付端末登録をリセットしました",nextId);
