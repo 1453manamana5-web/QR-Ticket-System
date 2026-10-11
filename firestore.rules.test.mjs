@@ -47,7 +47,7 @@ test("approved reception installations can read event metadata but not ticket do
     });
     await setDoc(doc(db, "terminals", "T-RECEPTION-READ"), {
       terminalId: "T-RECEPTION-READ", approved: true, managementApproved: false,
-      receptionApproved: true, role: "reception",
+      receptionApproved: true, role: "reception", requestedByUid: "reception-reader",
     });
     await setDoc(doc(db, "events", "event-1"), { eventId: "event-1" });
     await setDoc(doc(db, "events", "event-1", "tickets", "ticket-1"), {
@@ -57,6 +57,8 @@ test("approved reception installations can read event metadata but not ticket do
   const db = env.authenticatedContext("reception-reader").firestore();
   await assertSucceeds(getDoc(doc(db, "events", "event-1")));
   await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
+  await assertSucceeds(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
+  await assertFails(getDoc(doc(db, "terminals", "T-OTHER")));
   await env.withSecurityRulesDisabled(async context => {
     const trustedDb = context.firestore();
     await setDoc(doc(trustedDb, "events", "event-1", "receptionRecords", "record-1"), { recordId: "record-1" });
