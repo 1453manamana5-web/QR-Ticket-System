@@ -49,13 +49,22 @@ export const requestTerminalHandoff = onCall(async (call) => {
       tx.get(rateLimitRef),
     ]);
 
+    const role = terminalSnap.get("role");
+    const receptionRole = role === "reception" || role === "both";
+    const receptionApproved = terminalSnap.get("receptionApproved") === true ||
+      (terminalSnap.get("receptionApproved") === undefined &&
+        terminalSnap.get("approved") === true);
+
     if (
       !terminalSnap.exists ||
       terminalSnap.get("approved") !== true ||
+      !receptionRole ||
+      !receptionApproved ||
       !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true
     ) {
-      // Avoid confirming whether an arbitrary ID exists or is registered.
+      // Validate the required reception authorization before creating a request.
+      // Keep the response generic so arbitrary IDs cannot be enumerated.
       throw new HttpsError("not-found", "引き継ぎ対象を確認できません。");
     }
 
