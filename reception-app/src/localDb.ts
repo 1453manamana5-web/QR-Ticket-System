@@ -313,6 +313,7 @@ export type ReceptionErrorLog = {
   category: ReceptionErrorCategory;
   mode: "entry" | "exit";
   timestamp: string;
+  syncedAt?: string;
 };
 
 export async function saveReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
@@ -338,6 +339,31 @@ export async function getReceptionErrorLogs(): Promise<ReceptionErrorLog[]> {
         .objectStore(STORES.receptionErrors).getAll();
       request.onsuccess = () => resolve(request.result as ReceptionErrorLog[]);
       request.onerror = () => reject(request.error ?? new Error("受付エラーログを読み込めませんでした"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function getPendingReceptionErrorLogs(): Promise<ReceptionErrorLog[]> {
+  const logs = await getReceptionErrorLogs();
+  return logs.filter(log => !log.syncedAt);
+}
+
+export async function markReceptionErrorLogSynced(errorId: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.receptionErrors, "readwrite");
+      const store = transaction.objectStore(STORES.receptionErrors);
+      const request = store.get(errorId);
+      request.onsuccess = () => {
+        const log = request.result as ReceptionErrorLog | undefined;
+        if (log) store.put({ ...log, syncedAt: new Date().toISOString() });
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("受付エラーログの同期状態を保存できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("受付エラーログの同期状態保存が中断されました"));
     });
   } finally {
     database.close();
