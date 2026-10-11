@@ -12,6 +12,11 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
     const serverStatus = await getTerminalInstallationStatus();
     if (!serverStatus.approved || serverStatus.terminalId !== terminalId) return null;
+    return {
+      approved: true,
+      status: serverStatus.status ?? "offline",
+      name: serverStatus.name ?? "受付端末",
+    };
   }
   const db = getFirebaseDb();
   const snapshot = await getDoc(doc(db, "terminals", terminalId));
@@ -44,6 +49,32 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await getTerminalInstallationStatus();
+        if (cancelled) return;
+        if (!status.approved || status.terminalId !== getTerminalIdForRegistration()) {
+          onChange(null);
+          return;
+        }
+        onChange({
+          approved: true,
+          status: status.status ?? "offline",
+          name: status.name ?? "受付端末",
+        });
+      } catch (error) {
+        if (!cancelled) onError(error);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }
   const db = getFirebaseDb();
   let revision = 0;
   return onSnapshot(doc(db, "terminals", getTerminalIdForRegistration()), snapshot => {
@@ -127,8 +158,6 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     : (await getPendingSyncItems()).length;
   const db = getFirebaseDb();
   const reference = doc(db, "terminals", terminalId);
-  const existing = await getDoc(reference);
-  if (!existing.exists()) throw new Error("TERMINAL_NOT_REGISTERED");
   const networkMbps = await measureNetworkSpeed(db, reference);
   const { updateTerminalHeartbeat } = await import("./terminalHandoff");
   const modeLabel = mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止";
@@ -137,6 +166,27 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
 }
 
 export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await getTerminalInstallationStatus();
+        if (cancelled || !status.approved || status.terminalId !== terminalId) return;
+        const value = status.desiredMode;
+        if (value === "入口受付" || value === "出口受付" || value === "停止") {
+          onMode(value, status.desiredModeUpdatedAt ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) onError(error);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }
   const db = getFirebaseDb();
   return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
     const value = snapshot.data()?.desiredMode;
