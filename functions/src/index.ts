@@ -69,8 +69,9 @@ export const requestTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("not-found", "引き継ぎ対象を確認できません。");
     }
 
-    const lastRequestedAt = rateLimitSnap.get("lastRequestedAt") as Timestamp | undefined;
-    if (lastRequestedAt && now - lastRequestedAt.toMillis() < REQUEST_COOLDOWN_MS) {
+    const lastRequestedAt = rateLimitSnap.get("lastRequestedAt");
+    if (lastRequestedAt instanceof Timestamp &&
+        now - lastRequestedAt.toMillis() < REQUEST_COOLDOWN_MS) {
       throw new HttpsError("resource-exhausted", "少し待ってから再度申請してください。");
     }
 
@@ -122,11 +123,20 @@ export const listTerminalHandoffRequests = onCall(async (call) => {
     .get();
 
   return {
-    requests: snapshot.docs.map((doc) => ({
-      requestId: doc.id,
-      createdAt: doc.get("createdAt")?.toMillis?.() ?? null,
-      expiresAt: doc.get("expiresAt").toMillis(),
-    })),
+    requests: snapshot.docs.flatMap((doc) => {
+      const expiresAt = doc.get("expiresAt");
+      const createdAt = doc.get("createdAt");
+      // Defensive validation keeps malformed legacy documents from crashing
+      // the entire owner-facing request list.
+      if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) {
+        return [];
+      }
+      return [{
+        requestId: doc.id,
+        createdAt: createdAt instanceof Timestamp ? createdAt.toMillis() : null,
+        expiresAt: expiresAt.toMillis(),
+      }];
+    }),
   };
 });
 
@@ -146,7 +156,7 @@ export const decideTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("not-found", "申請が見つからないか、有効期限が切れています。");
     }
 
-    const terminalId = requestSnap.get("terminalId") as string;
+    const terminalId = readId(requestSnap.get("terminalId"), "申請内の端末ID");
     const terminalRef = db.doc(`terminals/${terminalId}`);
     const ownerRef = db.doc(`terminalOwners/${terminalId}`);
     const [terminalSnap, ownerSnap] = await Promise.all([
@@ -202,9 +212,11 @@ export const completeTerminalHandoff = onCall(async (call) => {
 
   const terminalId = await db.runTransaction(async (tx) => {
     const requestSnap = await tx.get(requestRef);
+    if (!requestSnap.exists) {
+      throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
+    }
     const expiresAt = requestSnap.get("expiresAt");
     if (
-      !requestSnap.exists ||
       requestSnap.get("requesterUid") !== requesterUid ||
       requestSnap.get("status") !== "approved" ||
       !(expiresAt instanceof Timestamp) ||
@@ -213,7 +225,7 @@ export const completeTerminalHandoff = onCall(async (call) => {
       throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
     }
 
-    const id = requestSnap.get("terminalId") as string;
+    const id = readId(requestSnap.get("terminalId"), "申請内の端末ID");
     const terminalRef = db.doc("terminals/" + id);
     const ownerRef = db.doc("terminalOwners/" + id);
     const [installationSnap, terminalSnap, ownerSnap] = await Promise.all([
