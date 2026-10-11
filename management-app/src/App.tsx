@@ -2944,7 +2944,29 @@ function NavIcon({type}:{type:string}){
           <div className="ai-lab-stat"><span>受付記録</span><strong>{receptionRecords.filter(record => record.type === "entry" || record.type === "exit").length}件</strong></div>
           <div className="ai-lab-stat"><span>チケット総数</span><strong>{ticketStats.total}枚</strong></div>
           <div className="ai-lab-stat"><span>入場中</span><strong>{ticketStats.inside}人</strong></div>
-          <p>現在端末で参照できるイベントデータを集計しています。複数端末の全記録が同期済みとは限りません。</p>
+          {(() => {
+            const hourly = Array.from({ length: 24 }, (_, hour) => {
+              const records = receptionRecords.filter(record =>
+                Number.isFinite(Date.parse(record.timestamp)) &&
+                new Date(record.timestamp).getHours() === hour &&
+                (record.type === "entry" || record.type === "exit" || record.type === "reentry")
+              );
+              return { hour, count: records.length, entries: records.filter(record => record.type === "entry").length, exits: records.filter(record => record.type === "exit").length, reentries: records.filter(record => record.type === "reentry").length };
+            }).filter(row => row.count > 0);
+            const peak = hourly.reduce((best, row) => row.count > best.count ? row : best, { hour: 0, count: 0, entries: 0, exits: 0, reentries: 0 });
+            const total = hourly.reduce((sum, row) => sum + row.count, 0);
+            const average = hourly.length ? total / hourly.length : 0;
+            const max = Math.max(1, ...hourly.map(row => row.count));
+            return <section className="smart-reception-analysis">
+              <div className="smart-reception-analysis-heading"><div><small>SMART RECEPTION</small><h4>時間帯別の混雑傾向</h4></div><span>{total}件を集計</span></div>
+              {hourly.length ? <>
+                <div className="smart-reception-peak"><span>記録が最も多い時間帯</span><strong>{String(peak.hour).padStart(2, "0")}:00〜{String((peak.hour + 1) % 24).padStart(2, "0")}:00</strong><small>{peak.count}件（集計対象時間帯の平均 {average.toFixed(1)}件）</small></div>
+                <div className="smart-reception-hourly-list">{hourly.map(row => <div className="smart-reception-hour-row" key={row.hour}><span>{String(row.hour).padStart(2, "0")}:00</span><div className="smart-reception-hour-track"><i style={{ width: (row.count / max * 100) + "%" }} /></div><strong>{row.count}件</strong></div>)}</div>
+                <p className="smart-reception-insight">{peak.count >= average * 1.5 && hourly.length > 1 ? "提案：最も記録が集中した時間帯は、受付担当を増やす・列を分けるなどの準備を検討してください。" : "現在の記録では、特定の時間帯への大きな集中は明確ではありません。受付記録が増えると傾向を把握しやすくなります。"}</p>
+              </> : <p className="smart-reception-empty">時間帯を分析できる受付記録がまだありません。受付記録が同期されると、ここに混雑傾向を表示します。</p>}
+            </section>;
+          })()}
+          <p>分析対象はこの端末で参照できる記録です。複数端末の未同期記録や、受付に失敗して記録されなかったQR読み取りは含まれません。</p>
         </div>}
         {aiLabPanel === "システム診断" && <div className="ai-lab-detail-content">
           <div className="ai-lab-diagnostic-row"><span>イベント</span><strong>{event.eventId ? "選択済み" : "未選択"}</strong></div>
