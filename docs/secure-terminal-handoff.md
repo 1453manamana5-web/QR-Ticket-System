@@ -17,7 +17,7 @@ Ownership is intentionally stored separately in `terminalOwners/{terminalId}`. T
 
 ## Not yet production-ready
 
-This is a backend foundation, not a complete live feature. The UI now has a first integration with Firebase Authentication and the callable endpoints. However, existing terminals have not been migrated to trusted owner mappings, the reception app still needs to enforce `terminalInstallations/{uid}` before granting access, and Firebase deployment/configuration and emulator tests remain outstanding. Do not deploy or enable this flow until all of the following are completed:
+This is a backend foundation, not a complete live feature. The current-main UI now calls the server for terminal applications, approvals, handoff, terminal heartbeat, reception-record writes, and reception-error writes. Firestore rules and emulator tests are included in the draft, but they still require a full review and passing CI before deployment. Existing production terminals have not yet been migrated to trusted owner mappings. Do not deploy or enable this flow until all of the following are completed:
 
 1. Set up Firebase Authentication in both apps and persist an authenticated UID per browser installation.
 2. Populate `terminalOwners/{terminalId}` through a trusted administrator-controlled migration. Each document must contain `ownerUid` and `enabled: true`.
@@ -38,6 +38,25 @@ This is a backend foundation, not a complete live feature. The UI now has a firs
 - Existing event/ticket/reception synchronization continues to work.
 - Safari and the Home Screen app on the same iPad can complete the explicit approval flow.
 
+
+## First administrator bootstrap (trusted, one-time)
+
+1. Open the management app in the browser installation that should become the first administrator.
+2. On **端末管理 → 端末登録申請**, submit the management terminal application. Copy both the displayed terminal ID and the displayed authentication UID. The UID belongs to this browser installation; do not copy it from another browser or from Safari/Home Screen storage that you do not intend to authorize.
+3. On a trusted administrator workstation, authenticate Application Default Credentials for the intended Firebase project and build the migration scripts.
+4. Run the bootstrap script with the exact project, terminal ID, and UID. It only promotes a matching pending management application from that same UID, or creates a terminal if no application exists; it refuses to overwrite existing owner/installation mappings or unrelated terminals.
+
+```sh
+gcloud auth application-default login
+npm --prefix functions install
+npm --prefix functions run build:migration
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" \
+BOOTSTRAP_TERMINAL_ID="T-REPLACE" \
+BOOTSTRAP_OWNER_UID="UID-REPLACE" \
+node functions/lib-migration/scripts/bootstrap-first-admin.js
+```
+
+This trusted bootstrap is not run by the browser and must never be exposed as a public callable endpoint. After it completes, the management app checks the server-issued authorization status and reloads the protected terminal list.
 
 ## Trusted owner migration (manual, create-only)
 
