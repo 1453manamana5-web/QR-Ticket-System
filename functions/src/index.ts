@@ -245,11 +245,22 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
   const terminalRole = terminal.get("role");
   if (!owner.exists || owner.get("enabled") !== true || !terminal.exists ||
       (terminalRole !== "reception" && terminalRole !== "both") ||
+      terminal.get("approved") !== true ||
       !(terminal.get("receptionApproved") === true || (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true))) {
     return { approved: false, terminalId: null };
   }
 
-  return { approved: true, terminalId };
+  const status = terminal.get("status");
+  const desiredMode = terminal.get("desiredMode");
+  const desiredModeUpdatedAt = terminal.get("desiredModeUpdatedAt");
+  return {
+    approved: true,
+    terminalId,
+    name: typeof terminal.get("name") === "string" ? terminal.get("name") : "受付端末",
+    status: status === "online" || status === "offline" ? status : "pending",
+    desiredMode: desiredMode === "入口受付" || desiredMode === "出口受付" || desiredMode === "停止" ? desiredMode : null,
+    desiredModeUpdatedAt: typeof desiredModeUpdatedAt === "string" ? desiredModeUpdatedAt : null,
+  };
 });
 
 /** Approve requested terminal roles only when called by a trusted registered manager. */
