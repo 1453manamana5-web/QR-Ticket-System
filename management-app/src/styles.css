@@ -9,7 +9,7 @@
 .sidebar-nav{display:flex!important;flex-direction:column;gap:4px}.sidebar-group{display:grid;gap:5px;margin-bottom:12px}.sidebar-group:last-child{margin-bottom:0}
 .sidebar-group-title{display:flex;align-items:center;gap:10px;padding:2px 12px 4px;color:#eef2f8}.sidebar-group-title strong{font-size:12px;font-weight:900;white-space:nowrap}.sidebar-group-title span{height:1px;flex:1;background:rgb(255 255 255/.14)}
 .sidebar-group-items{display:grid;gap:3px}
-.sidebar nav button{width:100%;min-height:52px;border:1px solid transparent;background:transparent;color:#fff;padding:0 12px;border-radius:15px;display:flex;align-items:center;justify-content:flex-start;gap:13px;cursor:pointer;text-align:left;font-weight:800;font-size:15px;transition:background .15s ease,color .15s ease,transform .15s ease}
+.sidebar nav button{width:100%;min-height:52px;border:1px solid transparent;background:transparent;color:#fff;padding:0 12px;border-radius:15px;display:flex;align-items:center;justify-content:flex-start;gap:13px;cursor:pointer;text-align:left;font-weight:800;font-size:15px;transition:background .15s ease,color .15s ease,border-color .15s ease,box-shadow .15s ease}
 .sidebar nav button:hover{background:rgb(255 255 255/.07);color:#fff}.sidebar nav button.active{background:rgb(255 255 255/.11);border-color:rgb(255 255 255/.16);color:#fff;box-shadow:0 6px 18px rgb(0 0 0/.08)}
 .sidebar-item-icon{width:30px;height:30px;flex:none;display:grid;place-items:center;color:#fff}.sidebar nav button.active .sidebar-item-icon{color:#fff}.sidebar-item-icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .sidebar-item-label{min-width:0;font-size:16px!important;color:#fff!important}.sidebar nav button .sidebar-item-icon{color:#fff!important}.sidebar nav button .sidebar-item-icon svg{color:#fff!important}
@@ -4629,3 +4629,23 @@ body:has(.ticket-screen),
 .app-shell.sidebar-collapsed .management-main{width:100%;padding:16px 12px 24px}
 }
 @media(prefers-reduced-motion:reduce){.app-shell .sidebar,.sidebar .brand-copy{transition:none}}
+
+
+/* Keep every sidebar item at a consistent size in all states. */
+.app-shell .sidebar nav button,
+.app-shell .sidebar nav button:hover,
+.app-shell .sidebar nav button:focus,
+.app-shell .sidebar nav button:focus-visible,
+.app-shell .sidebar nav button.active,
+.app-shell .sidebar nav button.nav-swipe-preview {
+  transform: none !important;
+  scale: none !important;
+}
+.app-shell .sidebar nav button .sidebar-item-icon {
+  transform: none !important;
+  scale: none !important;
+}
+.app-shell.sidebar-collapsed .sidebar-item-icon {
+  width: 30px;
+  height: 30px;
+}
