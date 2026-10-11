@@ -655,8 +655,11 @@ export const registerTerminalApplication = onCall(async (call) => {
           current.approved === true) {
         throw new HttpsError("already-exists", "登録済み端末は新規申請できません。管理端末から承認操作を行ってください。");
       }
-      if (typeof current.requestedByUid === "string" && current.requestedByUid !== uid) {
-        throw new HttpsError("already-exists", "この端末IDは別の申請で使用されています。");
+      // Existing pending IDs must be bound to the same authenticated applicant.
+      // Missing/malformed requestedByUid is not evidence of ownership: fail closed
+      // rather than letting another installation take over a legacy or damaged request.
+      if (current.requestedByUid !== uid) {
+        throw new HttpsError("already-exists", "この端末IDは別の申請で使用されているか、申請者を確認できません。");
       }
     }
 
