@@ -105,7 +105,7 @@ async function main() {
       registrationApprovedAt: new Date().toISOString(),
       createdByTrustedBootstrap: true,
     });
-  });;
+  });
 
   process.stdout.write("First admin terminal and trusted owner mapping created. Keep this output in your admin audit log.\n");
 }
