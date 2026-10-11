@@ -61,7 +61,8 @@ export const requestTerminalHandoff = onCall(async (call) => {
       !receptionRole ||
       !receptionApproved ||
       !ownerSnap.exists ||
-      ownerSnap.get("enabled") !== true
+      ownerSnap.get("enabled") !== true ||
+      ownerSnap.get("ownerUid") === requesterUid
     ) {
       // Validate the required reception authorization before creating a request.
       // Keep the response generic so arbitrary IDs cannot be enumerated.
