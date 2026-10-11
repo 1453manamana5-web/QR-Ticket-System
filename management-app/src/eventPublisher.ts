@@ -31,7 +31,7 @@ export async function saveEventMetadata(event: Event): Promise<void> {
   await setDoc(doc(db, "events", event.eventId), {
     ...event,
     updatedAt: new Date().toISOString(),
-  });
+  }, { merge: true });
 }
 
 export function createAuthToken(): string {
