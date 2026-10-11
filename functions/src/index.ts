@@ -703,9 +703,10 @@ export const setTerminalSubAdmin = onCall(async (call) => {
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const ownerRef = db.doc("terminalOwners/" + managerTerminalId);
   const targetRef = db.doc("terminals/" + targetTerminalId);
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
-      tx.get(managerRef), tx.get(ownerRef), tx.get(targetRef),
+    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(ownerRef), tx.get(targetRef), tx.get(targetOwnerRef),
     ]);
     if (!managerSnap.exists || !ownerSnap.exists ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
@@ -718,9 +719,25 @@ export const setTerminalSubAdmin = onCall(async (call) => {
     if (targetSnap.get("admin") === true) {
       throw new HttpsError("failed-precondition", "管理者端末の権限は変更できません。");
     }
-    if (targetSnap.get("managementApproved") !== true ||
+    if (targetSnap.get("approved") !== true ||
+        targetSnap.get("managementApproved") !== true ||
         (targetSnap.get("role") !== "management" && targetSnap.get("role") !== "both")) {
       throw new HttpsError("failed-precondition", "承認済みの管理端末のみ副管理者に設定できます。");
+    }
+    // Do not grant elevated privileges to an orphaned terminal document. Its
+    // owner mapping and server-issued installation must still agree on identity.
+    const targetOwnerUid = targetOwnerSnap.get("ownerUid");
+    if (!targetOwnerSnap.exists || targetOwnerSnap.get("enabled") !== true ||
+        typeof targetOwnerUid !== "string" || !targetOwnerUid) {
+      throw new HttpsError("failed-precondition", "対象端末の所有者情報を確認できません。");
+    }
+    const targetInstallationRef = db.doc("terminalInstallations/" + targetOwnerUid);
+    const targetInstallationSnap = await tx.get(targetInstallationRef);
+    if (!targetInstallationSnap.exists ||
+        targetInstallationSnap.get("authUid") !== targetOwnerUid ||
+        targetInstallationSnap.get("approved") !== true ||
+        targetInstallationSnap.get("terminalId") !== targetTerminalId) {
+      throw new HttpsError("failed-precondition", "対象端末の登録情報を確認できません。");
     }
     tx.update(targetRef, {
       subAdmin: enabled,
