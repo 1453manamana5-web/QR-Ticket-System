@@ -327,17 +327,43 @@ export const approveTerminalRegistration = onCall(async (call) => {
     throw new HttpsError("failed-precondition", "この申請は端末所有者を検証できません。安全な移行後に再申請してください。");
   }
 
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   const installationRef = db.doc("terminalInstallations/" + targetUid);
   await db.runTransaction(async (tx) => {
-    const [freshTarget, ownerSnap, installationSnap] = await Promise.all([
-      tx.get(targetRef), tx.get(targetOwnerRef), tx.get(installationRef),
+    const [freshManager, freshManagerOwner, freshTarget, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(targetRef),
+      tx.get(targetOwnerRef),
+      tx.get(installationRef),
     ]);
+    // Revalidate the acting manager inside the same transaction as the approval.
+    // A permission revocation or ownership change after the initial reads must
+    // not allow a stale administrator session to approve another terminal.
+    if (!freshManager.exists || !freshManagerOwner.exists ||
+        freshManagerOwner.get("enabled") !== true ||
+        freshManagerOwner.get("ownerUid") !== uid ||
+        freshManager.get("approved") !== true ||
+        freshManager.get("managementApproved") !== true ||
+        (freshManager.get("role") !== "management" && freshManager.get("role") !== "both") ||
+        (freshManager.get("admin") !== true && freshManager.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "管理端末の権限が変更されたため、承認できません。");
+    }
     if (!freshTarget.exists ||
         freshTarget.get("requestedByUid") !== targetUid ||
         freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true) {
       throw new HttpsError("failed-precondition", "申請内容が変更されています。再読み込みしてください。");
+    }
+    const freshRole = freshTarget.get("role");
+    if (freshRole !== "management" && freshRole !== "reception" && freshRole !== "both") {
+      throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
+    }
+    if (freshManager.get("admin") !== true &&
+        (freshRole === "management" || freshRole === "both")) {
+      throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
     }
     // Any existing owner mapping is authoritative, including a disabled one.
     // Ordinary approval must never revive a revoked mapping or transfer ownership;
@@ -357,8 +383,8 @@ export const approveTerminalRegistration = onCall(async (call) => {
       approvalUpdatedAt: FieldValue.serverTimestamp(),
       approvalUpdatedByUid: uid,
     };
-    if (role === "management" || role === "both") patch.managementApproved = true;
-    if (role === "reception" || role === "both") patch.receptionApproved = true;
+    if (freshRole === "management" || freshRole === "both") patch.managementApproved = true;
+    if (freshRole === "reception" || freshRole === "both") patch.receptionApproved = true;
     tx.update(targetRef, patch);
     tx.set(targetOwnerRef, {
       terminalId: targetTerminalId,
