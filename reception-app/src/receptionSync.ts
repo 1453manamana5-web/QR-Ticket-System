@@ -14,7 +14,7 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
   const terminalId = getTerminalIdForRegistration();
   const serverStatus = await getTerminalInstallationStatus();
-  if (serverStatus.approved && serverStatus.terminalId === terminalId) {
+  if (serverStatus.approved && serverStatus.terminalId === terminalId && serverStatus.receptionApproved === true && (serverStatus.role === "reception" || serverStatus.role === "both")) {
     localStorage.setItem("qr-ticket-terminal-handoff-verified", "true");
     return {
       approved: true,
@@ -22,7 +22,7 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
       name: serverStatus.name ?? "受付端末",
     };
   }
-  if (serverStatus.status === "pending" && serverStatus.name) {
+  if (!serverStatus.approved && serverStatus.status === "pending" && serverStatus.name) {
     return { approved: false, status: "pending", name: serverStatus.name };
   }
   return null;
