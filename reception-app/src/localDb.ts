@@ -373,16 +373,21 @@ export async function markReceptionErrorLogSynced(errorId: string): Promise<void
 export async function clearLocalEvent(): Promise<void> {
   const database = await openDatabase();
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(Object.values(STORES), "readwrite");
+  // イベントデータを消去しても、未同期の受付エラーログは保持する。
+  const storesToClear = Object.values(STORES).filter(storeName => storeName !== "receptionErrors");
 
-    for (const storeName of Object.values(STORES)) {
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storesToClear, "readwrite");
+
+    for (const storeName of storesToClear) {
       transaction.objectStore(storeName).clear();
     }
 
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
       reject(transaction.error ?? new Error("ローカルデータを削除できませんでした"));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error("ローカルデータの削除が中断されました"));
   });
 
   database.close();
