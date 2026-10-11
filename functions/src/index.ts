@@ -985,10 +985,28 @@ export const recordReception = onCall(async (call) => {
   const recordRef = db.doc("events/" + eventId + "/receptionRecords/" + recordId);
 
   await db.runTransaction(async (tx) => {
-    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap] = await Promise.all([
+    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap, publishedEventsSnap] = await Promise.all([
       tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(eventRef),
       tx.get(ticketRef), tx.get(recordRef),
+      tx.get(db.collection("events").where("receptionTarget", "==", true)),
     ]);
+
+    const activePublishedEvents = publishedEventsSnap.docs.filter((item) => {
+      const data = item.data();
+      return data.eventStatus !== "finished" &&
+        typeof data.eventId === "string" && data.eventId.length > 0 &&
+        typeof data.eventName === "string" && data.eventName.length > 0 &&
+        typeof data.dataVersion === "number" &&
+        typeof data.authToken === "string" && data.authToken.length > 0;
+    });
+    // The callable that supplies event metadata rejects zero or multiple active
+    // reception targets. Enforce the same invariant here as well: otherwise a
+    // stale or modified client could submit a ticket from an older event directly.
+    if (activePublishedEvents.length !== 1 ||
+        activePublishedEvents[0].id !== eventId ||
+        activePublishedEvents[0].get("eventId") !== eventId) {
+      throw new HttpsError("failed-precondition", "受付対象イベントが変更されたか、1件に限定されていません。最新のイベント情報を取得してください。");
+    }
 
     const installationMatches = installationSnap.exists &&
       installationSnap.get("authUid") === uid &&
