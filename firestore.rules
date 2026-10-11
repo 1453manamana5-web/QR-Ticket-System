@@ -17,6 +17,9 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && exists(/databases/$(database)/documents/terminalOwners/$(managementTerminalId()))
+        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.enabled == true
+        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.ownerUid == request.auth.uid
         && exists(/databases/$(database)/documents/terminals/$(managementTerminalId()))
         && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.approved == true
         && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.managementApproved == true
