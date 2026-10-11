@@ -144,8 +144,8 @@ export default function App() {
       const mainRect = mainElement.getBoundingClientRect();
       pageOpeningSequence.current += 1;
       setPageOpeningOrigin({
-        // The sidebar sits immediately to the left of the content, so unfold from that seam.
-        x: 0,
+        // Align the reveal with the center of the clicked navigation item.
+        x: Math.max(0, sourceRect.left + sourceRect.width / 2 - mainRect.left),
         y: Math.max(0, Math.min(mainRect.height, sourceRect.top + sourceRect.height / 2 - mainRect.top)),
         sequence: pageOpeningSequence.current,
       });
