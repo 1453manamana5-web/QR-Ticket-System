@@ -175,6 +175,10 @@ export default function App(){
         const saved=await loadLocalEvent();
         if(!saved)return;
 
+        // オンライン時はFirebaseの公開対象を正として扱い、削除済みイベントの古い端末キャッシュを復元しない。
+        // 保存済みデータは、ネットワークが利用できない起動時のオフライン受付用に限って復元する。
+        if(navigator.onLine)return;
+
         if(saved.dataReady){
           const ticketCount=await countTickets(saved.event.eventId);
           if(ticketCount!==saved.ticketCount){
