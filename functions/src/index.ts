@@ -411,42 +411,53 @@ export const revokeTerminalReception = onCall(async (call) => {
   const uid = requireUid(call);
   const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
   const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
-
-  const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
-    db.doc("terminals/" + managerTerminalId).get(),
-    db.doc("terminalOwners/" + managerTerminalId).get(),
-    db.doc("terminals/" + targetTerminalId).get(),
-  ]);
-  if (!managerSnap.exists || !ownerSnap.exists ||
-      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
-      managerSnap.get("approved") !== true ||
-      managerSnap.get("managementApproved") !== true ||
-      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
-      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
-    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
-  }
-  if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
-  if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
-    throw new HttpsError("permission-denied", "管理権限を持つ端末の受付権限は解除できません。");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身の受付権限はこの操作では解除できません。");
   }
 
-  const role = targetSnap.get("role");
-  const patch: Record<string, unknown> = {
-    receptionApproved: false,
-    approved: targetSnap.get("managementApproved") === true,
-    mode: "停止",
-    desiredMode: "停止",
-    desiredModeUpdatedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    approvalUpdatedAt: FieldValue.serverTimestamp(),
-    approvalUpdatedByUid: uid,
-  };
-  if (role === "both") patch.role = "management";
-  else if (role === "reception") patch.role = "reception";
-  await db.doc("terminals/" + targetTerminalId).update(patch);
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(targetRef),
+    ]);
+    // Permission and ownership must still be valid at the exact time of revocation.
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+    if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("permission-denied", "管理権限を持つ端末の受付権限は解除できません。");
+    }
+
+    const role = targetSnap.get("role");
+    if (role !== "both" && role !== "reception" && role !== "management") {
+      throw new HttpsError("failed-precondition", "対象端末の種別を確認できません。");
+    }
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      receptionApproved: false,
+      approved: targetSnap.get("managementApproved") === true,
+      mode: "停止",
+      desiredMode: "停止",
+      desiredModeUpdatedAt: now,
+      updatedAt: now,
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (role === "both") patch.role = "management";
+    tx.update(targetRef, patch);
+  });
   return { terminalId: targetTerminalId, receptionApproved: false };
 });
-
 /** Delete another terminal only through a trusted admin/sub-admin server check. */
 export const deleteManagedTerminal = onCall(async (call) => {
   const uid = requireUid(call);
