@@ -250,6 +250,10 @@ test("clients cannot access trusted handoff collections", async () => {
   await assertFails(setDoc(doc(db, "terminalInstallations", "anonymous-user-1"), { terminalId: "T-ABCDEFGH" }));
   await assertFails(setDoc(doc(db, "terminalHandoffRequests", "request-12345678"), { status: "approved" }));
   await assertFails(setDoc(doc(db, "terminalHandoffRateLimits", "anonymous-user-1"), { count: 1 }));
+  await assertFails(getDoc(doc(db, "terminalApplications", "T-ABCDEFGH")));
+  await assertFails(setDoc(doc(db, "terminalApplications", "T-ABCDEFGH"), {
+    terminalId: "T-ABCDEFGH", requestedByUid: "anonymous-user-1", requestedRole: "management", status: "approved",
+  }));
 });
 
 test("clients cannot create, update, or delete terminal documents directly", async () => {
