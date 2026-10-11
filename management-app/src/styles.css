@@ -4598,19 +4598,13 @@ body:has(.ticket-screen),
 }
 
 
-/* Collapsible management sidebar */
-.app-shell .sidebar{transition:width .28s cubic-bezier(.2,.8,.2,1),padding .28s ease}
-.sidebar-collapse-toggle{margin-left:auto;min-height:34px;max-width:100%;padding:0 10px;flex:none;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgb(255 255 255/.28);border-radius:10px;background:rgb(255 255 255/.12);color:#fff;cursor:pointer;font-size:12px;font-weight:700;line-height:1;white-space:nowrap;transition:background .18s ease,transform .18s ease}
-.sidebar-collapse-icon{font-size:23px;line-height:1}
-.sidebar-collapse-label{font-size:11px;letter-spacing:.01em}
-.sidebar-collapse-toggle:hover{background:rgb(255 255 255/.22)}
-.sidebar-collapse-toggle:focus-visible{outline:2px solid #aeb8ff;outline-offset:3px}
+/* The sidebar itself responds to horizontal swipes: left collapses, right expands. */
+.app-shell .sidebar{transition:width .28s cubic-bezier(.2,.8,.2,1),padding .28s ease;touch-action:pan-y;user-select:none}
 .sidebar .brand-copy{min-width:0;overflow:hidden;white-space:nowrap;transition:opacity .16s ease,width .28s ease}
 .app-shell.sidebar-collapsed .sidebar{width:82px;padding:22px 10px}
 .app-shell.sidebar-collapsed .brand{padding:2px 0 22px;justify-content:center;flex-wrap:wrap;gap:10px 0}
 .app-shell.sidebar-collapsed .brand-mark{width:44px;height:44px}
 .app-shell.sidebar-collapsed .brand-copy{display:none}
-.app-shell.sidebar-collapsed .sidebar-collapse-toggle{margin:0;width:42px;min-height:34px;padding:0}.app-shell.sidebar-collapsed .sidebar-collapse-label{display:none}
 .app-shell.sidebar-collapsed .event-mini{display:none}
 .app-shell.sidebar-collapsed .sidebar-group-title{justify-content:center;padding:2px 0 4px}
 .app-shell.sidebar-collapsed .sidebar-group-title strong{display:none}
@@ -4626,7 +4620,6 @@ body:has(.ticket-screen),
 .app-shell.sidebar-collapsed .sidebar{width:auto;min-height:auto;max-height:none;margin:8px 8px 0;padding:12px 10px 9px;position:relative;top:auto}
 .app-shell.sidebar-collapsed .brand{padding:2px 4px 10px;justify-content:flex-start;flex-wrap:nowrap;gap:10px}
 .app-shell.sidebar-collapsed .brand-mark{width:38px;height:38px}
-.app-shell.sidebar-collapsed .sidebar-collapse-toggle{margin-left:auto;width:36px;min-height:30px;padding:0}.app-shell:not(.sidebar-collapsed) .sidebar-collapse-toggle{padding:0 8px}
 .app-shell.sidebar-collapsed .sidebar-nav{overflow-x:auto;display:flex!important;flex-direction:row!important;gap:5px;padding-bottom:2px}
 .app-shell.sidebar-collapsed .sidebar-group{display:flex;flex:none;align-items:center;gap:5px;margin:0}
 .app-shell.sidebar-collapsed .sidebar-group-title{display:none}
@@ -4635,4 +4628,4 @@ body:has(.ticket-screen),
 .app-shell.sidebar-collapsed .sidebar-item-icon{width:25px;height:25px}
 .app-shell.sidebar-collapsed .management-main{width:100%;padding:16px 12px 24px}
 }
-@media(prefers-reduced-motion:reduce){.app-shell .sidebar,.sidebar .brand-copy,.sidebar-collapse-toggle{transition:none}}
+@media(prefers-reduced-motion:reduce){.app-shell .sidebar,.sidebar .brand-copy{transition:none}}
