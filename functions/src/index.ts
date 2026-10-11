@@ -226,6 +226,15 @@ export const completeTerminalHandoff = onCall(async (call) => {
          installationSnap.get("authUid") !== requesterUid)) {
       throw new HttpsError("failed-precondition", "この環境の登録情報が一致しません。管理者による確認が必要です。");
     }
+    // A release invalidates handoff approvals created before the release time.
+    // A new owner-approved request created after release remains valid.
+    const releasedAt = installationSnap.get("releasedAt");
+    const requestCreatedAt = requestSnap.get("createdAt");
+    if (installationSnap.exists && installationSnap.get("approved") === false &&
+        releasedAt instanceof Timestamp && requestCreatedAt instanceof Timestamp &&
+        releasedAt.toMillis() >= requestCreatedAt.toMillis()) {
+      throw new HttpsError("failed-precondition", "受付登録の解除後に新しく申請してください。");
+    }
 
     tx.set(installationRef, {
       terminalId: id,
@@ -584,6 +593,9 @@ export const deleteManagedTerminal = onCall(async (call) => {
     installations.docs.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
     await cleanup.commit();
   }
+  // Remove the server-owned application record only after the terminal has
+  // been revoked and deleted. Keep the disabled owner tombstone to block reuse.
+  await db.doc("terminalApplications/" + targetTerminalId).delete();
   return { terminalId: targetTerminalId, deleted: true };
 });
 
@@ -640,6 +652,23 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     return { terminalId, receptionApproved: false, released: true };
   });
 
+  // Cancel any older handoff approvals for this installation/terminal. The
+  // releasedAt check in completeTerminalHandoff also closes the race with cleanup.
+  if (result.released) {
+    const requests = await db.collection("terminalHandoffRequests")
+      .where("terminalId", "==", terminalId)
+      .where("requesterUid", "==", uid)
+      .where("status", "in", ["pending", "approved"])
+      .get();
+    for (let i = 0; i < requests.docs.length; i += 400) {
+      const cleanup = db.batch();
+      requests.docs.slice(i, i + 400).forEach((doc) => cleanup.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: FieldValue.serverTimestamp(),
+      }));
+      await cleanup.commit();
+    }
+  }
   return result;
 });
 
