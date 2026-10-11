@@ -494,7 +494,7 @@ export const deleteManagedTerminal = onCall(async (call) => {
     // The primary admin can first remove sub-admin status explicitly if that
     // terminal genuinely needs to be decommissioned.
     if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
-      throw new HttpsError("permission-denied", "管理者・副管理者端末は削除できません。先に副管理者権限を解除してください。");
+      throw new HttpsError("permission-denied", "管理者・副管理者端末は削除できません。");
     }
 
     const isAdmin = managerSnap.get("admin") === true;
