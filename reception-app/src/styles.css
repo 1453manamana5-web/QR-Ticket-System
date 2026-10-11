@@ -3630,3 +3630,31 @@ body {
     animation-duration: .01ms !important; transition-duration: .01ms !important;
   }
 }
+
+
+/* Secure terminal handoff UI */
+.reception-registration-handoff {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(120, 130, 150, 0.24);
+  text-align: left;
+}
+
+.reception-registration-handoff h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #202735;
+}
+
+.reception-registration-handoff p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #586174;
+}
+
+.reception-registration-handoff button {
+  width: 100%;
+}
