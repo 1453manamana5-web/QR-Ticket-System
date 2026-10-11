@@ -4704,3 +4704,48 @@ body:has(.ticket-screen),
     flex-basis: 23px !important;
   }
 }
+
+
+/* Keep the sidebar fixed while only the right-hand workspace scrolls. */
+.app-shell {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+.app-shell .sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.app-shell .management-main {
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  margin: 0;
+}
+@media (max-width: 560px) {
+  .app-shell {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell .sidebar {
+    position: relative;
+    top: auto;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .app-shell .management-main {
+    height: calc(100vh - var(--mobile-sidebar-height, 150px));
+    min-height: 0;
+    overflow-y: auto;
+    margin: 0;
+  }
+}
