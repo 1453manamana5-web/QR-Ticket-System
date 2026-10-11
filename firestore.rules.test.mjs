@@ -201,6 +201,6 @@ test("clients cannot create, update, or delete terminal documents directly", asy
   await assertFails(updateDoc(doc(db, "terminals", "T-ABCDEFGH"), { managementApproved: false }));
   await assertFails(deleteDoc(doc(db, "terminals", "T-ABCDEFGH")));
 
-  // Reading terminal status remains necessary for the management/reception UI.
-  await assertSucceeds(getDoc(doc(db, "terminals", "T-ABCDEFGH")));
+  // Unrelated clients must not read another terminal's status.
+  await assertFails(getDoc(doc(db, "terminals", "T-ABCDEFGH")));
 });
