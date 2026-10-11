@@ -534,49 +534,53 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
   const installationRef = db.doc("terminalInstallations/" + uid);
-  const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
-    terminalRef.get(),
-    ownerRef.get(),
-    installationRef.get(),
-  ]);
 
-  const ownsTerminal = ownerSnap.exists &&
-    ownerSnap.get("enabled") === true &&
-    ownerSnap.get("ownerUid") === uid;
-  const hasInstallationGrant = installationSnap.exists &&
-    installationSnap.get("authUid") === uid &&
-    installationSnap.get("approved") === true &&
-    installationSnap.get("terminalId") === terminalId;
-  if (!ownsTerminal && !hasInstallationGrant) {
-    throw new HttpsError("permission-denied", "この端末の受付権限を解除する権限がありません。");
-  }
-  if (!terminalSnap.exists) {
-    return { terminalId, receptionApproved: false, released: false };
-  }
+  const result = await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+      tx.get(installationRef),
+    ]);
 
-  // A handed-off installation may release only its own installation grant.
-  // Updating the shared terminal document here would revoke reception for every
-  // installation and could also downgrade the original terminal's role.
-  if (!ownsTerminal && hasInstallationGrant) {
-    await installationRef.update({
-      approved: false,
-      releasedAt: FieldValue.serverTimestamp(),
-    });
+    const ownsTerminal = ownerSnap.exists &&
+      ownerSnap.get("enabled") === true &&
+      ownerSnap.get("ownerUid") === uid;
+    const hasInstallationGrant = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId;
+    if (!ownsTerminal && !hasInstallationGrant) {
+      throw new HttpsError("permission-denied", "この端末の受付権限を解除する権限がありません。");
+    }
+    if (!terminalSnap.exists) {
+      return { terminalId, receptionApproved: false, released: false };
+    }
+
+    // A handed-off installation may release only its own installation grant.
+    // Do not change shared terminal approval or role fields from a recipient device.
+    if (!ownsTerminal && hasInstallationGrant) {
+      tx.update(installationRef, {
+        approved: false,
+        releasedAt: FieldValue.serverTimestamp(),
+      });
+      return { terminalId, receptionApproved: false, released: true };
+    }
+
+    const role = terminalSnap.get("role");
+    const managementApproved = terminalSnap.get("managementApproved") === true;
+    const patch: Record<string, unknown> = {
+      receptionApproved: false,
+      approved: managementApproved,
+      updatedAt: new Date().toISOString(),
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (role === "both" && managementApproved) patch.role = "management";
+    tx.update(terminalRef, patch);
     return { terminalId, receptionApproved: false, released: true };
-  }
+  });
 
-  const role = terminalSnap.get("role");
-  const managementApproved = terminalSnap.get("managementApproved") === true;
-  const patch: Record<string, unknown> = {
-    receptionApproved: false,
-    approved: managementApproved,
-    updatedAt: new Date().toISOString(),
-    approvalUpdatedAt: FieldValue.serverTimestamp(),
-    approvalUpdatedByUid: uid,
-  };
-  if (role === "both" && managementApproved) patch.role = "management";
-  await terminalRef.update(patch);
-  return { terminalId, receptionApproved: false, released: true };
+  return result;
 });
 
 
