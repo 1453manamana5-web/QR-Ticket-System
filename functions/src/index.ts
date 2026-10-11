@@ -98,9 +98,15 @@ export const listTerminalHandoffRequests = onCall(async (call) => {
     db.doc(`terminalOwners/${terminalId}`).get(),
   ]);
 
+  const terminalRole = terminalSnap.get("role");
+  const receptionActive = (terminalRole === "reception" || terminalRole === "both") &&
+    (terminalSnap.get("receptionApproved") === true ||
+      (terminalSnap.get("receptionApproved") === undefined &&
+        terminalSnap.get("approved") === true));
   if (
     !terminalSnap.exists ||
     terminalSnap.get("approved") !== true ||
+    !receptionActive ||
     !ownerSnap.exists ||
     ownerSnap.get("enabled") !== true ||
     ownerSnap.get("ownerUid") !== ownerUid
@@ -148,9 +154,15 @@ export const decideTerminalHandoff = onCall(async (call) => {
       tx.get(ownerRef),
     ]);
 
+    const terminalRole = terminalSnap.get("role");
+    const receptionActive = (terminalRole === "reception" || terminalRole === "both") &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined &&
+          terminalSnap.get("approved") === true));
     if (
       !terminalSnap.exists ||
       terminalSnap.get("approved") !== true ||
+      !receptionActive ||
       !ownerSnap.exists ||
       ownerSnap.get("enabled") !== true ||
       ownerSnap.get("ownerUid") !== ownerUid
