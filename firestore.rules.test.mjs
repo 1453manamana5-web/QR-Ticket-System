@@ -76,6 +76,34 @@ test("approved reception installations can read event metadata but not ticket do
   await assertFails(getDocs(collection(db, "terminals")));
 });
 
+test("handed-off reception installations cannot inherit management access", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "handoff-reception"), {
+      terminalId: "T-SHARED-BOTH", authUid: "handoff-reception", approved: true,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-SHARED-BOTH"), {
+      terminalId: "T-SHARED-BOTH", ownerUid: "original-owner", enabled: true,
+    });
+    await setDoc(doc(db, "terminals", "T-SHARED-BOTH"), {
+      terminalId: "T-SHARED-BOTH", approved: true, managementApproved: true,
+      receptionApproved: true, role: "both",
+    });
+    await setDoc(doc(db, "events", "event-shared"), { eventId: "event-shared" });
+    await setDoc(doc(db, "events", "event-shared", "tickets", "ticket-shared"), {
+      ticketId: "ticket-shared", eventId: "event-shared", currentStatus: "unused",
+    });
+    await setDoc(doc(db, "events", "event-shared", "analysis", "private-analysis"), {
+      eventId: "event-shared", summary: "private",
+    });
+  });
+
+  const db = env.authenticatedContext("handoff-reception").firestore();
+  await assertSucceeds(getDoc(doc(db, "events", "event-shared")));
+  await assertFails(getDoc(doc(db, "events", "event-shared", "tickets", "ticket-shared")));
+  await assertFails(getDoc(doc(db, "events", "event-shared", "analysis", "private-analysis")));
+});
+
 test("approved management installations can write event and ticket data", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
