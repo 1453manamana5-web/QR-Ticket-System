@@ -1,14 +1,14 @@
-import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { getFirebaseDb } from "./firebaseClient";
-
+import { getTerminalInstallationStatus, releaseOwnReceptionRegistration, submitReceptionRecord } from "./terminalHandoff";
 
 
 export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
   const db = getFirebaseDb();
-  // エラー記録にはチケット番号やQRの生データを含めず、種類と発生状況だけを保存する。
+  // Store only error category and context; never include ticket QR payloads.
   await setDoc(doc(db, "receptionErrors", log.errorId), {
     ...log,
     syncedAt: new Date().toISOString(),
@@ -16,8 +16,20 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
 }
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
+  const terminalId = getTerminalIdForRegistration();
+  // A browser that completed handoff must re-validate its server-issued installation
+  // record on every registration check, including after reload or app relaunch.
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    const serverStatus = await getTerminalInstallationStatus();
+    if (!serverStatus.approved || serverStatus.terminalId !== terminalId) return null;
+    return {
+      approved: true,
+      status: serverStatus.status ?? "offline",
+      name: serverStatus.name ?? "受付端末",
+    };
+  }
   const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "terminals", getTerminalIdForRegistration()));
+  const snapshot = await getDoc(doc(db, "terminals", terminalId));
   if (!snapshot.exists()) return null;
   const data = snapshot.data();
   if (data.role !== "reception" && data.role !== "both") return null;
@@ -29,47 +41,53 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
 }
 
 export async function resetReceptionTerminalRegistration(): Promise<void> {
-  const db = getFirebaseDb();
-  await deleteDoc(doc(db, "terminals", getTerminalIdForRegistration()));
+  await releaseOwnReceptionRegistration(getTerminalIdForRegistration());
+  localStorage.removeItem("qr-ticket-terminal-handoff-verified");
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
-  const db = getFirebaseDb();
   const terminalId = getTerminalIdForRegistration();
-  const reference = doc(db, "terminals", terminalId);
-  const existing = await getDoc(reference);
-  const data = existing.exists() ? existing.data() : {};
-  const existingRole = data.role === "management" || data.role === "reception" || data.role === "both"
-    ? data.role
-    : "reception";
-  const role = existingRole === "management" || existingRole === "both" ? "both" : "reception";
-  // 受付を使うたびに、現在の端末状態に関係なく新しい承認申請として扱う。
-  // 同じ端末・同じFirebaseアカウントでも、受付権限を自動で引き継がない。
-  const receptionApproved = false;
-  // 受付の承認待ち状態は管理端末側の承認状態と分離する。
-  // 同じ端末が「管理＋受付」の両方を持つ場合、受付申請だけで管理画面を承認待ちにしない。
-  const status = data.managementApproved === true
-    ? (data.status === "online" || data.status === "offline" ? data.status : "offline")
-    : ("pending" as const);
-
-  await setDoc(reference, {
+  // 受付申請はサーバー側で未承認状態として登録する。
+  // 既存の管理権限・承認フラグをブラウザから変更しない。
+  const { registerTerminalApplication } = await import("./terminalHandoff");
+  await registerTerminalApplication(
     terminalId,
-    name: name.trim() || (typeof data.name === "string" ? data.name : "受付端末"),
-    type: data.type === "Web / PC" ? "Web / PC" : "Web / iPad",
-    role,
-    mode: "停止" as const,
-    status,
-    approved: data.managementApproved === true,
-    managementApproved: data.managementApproved === true,
-    receptionApproved,
-    lastSeen: new Date().toISOString(),
-    networkMbps: typeof data.networkMbps === "number" ? data.networkMbps : null,
-    battery: typeof data.battery === "number" ? data.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+    name.trim() || "受付端末",
+    "Web / iPad",
+    "reception",
+  );
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await getTerminalInstallationStatus();
+        if (cancelled) return;
+        if (!status.approved || status.terminalId !== getTerminalIdForRegistration()) {
+          onChange(null);
+          return;
+        }
+        onChange({
+          approved: true,
+          status: status.status ?? "offline",
+          name: status.name ?? "受付端末",
+        });
+      } catch (error) {
+        if (!cancelled) onError(error);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }
+
+  // Handoff installations cannot read another owner's terminal document directly.
+  // Their status is served by getTerminalInstallationStatus above.
   const db = getFirebaseDb();
   return onSnapshot(doc(db, "terminals", getTerminalIdForRegistration()), snapshot => {
     if (!snapshot.exists() || (snapshot.data()?.role !== "reception" && snapshot.data()?.role !== "both")) { onChange(null); return; }
@@ -92,15 +110,16 @@ function getTerminalIdForRegistration(): string {
 }
 
 export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticket): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "events", record.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-  await setDoc(doc(db, "events", record.eventId, "receptionRecords", record.recordId), record, { merge: true });
+  if (ticket.ticketId !== record.ticketId || ticket.eventId !== record.eventId) {
+    throw new Error("受付記録とチケットの情報が一致しません。");
+  }
+  // Ticket state is recomputed and validated on the server; never trust the client copy.
+  await submitReceptionRecord(record);
 }
 
 let networkSpeedCache: number | null = null;
 let networkSpeedMeasuredAt = 0;
 const NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
-const NETWORK_PROBE_SIZE_BYTES = 32768;
 
 function getBrowserDownlink(): number | null {
   if (typeof navigator === "undefined") return null;
@@ -117,79 +136,55 @@ function getBrowserDownlink(): number | null {
   return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
 }
 
-function createNetworkProbe(): string {
-  return "0123456789abcdef".repeat(NETWORK_PROBE_SIZE_BYTES / 16);
-}
-
 async function measureNetworkSpeed(
-  db: ReturnType<typeof getFirebaseDb>,
-  reference: ReturnType<typeof doc>,
+  _db: ReturnType<typeof getFirebaseDb>,
+  _reference: ReturnType<typeof doc>,
 ): Promise<number | null> {
   const now = Date.now();
-  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) {
-    return networkSpeedCache;
-  }
-
+  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) return networkSpeedCache;
+  // Do not write probe payloads into the terminal document. Use browser-provided
+  // estimates where available; otherwise keep the value unknown.
   const browserDownlink = getBrowserDownlink();
-  if (browserDownlink !== null) {
-    networkSpeedCache = browserDownlink;
-    networkSpeedMeasuredAt = now;
-    return browserDownlink;
-  }
-
-  try {
-    const probe = createNetworkProbe();
-    const startedAt = performance.now();
-    await setDoc(reference, {
-      networkProbe: probe,
-      networkProbeAt: new Date().toISOString(),
-    }, { merge: true });
-    await getDocFromServer(reference);
-
-    const elapsedMs = Math.max(1, performance.now() - startedAt);
-    const roundTripBytes = probe.length * 2;
-    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
-    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
-
-    networkSpeedCache = normalized;
-    networkSpeedMeasuredAt = Date.now();
-    return normalized;
-  } catch (reason) {
-    console.warn("通信速度の測定に失敗しました", reason);
-    return networkSpeedCache;
-  }
+  networkSpeedCache = browserDownlink;
+  networkSpeedMeasuredAt = now;
+  return browserDownlink;
 }
 
 export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
-  const db = getFirebaseDb();
   const pendingCount = typeof syncPendingCount === "number"
     ? syncPendingCount
     : (await getPendingSyncItems()).length;
+  const db = getFirebaseDb();
   const reference = doc(db, "terminals", terminalId);
-  const existing = await getDoc(reference);
-  const data = existing.exists() ? existing.data() : {};
   const networkMbps = await measureNetworkSpeed(db, reference);
-
-  await setDoc(reference, {
-    terminalId,
-    name: typeof data.name === "string" ? data.name : `受付端末 ${terminalId.slice(-4)}`,
-    type: "Web / iPad",
-    role: data.role === "management" || data.role === "both" ? data.role : "reception",
-    mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
-    status: "online",
-    approved: data.managementApproved === true || data.receptionApproved === true || data.approved === true,
-    managementApproved: data.managementApproved === true,
-    receptionApproved: data.receptionApproved === true,
-    syncPendingCount: pendingCount,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof data.networkMbps === "number" ? data.networkMbps : null),
-    battery: typeof data.battery === "number" ? data.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  const { updateTerminalHeartbeat } = await import("./terminalHandoff");
+  const modeLabel = mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止";
+  await updateTerminalHeartbeat(terminalId, modeLabel, pendingCount, networkMbps);
   return networkMbps;
 }
 
 export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
+  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await getTerminalInstallationStatus();
+        if (cancelled || !status.approved || status.terminalId !== terminalId) return;
+        const value = status.desiredMode;
+        if (value === "入口受付" || value === "出口受付" || value === "停止") {
+          onMode(value, status.desiredModeUpdatedAt ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) onError(error);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }
   const db = getFirebaseDb();
   return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
     const value = snapshot.data()?.desiredMode;
