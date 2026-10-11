@@ -227,6 +227,26 @@ export async function loadMembers(eventId: string): Promise<MemberRecord[]> {
   const snapshot = await getDocs(collection(db, "events", eventId, "members"));
   return snapshot.docs.map(item => item.data() as MemberRecord);
 }
+
+export type ReceptionErrorRecord = {
+  errorId: string;
+  eventId: string;
+  terminalId: string;
+  category: "unknown_ticket" | "invalid_ticket" | "invalid_state" | "save_failed" | "camera_failed" | "event_load_failed" | "sync_failed";
+  mode: "entry" | "exit";
+  timestamp: string;
+  syncedAt?: string;
+};
+
+export async function loadReceptionErrors(eventId: string): Promise<ReceptionErrorRecord[]> {
+  const db = getFirebaseDb();
+  const snapshot = await getDocs(collection(db, "receptionErrors"));
+  return snapshot.docs
+    .map(item => item.data() as ReceptionErrorRecord)
+    .filter(item => item.eventId === eventId)
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+}
+
 export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => void, onError: (error: unknown) => void): () => void {
   const db = getFirebaseDb();
   return onSnapshot(collection(db, "terminals"), snapshot => onChange(snapshot.docs.map(item => item.data() as TerminalRecord)), onError);
