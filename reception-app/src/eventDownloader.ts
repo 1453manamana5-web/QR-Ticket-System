@@ -14,7 +14,7 @@ type EventBundle = {
 
 export async function downloadCurrentFirebaseEventData(
   terminalId: string,
-): Promise<{ localEvent: LocalEventData; tickets: Ticket[] } | null> {
+): Promise<{ localEvent: LocalEventData; tickets: Ticket[]; authPayload: EventAuthPayload } | null> {
   const db = getFirebaseDb();
   const snapshot = await getDocs(collection(db, "events"));
   const candidates = snapshot.docs
@@ -41,7 +41,8 @@ export async function downloadCurrentFirebaseEventData(
     authToken: current.authToken,
   };
 
-  return downloadEventData(payload, terminalId);
+  const downloaded = await downloadEventData(payload, terminalId);
+  return { ...downloaded, authPayload: payload };
 }
 
 export async function getEventAuthPayloadByToken(token: string): Promise<EventAuthPayload | null> {
