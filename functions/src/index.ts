@@ -374,8 +374,10 @@ export const approveTerminalRegistration = onCall(async (call) => {
       throw new HttpsError("already-exists", "この端末IDは既存の所有者情報があるため、通常の承認では再登録できません。所有権の引き継ぎ手続きが必要です。");
     }
     if (installationSnap.exists &&
-        installationSnap.get("terminalId") !== targetTerminalId) {
-      throw new HttpsError("already-exists", "この端末環境は別の端末に登録済みです。");
+        (installationSnap.get("terminalId") !== targetTerminalId ||
+         installationSnap.get("authUid") !== targetUid ||
+         installationSnap.get("approved") !== true)) {
+      throw new HttpsError("already-exists", "この端末環境の登録情報が一致しないか、無効化されています。安全な再登録手続きが必要です。");
     }
 
     const patch: Record<string, any> = {
