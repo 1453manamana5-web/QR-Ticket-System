@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -16,7 +16,10 @@ export async function downloadCurrentFirebaseEventData(
   terminalId: string,
 ): Promise<{ localEvent: LocalEventData; tickets: Ticket[]; authPayload: EventAuthPayload } | null> {
   const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "events"));
+  // Firestoreルールが公開対象イベントだけを許可する構成でも取得できるよう、
+  // 全イベントを読まず receptionTarget=true の文書だけをサーバー側で検索する。
+  const publishedEventsQuery = query(collection(db, "events"), where("receptionTarget", "==", true));
+  const snapshot = await getDocs(publishedEventsQuery);
   const candidates = snapshot.docs
     .map(item => item.data() as Event & { authToken?: unknown; receptionTarget?: unknown })
     .filter(item =>
