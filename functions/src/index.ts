@@ -37,8 +37,11 @@ function readReceptionApprovalVersion(value: unknown): number {
 
 function readTerminalReceptionApprovalVersion(value: unknown): number {
   // Revocation must remain possible even if the stored counter is malformed.
-  // Resetting it to zero and incrementing still invalidates old generation-zero requests.
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return 0;
+  // Use an epoch-sized generation rather than resetting to zero: a stale request
+  // may already carry generation 1, so a reset could accidentally make it current.
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return Date.now();
+  }
   return value;
 }
 
