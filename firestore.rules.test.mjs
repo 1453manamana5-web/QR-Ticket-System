@@ -163,6 +163,50 @@ test("approved management installations can write event and ticket data", async 
   await assertSucceeds(getDocs(collection(db, "terminals")));
 });
 
+test("disabled owner tombstones and released installations revoke access immediately", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "revoked-management"), {
+      terminalId: "T-REVOKED-MANAGEMENT", authUid: "revoked-management", approved: true,
+    });
+    await setDoc(doc(db, "terminals", "T-REVOKED-MANAGEMENT"), {
+      terminalId: "T-REVOKED-MANAGEMENT", approved: true,
+      managementApproved: true, role: "management",
+    });
+    await setDoc(doc(db, "terminalOwners", "T-REVOKED-MANAGEMENT"), {
+      terminalId: "T-REVOKED-MANAGEMENT", ownerUid: "revoked-management",
+      enabled: false, deletedAt: new Date().toISOString(),
+    });
+
+    await setDoc(doc(db, "terminalInstallations", "released-reception"), {
+      terminalId: "T-RELEASED-RECEPTION", authUid: "released-reception",
+      approved: false, releasedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "terminals", "T-RELEASED-RECEPTION"), {
+      terminalId: "T-RELEASED-RECEPTION", approved: true,
+      receptionApproved: true, role: "reception",
+    });
+    await setDoc(doc(db, "terminalOwners", "T-RELEASED-RECEPTION"), {
+      terminalId: "T-RELEASED-RECEPTION", ownerUid: "original-owner", enabled: true,
+    });
+    await setDoc(doc(db, "events", "event-revocation"), {
+      eventId: "event-revocation", eventStatus: "ready",
+      authToken: "revocation-token", receptionTarget: true,
+    });
+    await setDoc(doc(db, "eventBundles", "revocation-token"), {
+      authToken: "revocation-token", event: { eventId: "event-revocation" }, tickets: [],
+    });
+  });
+
+  const revokedManagementDb = env.authenticatedContext("revoked-management").firestore();
+  await assertFails(setDoc(doc(revokedManagementDb, "events", "forbidden-after-delete"), {
+    eventId: "forbidden-after-delete",
+  }));
+
+  const releasedReceptionDb = env.authenticatedContext("released-reception").firestore();
+  await assertFails(getDoc(doc(releasedReceptionDb, "eventBundles", "revocation-token")));
+});
+
 test("only approved terminals can fetch event bundles and management terminals can publish", async () => {
   await env.withSecurityRulesDisabled(async context => {
     await setDoc(doc(context.firestore(), "events", "event-1"), {
