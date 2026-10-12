@@ -798,7 +798,7 @@ export const releaseOwnReceptionRegistration = onCall(async (call) => {
     const status = request.get("status");
     return (status === "pending" || status === "approved") &&
       (request.get("requesterUid") === uid ||
-       ("nextReceptionApprovalVersion" in result &&
+       (typeof result.nextReceptionApprovalVersion === "number" &&
         !isCurrentReceptionApprovalVersion(request.get("receptionApprovalVersion"), result.nextReceptionApprovalVersion)));
   });
   for (let i = 0; i < staleRequests.length; i += 400) {
