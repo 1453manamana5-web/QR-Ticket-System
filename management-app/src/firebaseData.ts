@@ -80,30 +80,19 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
-  const ownTerminalId =
+  const managerTerminalId =
     typeof window !== "undefined"
       ? localStorage.getItem("qr-ticket-terminal-id") ??
         localStorage.getItem("qr-ticket-device-id")
       : null;
-
-  if (ownTerminalId !== null && terminalId === ownTerminalId) {
-    throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  const db = getFirebaseDb();
-  const { deleteDoc, getDoc } = await import("firebase/firestore");
-  const targetRef = doc(db, "terminals", terminalId);
-  const targetSnapshot = await getDoc(targetRef);
-  if (targetSnapshot.exists() && targetSnapshot.data().admin === true) {
-    throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  await deleteDoc(targetRef);
+  if (!managerTerminalId) throw new Error("MANAGEMENT_TERMINAL_ID_MISSING");
+  const { deleteManagedTerminalOnServer } = await import("./terminalHandoff");
+  await deleteManagedTerminalOnServer(managerTerminalId, terminalId);
 }
 
-export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
+/** Terminal approval and ownership fields are server-managed only. */
+export async function saveTerminal(_terminal: TerminalRecord): Promise<void> {
+  throw new Error("TERMINAL_SAVE_SERVER_REQUIRED");
 }
 
 
@@ -167,27 +156,19 @@ async function measureManagementNetworkSpeed(
 
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
   const db = getFirebaseDb();
-  const reference = doc(db, "terminals", terminalId);
-  const existingSnapshot = await getDoc(reference);
-  const existing = existingSnapshot.exists() ? existingSnapshot.data() : {};
-  const networkMbps = await measureManagementNetworkSpeed(reference);
-
-  await setDoc(reference, {
-    terminalId,
-    name: typeof existing.name === "string" ? existing.name : "管理端末",
-    type: existing.type === "Web / PC" ? "Web / PC" : "Web / iPad",
-    role: existing.role === "both" || existing.role === "reception" ? existing.role : "management",
-    mode: existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止",
-    status: "online",
-    approved: existing.managementApproved === true || existing.approved === true,
-    managementApproved: existing.managementApproved === true || existing.approved === true,
-    receptionApproved: existing.receptionApproved === true,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof existing.networkMbps === "number" ? existing.networkMbps : null),
-    battery: typeof existing.battery === "number" ? existing.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-
+  const existingSnapshot = await getDoc(doc(db, "terminals", terminalId));
+  if (!existingSnapshot.exists()) throw new Error("TERMINAL_NOT_REGISTERED");
+  const existing = existingSnapshot.data();
+  const now = Date.now();
+  let networkMbps: number | null = managementNetworkSpeedCache;
+  if (now - managementNetworkSpeedMeasuredAt >= MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS) {
+    networkMbps = getManagementBrowserDownlink();
+    managementNetworkSpeedCache = networkMbps;
+    managementNetworkSpeedMeasuredAt = now;
+  }
+  const { updateTerminalHeartbeat } = await import("./terminalHandoff");
+  const mode = existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止";
+  await updateTerminalHeartbeat(terminalId, mode, undefined, networkMbps);
   return networkMbps;
 }
 
