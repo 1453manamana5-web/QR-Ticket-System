@@ -325,40 +325,7 @@ export default function App(){
     return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update);};
   },[]);
 
-  useEffect(()=>{
-    if(!terminalRegistration?.approved)return;
-    void (async()=>{
-      try{
-        const saved=await loadLocalEvent();
-        if(!saved)return;
 
-        // オンライン時はFirebaseの公開対象を正として扱い、削除済みイベントの古い端末キャッシュを復元しない。
-        // 保存済みデータは、ネットワークが利用できない起動時のオフライン受付用に限って復元する。
-        if(navigator.onLine)return;
-
-        if(saved.dataReady){
-          const ticketCount=await countTickets(saved.event.eventId);
-          if(ticketCount!==saved.ticketCount){
-            await clearLocalEvent();
-            setError("端末に保存されたイベントデータが不完全です。もう一度イベントを準備してください。");
-            return;
-          }
-        }
-
-        setLocalEvent(saved);
-        setAuthPayload({
-          type:"qr-ticket-event-auth",
-          eventId:saved.event.eventId,
-          eventName:saved.event.eventName,
-          dataVersion:saved.event.dataVersion,
-          authToken:"local"
-        });
-        setScreen(saved.dataReady?"ready":"preparing");
-      }catch{
-        setError("ローカルデータを確認できませんでした。");
-      }
-    })();
-  },[terminalRegistration?.approved]);
 
   useEffect(()=>{
     if(!result)return;
