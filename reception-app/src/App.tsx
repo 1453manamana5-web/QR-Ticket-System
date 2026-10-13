@@ -182,33 +182,86 @@ export default function App(){
     if(!terminalRegistration?.approved)return;
 
     let cancelled=false;
+    let cachedEvent:LocalEventData|null=null;
+
+    const restoreCachedEvent=async()=>{
+      const saved=await loadLocalEvent();
+      if(!saved?.dataReady)return null;
+      const ticketCount=await countTickets(saved.event.eventId);
+      if(ticketCount!==saved.ticketCount){
+        await clearLocalEvent();
+        throw new Error("LOCAL_EVENT_INCOMPLETE");
+      }
+      if(cancelled)return null;
+      cachedEvent=saved;
+      setLocalEvent(saved);
+      setAuthPayload({
+        type:"qr-ticket-event-auth",
+        eventId:saved.event.eventId,
+        eventName:saved.event.eventName,
+        dataVersion:saved.event.dataVersion,
+        authToken:"local"
+      });
+      setError("");
+      setResult(null);
+      setScreen("ready");
+      return saved;
+    };
+
     const loadCurrentFirebaseEvent=async()=>{
       try{
-        const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
-        if(!downloaded || cancelled)return;
+        // まず端末内の保存済みデータを復元する。Firebaseの応答を待たず受付準備画面を開ける。
+        if(!cachedEvent){
+          try{
+            await restoreCachedEvent();
+          }catch(reason){
+            console.error("端末内イベントデータの復元に失敗しました",reason);
+            if(reason instanceof Error&&reason.message==="LOCAL_EVENT_INCOMPLETE"){
+              if(!cancelled)setError("端末に保存されたイベントデータが不完全です。もう一度イベントデータを受信してください。");
+            }
+          }
+        }
+        if(cancelled||!navigator.onLine)return;
 
-        const existing=await loadLocalEvent();
+        const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
+        if(!downloaded||cancelled)return;
+
+        const existing=cachedEvent??await loadLocalEvent();
         if(
           existing?.dataReady &&
           existing.event.eventId===downloaded.localEvent.event.eventId &&
           existing.event.dataVersion===downloaded.localEvent.event.dataVersion
         ){
+          // バージョンが同じ場合も早期returnだけにせず、復元状態を確実に反映する。
+          cachedEvent=existing;
+          setLocalEvent(existing);
+          setAuthPayload({
+            type:"qr-ticket-event-auth",
+            eventId:existing.event.eventId,
+            eventName:existing.event.eventName,
+            dataVersion:existing.event.dataVersion,
+            authToken:downloaded.authPayload.authToken
+          });
+          setError("");
+          setResult(null);
+          setScreen("ready");
           return;
         }
 
-        const localEvent:LocalEventData={
+        const nextEvent:LocalEventData={
           ...downloaded.localEvent,
           dataReady:false,
         };
-        await prepareLocalEventData(localEvent,downloaded.tickets);
-        localEvent.dataReady=true;
+        await prepareLocalEventData(nextEvent,downloaded.tickets);
+        nextEvent.dataReady=true;
         if(cancelled)return;
-        setLocalEvent(localEvent);
+        cachedEvent=nextEvent;
+        setLocalEvent(nextEvent);
         setAuthPayload({
           type:"qr-ticket-event-auth",
-          eventId:localEvent.event.eventId,
-          eventName:localEvent.event.eventName,
-          dataVersion:localEvent.event.dataVersion,
+          eventId:nextEvent.event.eventId,
+          eventName:nextEvent.event.eventName,
+          dataVersion:nextEvent.event.dataVersion,
           authToken:downloaded.authPayload.authToken
         });
         setError("");
@@ -216,28 +269,37 @@ export default function App(){
         setScreen("ready");
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
-        if(localEvent?.event.eventId){
-          void logReceptionError(localEvent.event.eventId,getTerminalId(),"entry","event_load_failed");
-        }
         if(cancelled)return;
         const code=reason instanceof Error?reason.message:"";
         if(code==="NO_PUBLISHED_EVENT"){
+          // オンラインで受付対象イベントがなくなっている場合は、古い端末キャッシュで受付を続けない。
+          if(cachedEvent){
+            await clearLocalEvent().catch(clearReason=>console.error("古いイベントデータの消去に失敗しました",clearReason));
+            cachedEvent=null;
+            setLocalEvent(null);
+            setAuthPayload(null);
+            setScreen("auth");
+          }
           setError("Firebase上に受付対象の公開イベントが見つかりません。管理アプリでイベントを公開し、受付対象に設定してください。");
         }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
           setError("受付対象の公開イベントが複数あります。管理アプリで受付対象を1件だけにしてください。");
         }else if(code==="INVALID_PUBLISHED_EVENT"){
           setError("公開イベントの情報が不足しています。管理アプリからイベントを再公開してください。");
-        }else{
+        }else if(!cachedEvent){
           setError("Firebaseからイベントを取得できませんでした。通信状態・Firestoreルール・イベントデータを確認してください。");
         }
+        // 通信失敗時は、正常に保存済みのイベントとチケットを端末内でそのまま使う。
       }
     };
 
     void loadCurrentFirebaseEvent();
     const interval=window.setInterval(()=>void loadCurrentFirebaseEvent(),10000);
+    const handleOnline=()=>void loadCurrentFirebaseEvent();
+    window.addEventListener("online",handleOnline);
     return()=>{
       cancelled=true;
       window.clearInterval(interval);
+      window.removeEventListener("online",handleOnline);
     };
   },[terminalRegistration?.approved]);
 
