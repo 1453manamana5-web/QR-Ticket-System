@@ -106,6 +106,34 @@ export async function loadLocalEvent(): Promise<LocalEventData | null> {
 }
 
 export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[]): Promise<void> {
+  const eventId = event.event.eventId;
+  const ticketIds = new Set<string>();
+
+  if (!eventId) {
+    throw new Error("イベントIDがありません");
+  }
+  if (event.ticketCount !== tickets.length) {
+    throw new Error(`取得したチケット件数がイベント情報と一致しません（${tickets.length}/${event.ticketCount}）`);
+  }
+
+  for (const ticket of tickets) {
+    if (!ticket.ticketId || ticket.eventId !== eventId) {
+      throw new Error("イベントIDまたはチケットIDが不正なデータを検出しました");
+    }
+    if (ticketIds.has(ticket.ticketId)) {
+      throw new Error(`重複したチケットIDを検出しました（${ticket.ticketId}）`);
+    }
+    ticketIds.add(ticket.ticketId);
+  }
+
+  // イベント本体と全チケットは同じIndexedDBトランザクションで保存する。
+  // トランザクションが完了した時点で両方が保存済みになるため、
+  // 保存対象のイベントには準備完了状態を記録してよい。
+  const readyEvent: LocalEventData = {
+    ...event,
+    dataReady: true,
+    ticketCount: tickets.length,
+  };
   const database = await openDatabase();
 
   try {
@@ -119,7 +147,7 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
 
       eventStore.clear();
       ticketStore.clear();
-      eventStore.put(event);
+      eventStore.put(readyEvent);
 
       for (const ticket of tickets) {
         ticketStore.put(ticket);
@@ -127,28 +155,48 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
-        reject(transaction.error ?? new Error("イベントデータを保存できませんでした"));
+        reject(transaction.error ?? new Error("イベント・チケットデータを保存できませんでした"));
       transaction.onabort = () =>
-        reject(transaction.error ?? new Error("イベントデータの保存が中断されました"));
+        reject(transaction.error ?? new Error("イベント・チケットデータの保存が中断されました"));
     });
   } finally {
     database.close();
   }
 
   const savedEvent = await loadLocalEvent();
-  const savedTicketCount = await countTickets(event.event.eventId);
+  const verifyDatabase = await openDatabase();
+  let savedTickets: Ticket[];
+  try {
+    savedTickets = await new Promise<Ticket[]>((resolve, reject) => {
+      const request = verifyDatabase
+        .transaction(STORES.tickets, "readonly")
+        .objectStore(STORES.tickets)
+        .index("eventId")
+        .getAll(eventId);
+      request.onsuccess = () => resolve(request.result as Ticket[]);
+      request.onerror = () =>
+        reject(request.error ?? new Error("保存したチケットデータを再読み込みできませんでした"));
+    });
+  } finally {
+    verifyDatabase.close();
+  }
 
-  if (!savedEvent) {
-    throw new Error("イベント本体をIndexedDBから再読み込みできませんでした");
-  }
-  if (savedEvent.event.eventId !== event.event.eventId) {
-    throw new Error("保存したイベントIDが一致しません");
-  }
-  if (!savedEvent.dataReady) {
-    throw new Error("保存したイベントが準備完了状態ではありません");
-  }
-  if (savedTicketCount !== tickets.length) {
-    throw new Error(`チケット保存件数が一致しません（${savedTicketCount}/${tickets.length}）`);
+  const savedTicketIds = new Set(savedTickets.map(ticket => ticket.ticketId));
+  const allTicketIdsMatch =
+    savedTickets.length === tickets.length &&
+    savedTicketIds.size === ticketIds.size &&
+    [...ticketIds].every(ticketId => savedTicketIds.has(ticketId)) &&
+    savedTickets.every(ticket => ticket.eventId === eventId);
+
+  if (
+    !savedEvent ||
+    savedEvent.event.eventId !== eventId ||
+    !savedEvent.dataReady ||
+    savedEvent.ticketCount !== tickets.length ||
+    !allTicketIdsMatch
+  ) {
+    await clearLocalEvent();
+    throw new Error("イベント・チケットデータの保存後検証に失敗しました。ローカルデータを消去しました");
   }
 }
 
