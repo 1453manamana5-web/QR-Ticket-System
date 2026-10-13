@@ -95,6 +95,21 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", record.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
   await setDoc(doc(db, "events", record.eventId, "receptionRecords", record.recordId), record, { merge: true });
+
+  // 受付で更新した状態を配信バンドルにも反映し、次回受信時に古い状態へ戻らないようにする。
+  const eventSnapshot = await getDoc(doc(db, "events", record.eventId));
+  const authToken = eventSnapshot.exists() ? eventSnapshot.data().authToken : null;
+  if (typeof authToken !== "string" || !authToken) return;
+  const bundleRef = doc(db, "eventBundles", authToken);
+  const bundleSnapshot = await getDoc(bundleRef);
+  if (!bundleSnapshot.exists()) return;
+  const bundle = bundleSnapshot.data();
+  const existingTickets = Array.isArray(bundle.tickets) ? bundle.tickets as Ticket[] : [];
+  const exists = existingTickets.some(item => item.ticketId === ticket.ticketId);
+  const tickets = exists
+    ? existingTickets.map(item => item.ticketId === ticket.ticketId ? ticket : item)
+    : [...existingTickets, ticket];
+  await setDoc(bundleRef, { ...bundle, tickets, ticketCount: tickets.length });
 }
 
 let networkSpeedCache: number | null = null;
