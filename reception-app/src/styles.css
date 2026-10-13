@@ -3673,3 +3673,218 @@ body {
     right: max(8px, env(safe-area-inset-right)) !important;
   }
 }
+
+
+/* Result screens aligned with the current calm, tablet-first reception UI. */
+.entry-reception-page.ticket-success,
+.entry-reception-page.error {
+  background: #f3f6fa !important;
+  color: #172b43;
+}
+.entry-reception-page .entry-reception-main:has(> .entry-ticket-result),
+.entry-reception-page .entry-reception-main:has(> .exit-ticket-result) {
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 2vh, 24px) 0;
+}
+.entry-reception-page .entry-ticket-result,
+.entry-reception-page .exit-ticket-result {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: min(100%, 760px);
+  min-height: 0;
+  max-height: 100%;
+  margin: auto;
+  padding: clamp(24px, 4vh, 42px) clamp(20px, 4vw, 52px);
+  overflow: hidden;
+  border: 1px solid #d9e4ef;
+  border-radius: 22px;
+  background: #fff !important;
+  box-shadow: 0 10px 30px rgba(24, 59, 93, .08) !important;
+  color: #172b43;
+  text-align: center;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: reception-result-arrive 240ms ease-out both;
+}
+.entry-reception-page .entry-ticket-result::before,
+.entry-reception-page .exit-ticket-result::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  content: "";
+  background: #21a65b;
+}
+.entry-reception-page .exit-ticket-result::before { background: #e4a11b; }
+.entry-reception-page .entry-ticket-result::after,
+.entry-reception-page .exit-ticket-result::after { display: none !important; }
+.entry-reception-page .entry-ticket-success-icon,
+.entry-reception-page .exit-ticket-success-icon {
+  flex: 0 0 auto;
+  width: clamp(76px, 10vh, 104px) !important;
+  height: clamp(76px, 10vh, 104px) !important;
+  margin-bottom: clamp(12px, 1.8vh, 18px);
+  border: 0;
+  box-shadow: none !important;
+  animation: reception-success-icon-in 320ms ease-out both;
+}
+.entry-reception-page .entry-ticket-success-icon { background: #e6f7ed; color: #168447; }
+.entry-reception-page .exit-ticket-success-icon { background: #fff3d6; color: #946200; }
+.entry-reception-page .entry-ticket-success-circle,
+.entry-reception-page .exit-ticket-success-circle { stroke: rgba(255,255,255,0); }
+.entry-reception-page .entry-ticket-success-check { stroke: #168447; stroke-width: 8; }
+.entry-reception-page .exit-ticket-success-check { stroke: #946200; stroke-width: 8; }
+.entry-reception-page .entry-result-eyebrow,
+.entry-reception-page .exit-result-eyebrow {
+  margin-top: 0;
+  color: #71839a !important;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  animation: none;
+}
+.entry-reception-page .entry-ticket-success-title,
+.entry-reception-page .exit-ticket-success-title {
+  margin: 9px 0 0;
+  color: #183b5d !important;
+  font-size: clamp(46px, 6.2vw, 72px);
+  font-weight: 850;
+  line-height: 1.05;
+  letter-spacing: -.045em;
+  text-shadow: none !important;
+  animation: reception-success-title-in 300ms ease-out both;
+}
+.entry-reception-page .entry-ticket-success-message,
+.entry-reception-page .exit-thank-you-message {
+  margin: 10px 0 0;
+  color: #415b73 !important;
+  font-size: clamp(16px, 1.8vw, 22px);
+  font-weight: 700;
+  line-height: 1.4;
+  animation: none;
+}
+.entry-reception-page .entry-result-number,
+.entry-reception-page .exit-result-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: 100%;
+  margin: 20px 0 0;
+  padding: 10px 16px;
+  overflow-wrap: anywhere;
+  border: 1px solid #dce6ef !important;
+  border-radius: 12px !important;
+  background: #f8fafc !important;
+  color: #294965 !important;
+  font-size: clamp(14px, 1.55vw, 19px);
+  font-weight: 750;
+  box-shadow: none !important;
+  animation: none;
+}
+.entry-reception-page .entry-result-number span,
+.entry-reception-page .exit-result-number span {
+  color: #71839a !important;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.entry-reception-page .exit-result-secondary {
+  margin: 10px 0 0;
+  color: #62748a !important;
+  font-size: 14px;
+  animation: none;
+}
+.entry-reception-page .entry-result-return,
+.entry-reception-page .exit-result-return {
+  width: min(100%, 420px);
+  margin-top: 20px;
+  color: #71839a !important;
+  font-size: 12px;
+  font-weight: 650;
+  animation: none;
+}
+.entry-reception-page .entry-result-return-track,
+.entry-reception-page .exit-result-return-track {
+  height: 4px;
+  margin-top: 8px;
+  background: #e8eef5 !important;
+}
+.entry-reception-page .entry-result-return-track > span { background: #21a65b !important; }
+.entry-reception-page .exit-result-return-track > span { background: #e4a11b !important; }
+
+/* Errors use the same white card system, with red as a clear status accent only. */
+.entry-reception-page.error .entry-ticket-result,
+.entry-reception-page.error .exit-ticket-result {
+  border-color: #efcaca !important;
+  background: #fff !important;
+  box-shadow: 0 10px 30px rgba(160, 35, 35, .07) !important;
+  color: #172b43 !important;
+}
+.entry-reception-page.error .entry-ticket-result::before,
+.entry-reception-page.error .exit-ticket-result::before { background: #d64545; }
+.entry-reception-page.error .entry-result-icon,
+.entry-reception-page.error .exit-result-icon {
+  display: grid;
+  place-items: center;
+  width: clamp(64px, 8vh, 82px);
+  height: clamp(64px, 8vh, 82px);
+  margin-bottom: 14px;
+  border: 0 !important;
+  border-radius: 18px;
+  background: #fff0f0 !important;
+  color: #c83d3d !important;
+  font-size: clamp(40px, 5vh, 54px);
+  font-weight: 700;
+  box-shadow: none !important;
+}
+.entry-reception-page.error .entry-result-eyebrow,
+.entry-reception-page.error .exit-result-eyebrow { color: #b34a4a !important; }
+.entry-reception-page.error .entry-result-panel h2,
+.entry-reception-page.error .exit-result-panel h2 {
+  margin: 8px 0 0;
+  color: #183b5d !important;
+  font-size: clamp(34px, 4.5vw, 52px);
+  line-height: 1.12;
+  letter-spacing: -.035em;
+}
+.entry-reception-page.error .entry-result-primary,
+.entry-reception-page.error .exit-result-primary {
+  margin: 12px 0 0;
+  color: #c13f3f !important;
+  font-size: clamp(20px, 2.4vw, 29px);
+  font-weight: 800;
+  line-height: 1.3;
+}
+.entry-reception-page.error .entry-result-number,
+.entry-reception-page.error .exit-result-number {
+  white-space: normal;
+  background: #fff7f7 !important;
+  border-color: #f0dada !important;
+  color: #6e3c3c !important;
+}
+.entry-reception-page.error .entry-result-secondary,
+.entry-reception-page.error .exit-result-secondary {
+  margin-top: 12px;
+  color: #71839a !important;
+  font-size: 13px;
+}
+@media (max-height: 700px) {
+  .entry-reception-page .entry-ticket-result,
+  .entry-reception-page .exit-ticket-result { padding: 16px 22px; }
+  .entry-reception-page .entry-ticket-success-icon,
+  .entry-reception-page .exit-ticket-success-icon { width: 68px !important; height: 68px !important; margin-bottom: 8px; }
+  .entry-reception-page .entry-result-number,
+  .entry-reception-page .exit-result-number { margin-top: 12px; }
+  .entry-reception-page .entry-result-return,
+  .entry-reception-page .exit-result-return { margin-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry-reception-page .entry-ticket-result,
+  .entry-reception-page .exit-ticket-result { animation: none; }
+}
