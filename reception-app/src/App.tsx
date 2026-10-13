@@ -136,6 +136,48 @@ export default function App(){
     return()=>unsubscribe?.();
   },[screen]);
 
+  const receiveEventByCommunication=useCallback(async()=>{
+    if(busy)return;
+    if(!navigator.onLine){
+      setError("通信で受信するにはインターネット接続が必要です。保存済みイベントがある場合はオフラインで利用できます。");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try{
+      const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
+      if(!downloaded)throw new Error("NO_PUBLISHED_EVENT");
+      const eventData:LocalEventData={
+        ...downloaded.localEvent,
+        dataReady:false,
+      };
+      await prepareLocalEventData(eventData,downloaded.tickets);
+      eventData.dataReady=true;
+      setLocalEvent(eventData);
+      setAuthPayload({
+        type:"qr-ticket-event-auth",
+        eventId:eventData.event.eventId,
+        eventName:eventData.event.eventName,
+        dataVersion:eventData.event.dataVersion,
+        authToken:downloaded.authPayload.authToken
+      });
+      setResult(null);
+      setScreen("ready");
+    }catch(reason){
+      console.error("通信によるイベントデータ受信に失敗しました",reason);
+      const code=reason instanceof Error?reason.message:"";
+      if(code==="NO_PUBLISHED_EVENT"){
+        setError("管理アプリで受付対象イベントを公開してください。");
+      }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
+        setError("受付対象の公開イベントが複数あります。管理アプリで1件にしてください。");
+      }else{
+        setError("通信でイベントデータを受信できませんでした。通信状態と管理アプリの公開設定を確認してください。");
+      }
+    }finally{
+      setBusy(false);
+    }
+  },[busy]);
+
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
 
@@ -564,6 +606,7 @@ export default function App(){
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
                   <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
+                  <button type="button" className="primary" disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
                   <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>\n                  <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");speakReception(mode==="entry"?"entry":"exit");playSuccessSound();}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
