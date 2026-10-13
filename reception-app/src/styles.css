@@ -3644,3 +3644,32 @@ body {
 }
 .entry-ticket-result,
 .exit-ticket-result { position: relative; z-index: 1; }
+
+
+/* Final placement fix: pin the entrance/exit mode control to the viewport's upper-right. */
+.entry-reception-page .entry-reception-header .entry-header-main {
+  padding-right: clamp(205px, 22vw, 275px) !important;
+}
+.entry-reception-page .entry-reception-mode-switch {
+  position: fixed !important;
+  top: max(10px, env(safe-area-inset-top)) !important;
+  right: max(12px, env(safe-area-inset-right)) !important;
+  left: auto !important;
+  bottom: auto !important;
+  width: clamp(190px, 20vw, 250px) !important;
+  height: clamp(58px, 7.5vh, 76px) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  transform-origin: center center;
+  z-index: 1000 !important;
+}
+@media (max-width: 760px) {
+  .entry-reception-page .entry-reception-header .entry-header-main {
+    padding-right: 200px !important;
+  }
+  .entry-reception-page .entry-reception-mode-switch {
+    width: 184px !important;
+    height: 56px !important;
+    right: max(8px, env(safe-area-inset-right)) !important;
+  }
+}
