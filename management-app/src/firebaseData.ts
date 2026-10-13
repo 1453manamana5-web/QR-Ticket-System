@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -32,18 +32,89 @@ export function subscribeEvents(onChange: (events: Event[]) => void, onError: (e
   }, onError);
 }
 
+async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]): Promise<void> {
+  const db = getFirebaseDb();
+  const eventRef = doc(db, "events", eventId);
+  const eventSnapshot = await getDoc(eventRef);
+  if (!eventSnapshot.exists()) throw new Error("EVENT_NOT_FOUND");
+  const eventData = eventSnapshot.data();
+  const authToken = typeof eventData.authToken === "string" ? eventData.authToken : "";
+  const now = new Date().toISOString();
+  let nextDataVersion = Math.max(1, Number(eventData.dataVersion) || 1);
+  let bundleRef: ReturnType<typeof doc> | null = null;
+  let savedBundle: Record<string, unknown> | null = null;
+
+  if (authToken) {
+    bundleRef = doc(db, "eventBundles", authToken);
+    const bundleSnapshot = await getDoc(bundleRef);
+    if (bundleSnapshot.exists()) {
+      savedBundle = bundleSnapshot.data();
+      nextDataVersion += 1;
+    }
+  }
+
+  await setDoc(eventRef, {
+    ticketCount: tickets.length,
+    ...(savedBundle ? { dataVersion: nextDataVersion } : {}),
+    updatedAt: now,
+  }, { merge: true });
+
+  if (!bundleRef || !savedBundle) return;
+  await setDoc(bundleRef, {
+    ...savedBundle,
+    event: {
+      ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
+      eventId,
+      dataVersion: nextDataVersion,
+    },
+    tickets,
+    ticketCount: tickets.length,
+    publishedAt: now,
+  });
+}
+
+async function syncPublishedTicketStatus(eventId: string, ticket: Ticket): Promise<void> {
+  const db = getFirebaseDb();
+  const eventSnapshot = await getDoc(doc(db, "events", eventId));
+  const authToken = eventSnapshot.exists() ? eventSnapshot.data().authToken : null;
+  if (typeof authToken !== "string" || !authToken) return;
+  const bundleRef = doc(db, "eventBundles", authToken);
+  const bundleSnapshot = await getDoc(bundleRef);
+  if (!bundleSnapshot.exists()) return;
+  const savedBundle = bundleSnapshot.data();
+  const existingTickets = Array.isArray(savedBundle.tickets) ? savedBundle.tickets as Ticket[] : [];
+  const found = existingTickets.some(item => item.ticketId === ticket.ticketId);
+  const nextTickets = found
+    ? existingTickets.map(item => item.ticketId === ticket.ticketId ? ticket : item)
+    : [...existingTickets, ticket];
+  await setDoc(bundleRef, { ...savedBundle, tickets: nextTickets, ticketCount: nextTickets.length });
+}
+
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
   const db = getFirebaseDb();
-  await Promise.all(tickets.map(ticket => setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true })));
+  // Firestoreの1バッチ上限を避け、数百〜数千枚でも確実に保存する。
+  for (let start = 0; start < tickets.length; start += 450) {
+    const batch = writeBatch(db);
+    for (const ticket of tickets.slice(start, start + 450)) {
+      batch.set(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+    }
+    await batch.commit();
+  }
+  await syncPublishedTicketInventory(eventId, tickets);
 }
+
 export async function saveTicket(eventId: string, ticket: Ticket): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+  await syncPublishedTicketStatus(eventId, ticket);
 }
+
 export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
   await deleteDoc(doc(db, "events", eventId, "tickets", ticketId));
+  const remainingTickets = await loadEventTickets(eventId);
+  await syncPublishedTicketInventory(eventId, remainingTickets);
 }
 
 export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) => void, onError: (error: unknown) => void): () => void {
