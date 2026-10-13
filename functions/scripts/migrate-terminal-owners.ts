@@ -58,10 +58,11 @@ async function main() {
     const installationRef = db.doc(`terminalInstallations/${entry.ownerUid}`);
 
     const action = await db.runTransaction(async transaction => {
-      const [terminal, owner, installation] = await Promise.all([
+      const [terminal, owner, installation, ownerUidMappings] = await Promise.all([
         transaction.get(terminalRef),
         transaction.get(ownerRef),
         transaction.get(installationRef),
+        transaction.get(db.collection("terminalOwners").where("ownerUid", "==", entry.ownerUid)),
       ]);
       if (!terminal.exists) throw new Error(`Terminal ${entry.terminalId} does not exist.`);
       const data = terminal.data()!;
@@ -86,6 +87,13 @@ async function main() {
             existingOwner.ownerUid !== entry.ownerUid || existingOwner.enabled !== true) {
           throw new Error(`Owner mapping for ${entry.terminalId} conflicts with the requested owner; refusing to overwrite it.`);
         }
+      }
+
+      const conflictingOwnerMapping = ownerUidMappings.docs.find(mapping => mapping.id !== entry.terminalId);
+      if (conflictingOwnerMapping) {
+        throw new Error(
+          `Owner UID ${entry.ownerUid} is already mapped to terminal ${conflictingOwnerMapping.id}; refusing to reuse one UID across terminals.`,
+        );
       }
 
       if (installation.exists) {

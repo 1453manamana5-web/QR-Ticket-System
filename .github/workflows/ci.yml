@@ -23,14 +23,17 @@ jobs:
       - name: Firestore rules tests
         run: npm run test:rules
 
+      - name: Install Functions dependencies
+        run: npm install --prefix functions
+
+      - name: Terminal handoff callable tests
+        run: npm run test:callables
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Build
         run: npm run build
-
-      - name: Install Functions dependencies
-        run: npm install --prefix functions
 
       - name: Typecheck Functions
         run: npm run typecheck --prefix functions
