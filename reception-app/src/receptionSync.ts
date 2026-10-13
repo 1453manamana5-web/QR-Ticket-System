@@ -1,4 +1,4 @@
-import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc, runTransaction } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
@@ -101,15 +101,17 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   const authToken = eventSnapshot.exists() ? eventSnapshot.data().authToken : null;
   if (typeof authToken !== "string" || !authToken) return;
   const bundleRef = doc(db, "eventBundles", authToken);
-  const bundleSnapshot = await getDoc(bundleRef);
-  if (!bundleSnapshot.exists()) return;
-  const bundle = bundleSnapshot.data();
-  const existingTickets = Array.isArray(bundle.tickets) ? bundle.tickets as Ticket[] : [];
-  const exists = existingTickets.some(item => item.ticketId === ticket.ticketId);
-  const tickets = exists
-    ? existingTickets.map(item => item.ticketId === ticket.ticketId ? ticket : item)
-    : [...existingTickets, ticket];
-  await setDoc(bundleRef, { ...bundle, tickets, ticketCount: tickets.length });
+  await runTransaction(db, async transaction => {
+    const bundleSnapshot = await transaction.get(bundleRef);
+    if (!bundleSnapshot.exists()) return;
+    const bundle = bundleSnapshot.data();
+    const existingTickets = Array.isArray(bundle.tickets) ? bundle.tickets as Ticket[] : [];
+    const exists = existingTickets.some(item => item.ticketId === ticket.ticketId);
+    const tickets = exists
+      ? existingTickets.map(item => item.ticketId === ticket.ticketId ? ticket : item)
+      : [...existingTickets, ticket];
+    transaction.set(bundleRef, { ...bundle, tickets, ticketCount: tickets.length });
+  });
 }
 
 let networkSpeedCache: number | null = null;
