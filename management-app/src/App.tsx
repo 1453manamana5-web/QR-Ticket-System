@@ -220,7 +220,7 @@ export default function App() {
       if (!cancelled) setBundle(savedBundle);
     }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
     return () => { cancelled = true; };
-  }, [event.eventId]);
+  }, [event.eventId, event.dataVersion]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
   const [receptionErrors, setReceptionErrors] = useState<Awaited<ReturnType<typeof loadReceptionErrors>>>([]);
