@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -64,6 +64,15 @@ export async function publishEventBundle(
     publishedAt: new Date().toISOString(),
   };
 
+  // 管理端末のリアルタイム一覧と受付用バンドルで、同じチケット群を使う。
+  for (let start = 0; start < tickets.length; start += 450) {
+    const batch = writeBatch(db);
+    for (const ticket of tickets.slice(start, start + 450)) {
+      batch.set(doc(db, "events", event.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+    }
+    await batch.commit();
+  }
+
   // 先にチケットを含む公開バンドルを保存し、その後イベント一覧のメタデータを更新する。
   // merge:true にして、同時に保存される他のイベント管理情報を消さない。
   await setDoc(doc(db, "eventBundles", authToken), {
@@ -80,6 +89,7 @@ export async function publishEventBundle(
     ...publishedEvent,
     authToken,
     receptionTarget: publishedEvent.eventStatus !== "finished",
+    ticketCount: tickets.length,
     updatedAt: bundle.publishedAt,
   }, { merge: true });
 
