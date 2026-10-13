@@ -15,6 +15,11 @@ async function clearCollections() {
     }
   }
 }
+async function seedManager() {
+  await db.doc("terminals/T-MANAGEMENT-0001").set({ terminalId: "T-MANAGEMENT-0001", approved: true, managementApproved: true, receptionApproved: false, role: "management", admin: true });
+  await db.doc("terminalOwners/T-MANAGEMENT-0001").set({ terminalId: "T-MANAGEMENT-0001", ownerUid: "manager-owner-uid", enabled: true });
+  await db.doc("terminalInstallations/manager-owner-uid").set({ terminalId: "T-MANAGEMENT-0001", authUid: "manager-owner-uid", approved: true });
+}
 async function seedReceptionTerminal() {
   await db.doc("terminals/T-RECEPTION-0001").set({ terminalId: "T-RECEPTION-0001", approved: true, receptionApproved: true, managementApproved: false, role: "reception", receptionApprovalVersion: 0 });
   await db.doc("terminalOwners/T-RECEPTION-0001").set({ terminalId: "T-RECEPTION-0001", ownerUid: "trusted-owner-uid", enabled: true });
@@ -67,4 +72,24 @@ test("expired approvals cannot create installation grants", async () => {
   await db.doc("terminalHandoffRequests/manual-expired-request").set({ terminalId: "T-RECEPTION-0001", requesterUid: "new-installation-uid", status: "approved", receptionApprovalVersion: 0, createdAt: old, expiresAt: old, decidedByUid: "trusted-owner-uid" });
   await assert.rejects(call("completeTerminalHandoff", "new-installation-uid", { requestId: "manual-expired-request" }));
   assert.equal((await db.doc("terminalInstallations/new-installation-uid").get()).exists, false);
+});
+
+test("reception revocation invalidates an already approved handoff", async () => {
+  await seedManager();
+  await seedReceptionTerminal();
+  const request = await call("requestTerminalHandoff", "new-installation-uid", {
+    terminalId: "T-RECEPTION-0001",
+  });
+  await call("decideTerminalHandoff", "trusted-owner-uid", {
+    requestId: request.requestId, decision: "approve",
+  });
+  await call("revokeTerminalReception", "manager-owner-uid", {
+    managerTerminalId: "T-MANAGEMENT-0001", targetTerminalId: "T-RECEPTION-0001",
+  });
+  await assert.rejects(call("completeTerminalHandoff", "new-installation-uid", {
+    requestId: request.requestId,
+  }));
+  assert.equal((await db.doc("terminalInstallations/new-installation-uid").get()).exists, false);
+  assert.equal((await db.doc("terminals/T-RECEPTION-0001").get()).get("receptionApproved"), false);
+  assert.equal((await db.doc("terminalHandoffRequests/" + request.requestId).get()).get("status"), "cancelled");
 });
