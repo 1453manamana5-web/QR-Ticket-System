@@ -10,8 +10,10 @@ import { getFirestore } from "firebase-admin/firestore";
  * Required environment:
  *   GCLOUD_PROJECT=<exact Firebase project ID>
  *   TERMINAL_OWNER_MIGRATION_JSON=[{"terminalId":"T-...","ownerUid":"..."}]
+ * Safety:
+ *   The default is a dry run. No writes occur unless MIGRATION_APPLY=true.
  * Optional:
- *   MIGRATION_DRY_RUN=true   validates mappings and prints the changes without writing.
+ *   MIGRATION_DRY_RUN=true   explicitly keeps the run read-only, even if MIGRATION_APPLY=true.
  *
  * The owner UID must be independently verified as the Firebase Auth UID of the
  * terminal's original registered installation. Do not trust requestedByUid or
@@ -21,7 +23,9 @@ import { getFirestore } from "firebase-admin/firestore";
 async function main() {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
   const raw = process.env.TERMINAL_OWNER_MIGRATION_JSON;
-  const dryRun = process.env.MIGRATION_DRY_RUN === "true";
+  // Fail closed: a missing or misspelled apply flag must never write to Firestore.
+  const applyRequested = process.env.MIGRATION_APPLY === "true";
+  const dryRun = !applyRequested || process.env.MIGRATION_DRY_RUN === "true";
 
   if (!projectId) throw new Error("Set GCLOUD_PROJECT to the exact Firebase project ID.");
   if (!raw) throw new Error("Set TERMINAL_OWNER_MIGRATION_JSON to the reviewed mapping array.");
@@ -149,7 +153,7 @@ async function main() {
 
   for (const result of results) process.stdout.write(result + "\n");
   process.stdout.write(dryRun
-    ? "Dry run completed. No Firestore documents were changed. Review the project ID and UID mappings before a write run.\n"
+    ? "Dry run completed. No Firestore documents were changed. Review the project ID and UID mappings; set MIGRATION_APPLY=true only for an explicitly approved write run.\n"
     : "Migration completed. Review the audit output and test in a non-production environment before enabling production rules.\n");
 }
 
