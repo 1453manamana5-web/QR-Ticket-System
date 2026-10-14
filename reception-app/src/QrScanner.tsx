@@ -109,12 +109,16 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         if(cameras.length===0)throw new Error("使用できるカメラが見つかりませんでした。");
 
         // iPad/SafariではカメラID指定の方が安定するため、端末の前面カメラを明示的に選択。
-        const preferredCamera=cameras.find(camera=>isFrontCameraLabel(camera.label))??cameras[0];
-        if(!preferredCamera)throw new Error("前面カメラを選択できませんでした。");
-
-        console.info("使用する前面カメラ:",preferredCamera.label||preferredCamera.id);
+        const preferredCamera=cameras.find(camera=>isFrontCameraLabel(camera.label));
+        // Safariでカメラ名が隠される場合は、ID順に依存せず facingMode=user を指定する。
+        const cameraConfig:string|MediaTrackConstraints=preferredCamera?.id??{facingMode:"user"};
+        if(preferredCamera){
+          console.info("使用する前面カメラ:",preferredCamera.label||preferredCamera.id);
+        }else{
+          console.info("カメラ名を判定できないため facingMode=user で前面カメラを要求します");
+        }
         await instance.start(
-          preferredCamera.id,
+          cameraConfig,
           {
             fps:18,
             qrbox:(viewfinderWidth,viewfinderHeight)=>{
