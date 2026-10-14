@@ -47,6 +47,15 @@ export async function publishEventBundle(
 ): Promise<PublishedEventBundle> {
   const db = getFirebaseDb();
   const authToken = createAuthToken();
+  // React stateが未読込の瞬間に公開操作されても、Firestoreに保存済みのチケットを空配信しない。
+  // 明示的なチケット一覧が空の場合だけ、Firestoreの保存済み一覧を復元元として使う。
+  let publishedTickets = tickets;
+  if (publishedTickets.length === 0) {
+    const savedTicketsSnapshot = await getDocs(collection(db, "events", event.eventId, "tickets"));
+    if (!savedTicketsSnapshot.empty) {
+      publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
+    }
+  }
   const existingEvents = await getDocs(collection(db, "events"));
   await Promise.all(existingEvents.docs
     .filter(item => item.id !== event.eventId && item.data().receptionTarget === true)
@@ -58,16 +67,16 @@ export async function publishEventBundle(
   const bundle: PublishedEventBundle = {
     event: publishedEvent,
     settings,
-    tickets,
-    ticketCount: tickets.length,
+    tickets: publishedTickets,
+    ticketCount: publishedTickets.length,
     authToken,
     publishedAt: new Date().toISOString(),
   };
 
   // 管理端末のリアルタイム一覧と受付用バンドルで、同じチケット群を使う。
-  for (let start = 0; start < tickets.length; start += 450) {
+  for (let start = 0; start < publishedTickets.length; start += 450) {
     const batch = writeBatch(db);
-    for (const ticket of tickets.slice(start, start + 450)) {
+    for (const ticket of publishedTickets.slice(start, start + 450)) {
       batch.set(doc(db, "events", event.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
     }
     await batch.commit();
@@ -78,8 +87,8 @@ export async function publishEventBundle(
   await setDoc(doc(db, "eventBundles", authToken), {
     event: publishedEvent,
     settings,
-    tickets,
-    ticketCount: tickets.length,
+    tickets: publishedTickets,
+    ticketCount: publishedTickets.length,
     authToken,
     publishedAt: bundle.publishedAt,
   });
@@ -89,7 +98,7 @@ export async function publishEventBundle(
     ...publishedEvent,
     authToken,
     receptionTarget: publishedEvent.eventStatus !== "finished",
-    ticketCount: tickets.length,
+    ticketCount: publishedTickets.length,
     updatedAt: bundle.publishedAt,
   }, { merge: true });
 
