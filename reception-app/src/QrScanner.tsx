@@ -1,7 +1,67 @@
 import {useEffect,useRef} from "react";
-import {Html5Qrcode} from "html5-qrcode";
+import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
 
-type Props={readerId:string;onResult:(text:string)=>void;onError?:(message:string)=>void;className?:string};
+type Props={
+  readerId:string;
+  onResult:(text:string)=>void;
+  onError?:(message:string)=>void;
+  className?:string;
+};
+
+type ExtendedVideoConstraints=MediaTrackConstraints&{
+  advanced?:Array<MediaTrackConstraintSet&{
+    focusMode?:string|string[];
+    exposureMode?:string|string[];
+  }>;
+};
+
+function isFrontCameraLabel(cameraLabel:string){
+  const label=cameraLabel.toLowerCase();
+  return label.includes("front")||
+    label.includes("user")||
+    label.includes("facetime")||
+    label.includes("前面")||
+    label.includes("内側")||
+    label.includes("インカメラ");
+}
+
+function stopAllVideoTracks(){
+  document.querySelectorAll("video").forEach(video=>{
+    const stream=video.srcObject;
+    if(stream instanceof MediaStream){
+      stream.getTracks().forEach(track=>{
+        try{track.stop();}catch(error){console.warn("映像トラックを停止できませんでした",error);}
+      });
+      video.srcObject=null;
+    }
+    try{video.pause();}catch{}
+    video.removeAttribute("src");
+    try{video.load();}catch{}
+  });
+}
+
+async function applyFastCameraSettings(scanner:Html5Qrcode){
+  const fastConstraints:ExtendedVideoConstraints={
+    width:{ideal:1280},
+    height:{ideal:720},
+    frameRate:{ideal:30,min:15},
+    advanced:[{focusMode:"continuous",exposureMode:"continuous"}]
+  };
+  try{
+    await scanner.applyVideoConstraints(fastConstraints);
+  }catch(advancedError){
+    console.warn("連続フォーカス設定を使用できないため、基本設定を試します",advancedError);
+    try{
+      await scanner.applyVideoConstraints({
+        width:{ideal:1280},
+        height:{ideal:720},
+        frameRate:{ideal:30,min:15}
+      });
+    }catch(basicError){
+      console.warn("端末標準のカメラ設定を使用します",basicError);
+    }
+  }
+}
 
 export default function QrScanner({readerId,onResult,onError,className}:Props){
   const onResultRef=useRef(onResult);
@@ -11,44 +71,98 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
   useEffect(()=>{onErrorRef.current=onError;},[onError]);
 
   useEffect(()=>{
-    const scanner=new Html5Qrcode(readerId);
     let active=true;
-    let processing=false;
+    let scanner:Html5Qrcode|null=null;
+    let scanLocked=false;
     let lastDecodedText="";
     let lastDecodedAt=0;
 
-    void scanner.start(
-      {facingMode:"environment"},
-      {
-        fps:10,
-        qrbox:(w,h)=>{
-          const size=Math.floor(Math.min(w,h)*0.68);
-          return {width:size,height:size};
-        },
-        aspectRatio:1
-      },
-      decodedText=>{
-        if(!active||processing)return;
-        const now=Date.now();
-        // 同じQRを連続フレームで何度も受付しない。別のQRなら結果表示中でも受付可能。
-        if(decodedText===lastDecodedText&&now-lastDecodedAt<2800)return;
-        processing=true;
-        lastDecodedText=decodedText;
-        lastDecodedAt=now;
-        onResultRef.current(decodedText);
-        window.setTimeout(()=>{processing=false;},250);
-      },
-      ()=>undefined
-    ).catch(()=>{
-      if(active)onErrorRef.current?.("カメラを起動できませんでした。Safariのカメラ許可を確認してください。");
-    });
+    const stopCamera=async()=>{
+      const current=scanner;
+      scanner=null;
+      if(current){
+        try{if(current.isScanning)await current.stop();}catch(error){console.warn("QRカメラの停止に失敗しました",error);}
+        try{current.clear();}catch(error){console.warn("QR表示領域のクリアに失敗しました",error);}
+      }
+      // html5-qrcodeの停止後もiPadで映像トラックが残る場合に備えて明示停止。
+      stopAllVideoTracks();
+    };
 
+    const startCamera=async()=>{
+      try{
+        await stopCamera();
+        if(!active)return;
+
+        const readerElement=document.getElementById(readerId);
+        if(!readerElement)throw new Error("カメラ表示領域が見つかりません。");
+        readerElement.innerHTML="";
+
+        const instance=new Html5Qrcode(readerId,{
+          formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],
+          useBarCodeDetectorIfSupported:true,
+          verbose:false
+        });
+        scanner=instance;
+
+        const cameras=await Html5Qrcode.getCameras();
+        if(!active){await stopCamera();return;}
+        if(cameras.length===0)throw new Error("使用できるカメラが見つかりませんでした。");
+
+        // iPad/SafariではカメラID指定の方が安定するため、端末の前面カメラを明示的に選択。
+        const preferredCamera=cameras.find(camera=>isFrontCameraLabel(camera.label))??cameras[0];
+        if(!preferredCamera)throw new Error("前面カメラを選択できませんでした。");
+
+        console.info("使用する前面カメラ:",preferredCamera.label||preferredCamera.id);
+        await instance.start(
+          preferredCamera.id,
+          {
+            fps:18,
+            qrbox:(viewfinderWidth,viewfinderHeight)=>{
+              const minimumSide=Math.min(viewfinderWidth,viewfinderHeight);
+              const calculatedSize=Math.floor(minimumSide*0.9);
+              const availableSize=Math.max(160,minimumSide-16);
+              const finalSize=Math.min(calculatedSize,availableSize);
+              return {width:finalSize,height:finalSize};
+            },
+            aspectRatio:16/9,
+            disableFlip:true
+          },
+          decodedText=>{
+            if(!active||scanLocked)return;
+            const normalizedValue=decodedText.trim();
+            if(!normalizedValue)return;
+
+            const now=Date.now();
+            if(normalizedValue===lastDecodedText&&now-lastDecodedAt<1200)return;
+            lastDecodedText=normalizedValue;
+            lastDecodedAt=now;
+            scanLocked=true;
+            onResultRef.current(normalizedValue);
+          },
+          ()=>undefined
+        );
+
+        if(!active){await stopCamera();return;}
+        await applyFastCameraSettings(instance);
+      }catch(reason){
+        console.error("前面カメラのQR読み取りを開始できませんでした",reason);
+        await stopCamera();
+        if(active){
+          const message=reason instanceof Error
+            ? `カメラを起動できませんでした: ${reason.message}`
+            : "カメラを起動できませんでした。Safariのカメラ許可を確認してください。";
+          onErrorRef.current?.(message);
+        }
+      }
+    };
+
+    void startCamera();
     return()=>{
       active=false;
-      if(scanner.isScanning)void scanner.stop().catch(()=>undefined);
-      void scanner.clear().catch(()=>undefined);
+      scanLocked=true;
+      void stopCamera();
     };
   },[readerId]);
 
-  return <div id={readerId} className={className??"qr-reader"} aria-label="QRコード読み取りエリア"/>;
+  return <div id={readerId} className={className??"qr-reader"} aria-label="前面カメラのQRコード読み取りエリア"/>;
 }
