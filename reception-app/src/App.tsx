@@ -63,6 +63,8 @@ async function logReceptionError(
 
 export default function App(){
   const [screen,setScreen]=useState<Screen>("registration");
+  const screenRef=useRef<Screen>(screen);
+  screenRef.current=screen;
   const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
   const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
   const [mode,setMode]=useState<Mode>("entry");
@@ -149,6 +151,7 @@ export default function App(){
       if(!downloaded)throw new Error("NO_PUBLISHED_EVENT");
       const eventData:LocalEventData={
         ...downloaded.localEvent,
+        ticketCount:downloaded.tickets.length,
         dataReady:false,
       };
       await prepareLocalEventData(eventData,downloaded.tickets);
@@ -224,7 +227,7 @@ export default function App(){
         if(cancelled||!navigator.onLine)return;
 
         const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
-        if(!downloaded||cancelled)return;
+        if(!downloaded||cancelled||screenRef.current==="reception")return;
 
         const existing=cachedEvent??await loadLocalEvent();
         if(
@@ -250,6 +253,7 @@ export default function App(){
 
         const nextEvent:LocalEventData={
           ...downloaded.localEvent,
+          ticketCount:downloaded.tickets.length,
           dataReady:false,
         };
         await prepareLocalEventData(nextEvent,downloaded.tickets);
