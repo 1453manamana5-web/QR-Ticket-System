@@ -104,9 +104,27 @@ export async function downloadEventData(
     bundle.event?.eventName !== payload.eventName ||
     bundle.event?.dataVersion !== payload.dataVersion ||
     !Array.isArray(bundle.tickets) ||
-    typeof bundle.ticketCount !== "number" ||
-    bundle.ticketCount !== bundle.tickets.length
+    typeof bundle.ticketCount !== "number"
   ) {
+    throw new Error("EVENT_DATA_INVALID");
+  }
+
+  let tickets = bundle.tickets;
+
+  // 古い公開バンドルが「0枚」のままでも、イベント配下に保存済みの
+  // チケットがあればそちらから復元する。空バンドルをそのまま受付端末へ保存しない。
+  if (tickets.length === 0) {
+    try {
+      const savedTickets = await getDocs(collection(db, "events", payload.eventId, "tickets"));
+      if (!savedTickets.empty) {
+        tickets = savedTickets.docs.map(item => item.data() as Ticket);
+      }
+    } catch (reason) {
+      console.warn("公開バンドルが空のためチケット一覧を復元しようとしましたが、取得できませんでした", reason);
+    }
+  }
+
+  if (bundle.ticketCount !== bundle.tickets.length && tickets.length === bundle.tickets.length) {
     throw new Error("EVENT_DATA_INVALID");
   }
 
@@ -123,8 +141,8 @@ export async function downloadEventData(
     terminalId,
     authenticatedAt: new Date().toISOString(),
     dataReady: false,
-    ticketCount: bundle.tickets.length,
+    ticketCount: tickets.length,
   };
 
-  return { localEvent, tickets: bundle.tickets };
+  return { localEvent, tickets };
 }
