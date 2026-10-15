@@ -485,13 +485,40 @@ export default function App(){
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
     if(!localEvent||busy)return;
-    const ticketId=rawText.trim();
+    let ticketId=rawText.trim();
+    let qrEventId:string|null=null;
     if(!ticketId)return;
+
+    // 現行のチケットQRは { type, eventId, ticketId, ticketNumber } のJSON。
+    // 生文字列のまま検索するとチケットIDと一致せず、毎回「チケットを確認できません」になる。
+    // 旧形式のQRとの互換性を保つため、JSONでない値は従来どおりチケットIDとして扱う。
+    try{
+      const decoded:unknown=JSON.parse(ticketId);
+      if(decoded&&typeof decoded==="object"&&!Array.isArray(decoded)){
+        const payload=decoded as {type?:unknown;eventId?:unknown;ticketId?:unknown};
+        if(payload.type==="qr-ticket"){
+          if(typeof payload.ticketId!=="string"||!payload.ticketId.trim()){
+            void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
+            setResult({kind:"error",title:"QRコードを確認できません",detail:"チケット情報が不足しています。"});
+            return;
+          }
+          ticketId=payload.ticketId.trim();
+          if(typeof payload.eventId==="string")qrEventId=payload.eventId;
+        }
+      }
+    }catch{
+      // 旧形式のチケットIDはJSONではないため、そのまま照合する。
+    }
 
     setBusy(true);
     setResult(null);
 
     try{
+      if(qrEventId&&qrEventId!==localEvent.event.eventId){
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
+        setResult({kind:"error",title:"別のイベントのチケットです",detail:"現在の受付イベントのチケットを読み取ってください。"});
+        return;
+      }
       const ticket=await getTicket(ticketId);
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
         void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
