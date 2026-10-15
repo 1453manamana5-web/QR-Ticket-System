@@ -227,9 +227,29 @@ export default function App(){
         if(cancelled||!navigator.onLine)return;
 
         const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
-        if(!downloaded||cancelled||screenRef.current==="reception")return;
+        if(!downloaded||cancelled)return;
 
         const existing=cachedEvent??await loadLocalEvent();
+        // 受付認証はイベント単位。別イベントが公開されたら、受付権限だけを再申請状態に戻す。
+        // role / managementApproved は registerReceptionTerminal が保持するため、管理端末兼用でも管理権限は失わない。
+        if(existing?.dataReady && existing.event.eventId!==downloaded.localEvent.event.eventId){
+          const name=terminalRegistrationName.trim()||existing.event.eventName||"受付端末";
+          await clearLocalEvent();
+          await registerReceptionTerminal(name);
+          if(cancelled)return;
+          cachedEvent=null;
+          setLocalEvent(null);
+          setAuthPayload(null);
+          setResult(null);
+          setError("イベントが切り替わりました。新しいイベントの受付申請を行い、管理者の承認を受けてください。");
+          setTerminalRegistration({approved:false,status:"pending",name});
+          setScreen("registration");
+          return;
+        }
+
+        // 受付スキャン中は同一イベントの定期更新で画面を切り替えない。
+        if(screenRef.current==="reception")return;
+
         if(
           existing?.dataReady &&
           existing.event.eventId===downloaded.localEvent.event.eventId &&
@@ -278,13 +298,17 @@ export default function App(){
         if(code==="NO_PUBLISHED_EVENT"){
           // オンラインで受付対象イベントがなくなっている場合は、古い端末キャッシュで受付を続けない。
           if(cachedEvent){
+            const name=terminalRegistrationName.trim()||cachedEvent.event.eventName||"受付端末";
             await clearLocalEvent().catch(clearReason=>console.error("古いイベントデータの消去に失敗しました",clearReason));
+            await registerReceptionTerminal(name).catch(resetReason=>console.error("イベント終了時の受付再申請状態への切替に失敗しました",resetReason));
             cachedEvent=null;
             setLocalEvent(null);
             setAuthPayload(null);
-            setScreen("auth");
+            setResult(null);
+            setTerminalRegistration({approved:false,status:"pending",name});
+            setScreen("registration");
           }
-          setError("Firebase上に受付対象の公開イベントが見つかりません。管理アプリでイベントを公開し、受付対象に設定してください。");
+          setError("受付対象の公開イベントが見つかりません。次のイベントでは受付申請と承認が必要です。");
         }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
           setError("受付対象の公開イベントが複数あります。管理アプリで受付対象を1件だけにしてください。");
         }else if(code==="INVALID_PUBLISHED_EVENT"){
