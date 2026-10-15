@@ -4774,3 +4774,109 @@ body:has(.ticket-screen),
 .smart-reception-insight{margin:15px 0 0;padding:12px 14px;border-radius:12px;background:rgba(248,250,252,.82);color:#334155;font-size:13px;line-height:1.7}
 .smart-reception-empty{font-size:13px;line-height:1.7;color:#64748b}
 @media(max-width:640px){.smart-reception-analysis{padding:14px}.smart-reception-analysis-heading{align-items:flex-start}.smart-reception-peak>strong{font-size:20px}}
+
+
+/* Home interaction refinement: restrained, spring-like motion inspired by native Apple interfaces. */
+.home-dashboard > .home-welcome,
+.home-dashboard > .home-metrics,
+.home-dashboard > .home-content-grid,
+.home-dashboard > .home-quick-section {
+  animation: home-surface-arrive 620ms cubic-bezier(.2,.75,.25,1) both;
+}
+.home-dashboard > .home-welcome { animation-delay: 0ms; }
+.home-dashboard > .home-metrics { animation-delay: 55ms; }
+.home-dashboard > .home-content-grid { animation-delay: 105ms; }
+.home-dashboard > .home-quick-section { animation-delay: 150ms; }
+
+.home-welcome,
+.home-current-event,
+.home-metric-card,
+.home-section,
+.home-quick-section {
+  transition:
+    transform 420ms cubic-bezier(.2,.75,.25,1),
+    box-shadow 420ms cubic-bezier(.2,.75,.25,1),
+    border-color 320ms ease,
+    background-color 320ms ease;
+}
+.home-metric-card { transform: translateZ(0); }
+.home-event-row {
+  border-radius: 12px;
+  padding-left: 10px;
+  padding-right: 10px;
+  transition:
+    background-color 260ms ease,
+    transform 360ms cubic-bezier(.2,.75,.25,1),
+    padding 260ms ease;
+}
+.home-event-row:hover {
+  background: #f6f8fc;
+  transform: translateX(3px);
+}
+.home-event-row:active { transform: translateX(1px) scale(.995); }
+.home-activity-row { transition: background-color 240ms ease; }
+.home-activity-row:hover { background: #f8f9fc; }
+.home-inline-link,
+.home-text-button,
+.home-quick-grid > button,
+.home-empty .primary-action {
+  transition:
+    transform 360ms cubic-bezier(.2,.75,.25,1),
+    color 240ms ease,
+    background-color 260ms ease,
+    box-shadow 360ms cubic-bezier(.2,.75,.25,1);
+}
+.home-inline-link:hover,
+.home-text-button:hover { color: #1769d2; }
+.home-inline-link:active,
+.home-text-button:active,
+.home-quick-grid > button:active,
+.home-empty .primary-action:active {
+  transform: scale(.975);
+}
+.home-dashboard button:focus-visible {
+  outline: 3px solid rgba(38, 117, 235, .72);
+  outline-offset: 3px;
+}
+.liquid-glass-enabled .home-welcome:hover,
+.liquid-glass-enabled .home-current-event:hover,
+.liquid-glass-enabled .home-metric-card:hover,
+.liquid-glass-enabled .home-section:hover,
+.liquid-glass-enabled .home-quick-section:hover {
+  border-color: rgba(255,255,255,.96);
+  box-shadow: 0 18px 42px rgba(38,53,83,.12), inset 0 1px 0 rgba(255,255,255,.96);
+}
+.liquid-glass-enabled .home-metric-card:hover,
+.liquid-glass-enabled .home-current-event:hover {
+  transform: translateY(-2px);
+}
+@keyframes home-surface-arrive {
+  from { opacity: 0; transform: translateY(12px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-dashboard > .home-welcome,
+  .home-dashboard > .home-metrics,
+  .home-dashboard > .home-content-grid,
+  .home-dashboard > .home-quick-section {
+    animation: none;
+  }
+  .home-welcome,
+  .home-current-event,
+  .home-metric-card,
+  .home-section,
+  .home-quick-section,
+  .home-event-row,
+  .home-activity-row,
+  .home-inline-link,
+  .home-text-button,
+  .home-quick-grid > button,
+  .home-empty .primary-action {
+    transition: none;
+  }
+  .home-event-row:hover,
+  .home-metric-card:hover,
+  .home-current-event:hover {
+    transform: none;
+  }
+}
