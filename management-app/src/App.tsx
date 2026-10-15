@@ -2608,7 +2608,7 @@ export default function App() {
           <span>選択中のイベント</span>
           <strong>{event.eventId ? (savedEventName || event.eventName || "名称未設定") : "イベント未選択"}</strong>
           {event.eventId ? <small>{event.eventDate || "開催日未設定"} ・ {statusLabel[eventStatus]}</small> : <small>イベント管理からイベントを作成してください。</small>}
-          <button className="home-inline-link" onClick={() => setPage("イベント管理")}>イベント管理へ <b>→</b></button>
+          <button className="home-inline-link" onClick={(event) => navigateFromSidebar("イベント管理", event.currentTarget)}>イベント管理へ <b>→</b></button>
         </div>
       </section>
 
@@ -2633,9 +2633,9 @@ export default function App() {
 
       <div className="home-content-grid">
         <section className="home-section home-events-section">
-          <div className="home-section-heading"><div><small>EVENTS</small><h3>イベント一覧</h3></div><button className="home-text-button" onClick={() => setPage("イベント管理")}>すべて見る <span>→</span></button></div>
+          <div className="home-section-heading"><div><small>EVENTS</small><h3>イベント一覧</h3></div><button className="home-text-button" onClick={(event) => navigateFromSidebar("イベント管理", event.currentTarget)}>すべて見る <span>→</span></button></div>
           {homeEventList.length ? <div className="home-event-list">
-            {homeEventList.map(item => <button className="home-event-row" key={item.eventId} onClick={() => { selectHistoryEvent(item); setPage("イベント管理"); }}>
+            {homeEventList.map(item => <button className="home-event-row" key={item.eventId} onClick={(event) => { selectHistoryEvent(item); navigateFromSidebar("イベント管理", event.currentTarget); }}>
               <span className={"home-event-status " + item.eventStatus} />
               <span className="home-event-info"><strong>{item.eventName || "名称未設定"}</strong><small>{item.eventDate || "開催日未設定"} ・ {item.eventId}</small></span>
               <span className={"home-event-badge " + item.eventStatus}>{statusLabel[item.eventStatus]}</span>
@@ -2645,7 +2645,7 @@ export default function App() {
         </section>
 
         <section className="home-section home-activity-section">
-          <div className="home-section-heading"><div><small>RECENT ACTIVITY</small><h3>最近の受付状況</h3></div><button className="home-text-button" onClick={() => setPage("分析")}>分析を見る <span>→</span></button></div>
+          <div className="home-section-heading"><div><small>RECENT ACTIVITY</small><h3>最近の受付状況</h3></div><button className="home-text-button" onClick={(event) => navigateFromSidebar("分析", event.currentTarget)}>分析を見る <span>→</span></button></div>
           {recentReceptionRecords.length ? <div className="home-activity-list">
             {recentReceptionRecords.map((record, index) => <div className="home-activity-row" key={(record.recordId || record.ticketId || "record") + "-" + record.timestamp + "-" + index}>
               <span className={"home-activity-icon " + record.type}>{record.type === "entry" ? "↘" : "↗"}</span>
@@ -2659,10 +2659,10 @@ export default function App() {
       <section className="home-quick-section">
         <div className="home-section-heading"><div><small>QUICK ACCESS</small><h3>クイックアクセス</h3></div><p>よく使う管理機能へすばやく移動</p></div>
         <div className="home-quick-grid">
-          <button onClick={() => setPage("イベント管理")}><span className="home-quick-icon"><NavIcon type="event" /></span><span><strong>イベント管理</strong><small>イベントの作成・状態変更</small></span><b>→</b></button>
-          <button onClick={() => setPage("チケット管理")}><span className="home-quick-icon"><NavIcon type="ticket" /></span><span><strong>チケット管理</strong><small>一覧・発行状況を確認</small></span><b>→</b></button>
-          <button onClick={() => setPage("端末管理")}><span className="home-quick-icon"><NavIcon type="terminal" /></span><span><strong>端末管理</strong><small>受付端末の登録・接続状況</small></span><b>→</b></button>
-          <button onClick={() => setPage("分析")}><span className="home-quick-icon"><NavIcon type="analysis" /></span><span><strong>分析</strong><small>受付データと過去の実績</small></span><b>→</b></button>
+          <button onClick={(event) => navigateFromSidebar("イベント管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="event" /></span><span><strong>イベント管理</strong><small>イベントの作成・状態変更</small></span><b>→</b></button>
+          <button onClick={(event) => navigateFromSidebar("チケット管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="ticket" /></span><span><strong>チケット管理</strong><small>一覧・発行状況を確認</small></span><b>→</b></button>
+          <button onClick={(event) => navigateFromSidebar("端末管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="terminal" /></span><span><strong>端末管理</strong><small>受付端末の登録・接続状況</small></span><b>→</b></button>
+          <button onClick={(event) => navigateFromSidebar("分析", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="analysis" /></span><span><strong>分析</strong><small>受付データと過去の実績</small></span><b>→</b></button>
         </div>
       </section>
     </div>;
