@@ -3,7 +3,7 @@ import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
 
 type Props={
   readerId:string;
-  onResult:(text:string)=>void;
+  onResult:(text:string)=>void|Promise<void>;
   onError?:(message:string)=>void;
   className?:string;
 };
@@ -141,7 +141,16 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
             lastDecodedText=normalizedValue;
             lastDecodedAt=now;
             scanLocked=true;
-            onResultRef.current(normalizedValue);
+            // 処理中の二重読取を防ぎつつ、結果画面の表示後は次のQRを読めるようにする。
+            // 以前は scanLocked が解除されず、1回目の読取後にカメラが永久に反応しなかった。
+            void Promise.resolve()
+              .then(()=>onResultRef.current(normalizedValue))
+              .catch(error=>console.error("QRコードの受付処理に失敗しました",error))
+              .finally(()=>{
+                window.setTimeout(()=>{
+                  if(active)scanLocked=false;
+                },2600);
+              });
           },
           ()=>undefined
         );
