@@ -2656,15 +2656,6 @@ export default function App() {
         </section>
       </div>
 
-      <section className="home-quick-section">
-        <div className="home-section-heading"><div><small>QUICK ACCESS</small><h3>クイックアクセス</h3></div><p>よく使う管理機能へすばやく移動</p></div>
-        <div className="home-quick-grid">
-          <button onClick={(event) => navigateFromSidebar("イベント管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="event" /></span><span><strong>イベント管理</strong><small>イベントの作成・状態変更</small></span><b>→</b></button>
-          <button onClick={(event) => navigateFromSidebar("チケット管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="ticket" /></span><span><strong>チケット管理</strong><small>一覧・発行状況を確認</small></span><b>→</b></button>
-          <button onClick={(event) => navigateFromSidebar("端末管理", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="terminal" /></span><span><strong>端末管理</strong><small>受付端末の登録・接続状況</small></span><b>→</b></button>
-          <button onClick={(event) => navigateFromSidebar("分析", event.currentTarget)}><span className="home-quick-icon"><NavIcon type="analysis" /></span><span><strong>分析</strong><small>受付データと過去の実績</small></span><b>→</b></button>
-        </div>
-      </section>
     </div>;
   };
 
