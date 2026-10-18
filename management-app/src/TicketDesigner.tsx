@@ -179,7 +179,7 @@ function TicketDesigner({
   const [previewZoom, setPreviewZoom] = useState(1);
   const [showActualSize, setShowActualSize] = useState(false);
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
-  const [selectedPart, setSelectedPart] = useState<"qr" | "number">("qr");
+  const [selectedPart, setSelectedPart] = useState<"qr" | "number" | null>(null);
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartZoom = useRef(1);
   const dragTarget = useRef<"qr" | "number" | null>(null);
