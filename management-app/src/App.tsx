@@ -1004,6 +1004,46 @@ export default function App() {
     }
   };
 
+  const updateTicketNumber = (ticketId: string) => {
+    if (event.eventStatus === "finished") {
+      setError("終了済みイベントのチケット番号は変更できません。");
+      return;
+    }
+    const target = tickets.find(ticket => ticket.ticketId === ticketId);
+    if (!target) return;
+    const currentNumber = Number(target.basicInfo.ticketNumber);
+    const entered = window.prompt(
+      "新しいチケット番号を入力してください（1以上の整数）。\n内部IDと受付履歴は変更されません。",
+      String(Number.isFinite(currentNumber) ? currentNumber : "")
+    );
+    if (entered === null) return;
+    const normalized = entered.trim();
+    if (!/^\\d+$/.test(normalized) || !Number.isSafeInteger(Number(normalized)) || Number(normalized) < 1) {
+      setError("チケット番号は1以上の整数で入力してください。");
+      return;
+    }
+    const nextNumber = Number(normalized);
+    if (tickets.some(ticket =>
+      ticket.ticketId !== ticketId &&
+      Number(ticket.basicInfo.ticketNumber) === nextNumber
+    )) {
+      setError("同じイベント内に同じチケット番号が既に存在します。別の番号を指定してください。");
+      return;
+    }
+    const nextTicket: Ticket = {
+      ...target,
+      basicInfo: { ...target.basicInfo, ticketNumber: nextNumber },
+      updatedAt: new Date().toISOString(),
+    };
+    setError("");
+    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
+    void saveTicket(event.eventId, nextTicket).catch(reason => {
+      console.error(reason);
+      setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? target : ticket));
+      setError("チケット番号をFirebaseへ保存できませんでした。通信状態とFirestoreの権限を確認してください。");
+    });
+  };
+
   const updateTicketStatus = (ticketId: string, status: Ticket["currentStatus"]) => {
     const target = tickets.find(ticket => ticket.ticketId === ticketId);
     if (!target) return;
@@ -1919,6 +1959,7 @@ export default function App() {
                 </select>
                 <div className="ticket-row-actions">
                   <button className="ticket-row-view" onClick={() => setTicketQrModalTicket(ticket)}>QR表示</button>
+                  <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={event.eventStatus === "finished"}>番号変更</button>
                   <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
                   <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
                 </div>
