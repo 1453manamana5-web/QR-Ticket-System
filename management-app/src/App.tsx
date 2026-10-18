@@ -143,9 +143,9 @@ export default function App() {
   const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number } | null>(null);
   const pageOpeningSequence = useRef(0);
   const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
-    if (nextPage === "チケット管理" && (!selectedHistoryEventId || !event.eventId || event.eventStatus === "finished")) {
-      setNavigationNotice(!selectedHistoryEventId || !event.eventId
-        ? "チケット管理を開けません。先に「イベント管理」で、チケットを管理したいイベントのカードを選択してください。"
+    if (nextPage === "チケット管理" && (!event.eventId || event.eventStatus === "finished")) {
+      setNavigationNotice(!event.eventId
+        ? "チケット管理を開けません。先に「イベント管理」でイベントを作成するか、イベント一覧から対象イベントを選択してください。"
         : "チケット管理を開けません。このイベントは終了済みです。「イベント管理」で、終了していないイベントを選択してください。");
       setPage("イベント管理");
       return;
