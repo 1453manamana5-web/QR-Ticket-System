@@ -25,7 +25,6 @@ type TicketDesignerProps = {
   initialTicketNumber?: string;
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
-  onApplyTicketNumbers: (changes: Array<{ id: string; ticketNumber: number }>) => Promise<void>;
 };
 
 type CardRatio =
@@ -143,7 +142,6 @@ function TicketDesigner({
   initialTicketNumber,
   qrValue,
   onClose,
-  onApplyTicketNumbers,
 }: TicketDesignerProps) {
   const printableTickets =
     useMemo(
@@ -168,11 +166,6 @@ function TicketDesigner({
       : 0;
 
   const detectionId = useRef(0);
-
-  const [numberDraft, setNumberDraft] = useState("");
-  const [numberNotice, setNumberNotice] = useState("");
-  const [numberProposal, setNumberProposal] = useState<Array<{ id: string; oldNumber: number; newNumber: number }> | null>(null);
-  const [numberSaving, setNumberSaving] = useState(false);
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
@@ -319,20 +312,6 @@ function TicketDesigner({
     selectedTickets[0] ??
     printableTickets[0] ??
     null;
-
-  const sortedNumberTickets = useMemo(
-    () => [...printableTickets].sort((a, b) => {
-      const numberDiff = Number(a.qrNumber) - Number(b.qrNumber);
-      return numberDiff || a.id.localeCompare(b.id);
-    }),
-    [printableTickets],
-  );
-
-  useEffect(() => {
-    setNumberDraft(previewTicket?.qrNumber.replace(/^0+/, "") || "");
-    setNumberNotice("");
-    setNumberProposal(null);
-  }, [previewTicket?.id, previewTicket?.qrNumber]);
 
   const createNumberProposal = () => {
     if (!previewTicket) return;
@@ -1159,24 +1138,6 @@ function TicketDesigner({
 
             <div className="ticket-setting-group">
               <h4>チケット番号</h4>
-              <div className="ticket-number-editor">
-                <p>プレビュー中のチケット番号：<strong>{previewTicket?.qrNumber ?? "—"}</strong></p>
-                <label className="ticket-number-edit-field">
-                  変更後の番号
-                  <input type="number" min="1" step="1" inputMode="numeric" value={numberDraft} onChange={event => { setNumberDraft(event.target.value); setNumberProposal(null); setNumberNotice(""); }} />
-                </label>
-                <button type="button" className="ticket-number-suggest-button" onClick={createNumberProposal}>ほかの番号も提案</button>
-                {numberNotice && <p className="ticket-number-notice" role="status">{numberNotice}</p>}
-                {numberProposal && numberProposal.length > 0 && (
-                  <div className="ticket-number-proposal">
-                    <strong>番号変更案（確認用）</strong>
-                    <ul>{numberProposal.slice(0, 12).map(item => <li key={item.id}>{String(item.oldNumber).padStart(6, "0")} → <strong>{String(item.newNumber).padStart(6, "0")}</strong></li>)}</ul>
-                    {numberProposal.length > 12 && <p>ほか {numberProposal.length - 12} 枚</p>}
-                    <button type="button" className="ticket-number-apply-button" onClick={() => { void applyNumberProposal(); }} disabled={numberSaving}>{numberSaving ? "保存中…" : "この番号案を適用"}</button>
-                  </div>
-                )}
-              </div>
-
               <label>
                 横位置
 
