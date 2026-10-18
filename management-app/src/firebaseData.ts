@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch, runTransaction } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -60,36 +60,20 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
   }, { merge: true });
 
   if (!bundleRef || !savedBundle) return;
+  // バンドルに全チケットを再格納しない。件数・版数だけ更新し、実データはサブコレクションを参照する。
   await setDoc(bundleRef, {
-    ...savedBundle,
     event: {
       ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
       eventId,
       dataVersion: nextDataVersion,
     },
-    tickets,
     ticketCount: tickets.length,
     publishedAt: now,
-  });
+  }, { merge: true });
 }
 
-async function syncPublishedTicketStatus(eventId: string, ticket: Ticket): Promise<void> {
-  const db = getFirebaseDb();
-  const eventSnapshot = await getDoc(doc(db, "events", eventId));
-  const authToken = eventSnapshot.exists() ? eventSnapshot.data().authToken : null;
-  if (typeof authToken !== "string" || !authToken) return;
-  const bundleRef = doc(db, "eventBundles", authToken);
-  await runTransaction(db, async transaction => {
-    const bundleSnapshot = await transaction.get(bundleRef);
-    if (!bundleSnapshot.exists()) return;
-    const savedBundle = bundleSnapshot.data();
-    const existingTickets = Array.isArray(savedBundle.tickets) ? savedBundle.tickets as Ticket[] : [];
-    const found = existingTickets.some(item => item.ticketId === ticket.ticketId);
-    const nextTickets = found
-      ? existingTickets.map(item => item.ticketId === ticket.ticketId ? ticket : item)
-      : [...existingTickets, ticket];
-    transaction.set(bundleRef, { ...savedBundle, tickets: nextTickets, ticketCount: nextTickets.length });
-  });
+async function syncPublishedTicketStatus(_eventId: string, _ticket: Ticket): Promise<void> {
+  // チケット状態の正本は events/{eventId}/tickets。公開バンドルへ全件コピーしない。
 }
 
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
