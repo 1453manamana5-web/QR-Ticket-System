@@ -43,6 +43,7 @@ type TicketDesignSettings = {
   customHeight: number;
 
   printWidthMm: number;
+  printHeightMm: number;
   cardsPerRow: number;
   printGapMm: number;
 
@@ -76,6 +77,7 @@ const defaultSettings: TicketDesignSettings = {
   customHeight: 9,
 
   printWidthMm: 90,
+  printHeightMm: 50.625,
   cardsPerRow: 2,
   printGapMm: 4,
 
@@ -174,6 +176,7 @@ function TicketDesigner({
     () => loadDesignSettings(eventName).backgroundImage !== ""
   );
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
   const pinchStartDistance = useRef<number | null>(null);
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
@@ -272,8 +275,9 @@ function TicketDesigner({
     );
 
   const printHeightMm =
-    safePrintWidth *
-    (ratio.height / ratio.width);
+    settings.cardRatio === "custom"
+      ? Math.max(10, settings.printHeightMm || safePrintWidth * (ratio.height / ratio.width))
+      : safePrintWidth * (ratio.height / ratio.width);
 
   const selectedTickets =
     useMemo(() => {
@@ -1054,35 +1058,51 @@ function TicketDesigner({
                 </div>
               )}
 
-              <label className="ticket-number-setting">
-                印刷時の横幅
-
-                <input
-                  type="number"
-                  min="30"
-                  max="250"
-                  step="1"
-                  value={
-                    settings.printWidthMm
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    updateSetting(
-                      "printWidthMm",
-                      Math.max(
-                        30,
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    )
-                  }
-                />
-
-                <span>mm</span>
+              <label className="ticket-select-setting">
+                寸法の単位
+                <select value={sizeUnit} onChange={(event) => setSizeUnit(event.target.value as "mm" | "cm")}>
+                  <option value="mm">mm（ミリメートル）</option>
+                  <option value="cm">cm（センチメートル）</option>
+                </select>
               </label>
+              <div className="ticket-physical-size-inputs">
+                <label>
+                  幅（{sizeUnit}）
+                  <input
+                    type="number"
+                    min={sizeUnit === "cm" ? "3" : "30"}
+                    max={sizeUnit === "cm" ? "25" : "250"}
+                    step={sizeUnit === "cm" ? "0.1" : "1"}
+                    value={Number((settings.printWidthMm / (sizeUnit === "cm" ? 10 : 1)).toFixed(2))}
+                    onChange={(event) => {
+                      const next = Math.max(30, Math.min(250, Number(event.target.value) * (sizeUnit === "cm" ? 10 : 1)));
+                      updateSetting("printWidthMm", next);
+                      if (settings.cardRatio === "custom") updateSetting("customWidth", next);
+                    }}
+                  />
+                </label>
+                <label>
+                  高さ（{sizeUnit}）
+                  <input
+                    type="number"
+                    min={sizeUnit === "cm" ? "1" : "10"}
+                    max={sizeUnit === "cm" ? "25" : "250"}
+                    step={sizeUnit === "cm" ? "0.1" : "1"}
+                    value={Number((printHeightMm / (sizeUnit === "cm" ? 10 : 1)).toFixed(2))}
+                    onChange={(event) => {
+                      const next = Math.max(10, Math.min(250, Number(event.target.value) * (sizeUnit === "cm" ? 10 : 1)));
+                      setSettings(current => ({
+                        ...current,
+                        cardRatio: "custom",
+                        customWidth: current.printWidthMm,
+                        customHeight: next,
+                        printHeightMm: next,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="ticket-designer-help">自由設定では幅・高さがそれぞれ印刷実寸になります。画面の拡大率には影響しません。</p>
             </div>
 
             <div className="ticket-setting-group">
