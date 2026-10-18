@@ -594,7 +594,7 @@ function TicketDesigner({
     printableTickets.length === 0
   ) {
     return (
-      <div className="ticket-designer-background">
+      <div className="ticket-designer-background ticket-designer-glass">
         <section className="ticket-designer-empty">
           <h2>
             印刷できるチケットがありません
