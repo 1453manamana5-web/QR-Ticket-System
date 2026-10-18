@@ -2001,15 +2001,7 @@ export default function App() {
           const source = tickets.find(item => item.ticketId === ticket.id);
           return source ? ticketQrValue(event.eventId, source) : "";
         }}
-        onApplyTicketNumbers={async changes => {
-          const changedNumbers = new Map(changes.map(change => [change.id, change.ticketNumber]));
-          const nextTickets = tickets.map(ticket => {
-            const nextNumber = changedNumbers.get(ticket.ticketId);
-            return nextNumber === undefined ? ticket : { ...ticket, basicInfo: { ...ticket.basicInfo, ticketNumber: nextNumber }, updatedAt: new Date().toISOString() };
-          });
-          await saveTickets(event.eventId, nextTickets);
-          setTickets(nextTickets);
-        }}
+
         onClose={() => setTicketDesignModalOpen(false)}
       />}
 
