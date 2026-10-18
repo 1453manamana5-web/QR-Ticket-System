@@ -72,10 +72,6 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
   }, { merge: true });
 }
 
-async function syncPublishedTicketStatus(_eventId: string, _ticket: Ticket): Promise<void> {
-  // チケット状態の正本は events/{eventId}/tickets。公開バンドルへ全件コピーしない。
-}
-
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
   const db = getFirebaseDb();
   // Firestoreの1バッチ上限を避け、数百〜数千枚でも確実に保存する。
