@@ -177,9 +177,11 @@ function TicketDesigner({
     () => loadDesignSettings(eventName).backgroundImage !== ""
   );
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [showActualSize, setShowActualSize] = useState(false);
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
   const [selectedPart, setSelectedPart] = useState<"qr" | "number">("qr");
   const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartZoom = useRef(1);
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
@@ -675,6 +677,7 @@ function TicketDesigner({
               <h3>
                 チケットキャンバス
               </h3>
+              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実際のサイズを見る</button>
 
               <span>
                 {safePrintWidth.toFixed(
@@ -695,6 +698,7 @@ function TicketDesigner({
                   const dx = event.touches[0].clientX - event.touches[1].clientX;
                   const dy = event.touches[0].clientY - event.touches[1].clientY;
                   pinchStartDistance.current = Math.hypot(dx, dy);
+                  pinchStartZoom.current = previewZoom;
                 }
               }}
               onTouchMove={(event) => {
@@ -702,8 +706,7 @@ function TicketDesigner({
                   const dx = event.touches[0].clientX - event.touches[1].clientX;
                   const dy = event.touches[0].clientY - event.touches[1].clientY;
                   const distance = Math.hypot(dx, dy);
-                  setPreviewZoom(current => Math.max(0.5, Math.min(2.5, current * distance / pinchStartDistance.current!)));
-                  pinchStartDistance.current = distance;
+                  setPreviewZoom(Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current)));
                   event.preventDefault();
                 }
               }}
@@ -735,7 +738,12 @@ function TicketDesigner({
                   <div
                     className="ticket-design-qr ticket-draggable-part"
                     onPointerDown={(event) => {
-                      setSelectedPart("qr");
+                      if (selectedPart !== "qr") {
+                        setSelectedPart("qr");
+                        dragTarget.current = null;
+                        event.stopPropagation();
+                        return;
+                      }
                       dragTarget.current = "qr";
                       dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
                       event.currentTarget.setPointerCapture(event.pointerId);
@@ -765,7 +773,12 @@ function TicketDesigner({
                   <div
                     className="ticket-design-number ticket-draggable-part"
                     onPointerDown={(event) => {
-                      setSelectedPart("number");
+                      if (selectedPart !== "number") {
+                        setSelectedPart("number");
+                        dragTarget.current = null;
+                        event.stopPropagation();
+                        return;
+                      }
                       dragTarget.current = "number";
                       dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
                       event.currentTarget.setPointerCapture(event.pointerId);
@@ -919,44 +932,6 @@ function TicketDesigner({
             <h3>
               デザイン設定
             </h3>
-
-            <div className="ticket-setting-group">
-              <h4>
-                背景画像
-              </h4>
-
-              <label className="ticket-background-label">
-                PNG・JPEG画像
-
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={
-                    handleBackgroundImage
-                  }
-                />
-              </label>
-
-              <p className="ticket-designer-help">
-                KeynoteやPowerPointから書き出したPNG画像も使用できます。
-              </p>
-
-              {settings.backgroundImage !==
-                "" && (
-                <button
-                  type="button"
-                  className="ticket-remove-background"
-                  onClick={() =>
-                    updateSetting(
-                      "backgroundImage",
-                      ""
-                    )
-                  }
-                >
-                  背景画像を削除
-                </button>
-              )}
-            </div>
 
             <div className="ticket-setting-group">
               <h4>
@@ -1401,6 +1376,34 @@ function TicketDesigner({
           </button>
         </footer>
       </section>
+
+      {showActualSize && (
+        <div className="ticket-actual-size-overlay" role="dialog" aria-modal="true" aria-label="チケット実寸確認">
+          <section className="ticket-actual-size-dialog">
+            <header>
+              <div>
+                <h2>チケットの実際のサイズ</h2>
+                <p>印刷時に指定される実寸を確認できます。</p>
+              </div>
+              <button type="button" onClick={() => setShowActualSize(false)} aria-label="閉じる">×</button>
+            </header>
+            <div className="ticket-actual-size-measurement">
+              <span>幅</span><strong>{safePrintWidth.toFixed(1)} mm（{(safePrintWidth / 10).toFixed(2)} cm）</strong>
+              <span>高さ</span><strong>{printHeightMm.toFixed(1)} mm（{(printHeightMm / 10).toFixed(2)} cm）</strong>
+            </div>
+            <div className="ticket-actual-size-preview-wrap">
+              <div className="ticket-actual-size-preview" style={{ aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" }}>
+                <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
+                  <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
+                </div>
+                <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{previewTicket?.qrNumber ?? ""}</div>
+              </div>
+            </div>
+            <p className="ticket-actual-size-note">画面上の見え方は端末の表示倍率により異なります。上記のmm/cm表記が印刷時の指定寸法です。</p>
+            <button type="button" className="ticket-actual-size-done" onClick={() => setShowActualSize(false)}>編集に戻る</button>
+          </section>
+        </div>
+      )}
 
       <div
         className="ticket-print-sheet"
