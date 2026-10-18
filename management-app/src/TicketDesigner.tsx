@@ -1113,9 +1113,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {settings.qrX}%
-                </span>
+                <input className="ticket-value-input" type="number" min="5" max="95" step="0.1" aria-label="qrXの数値" value={settings.qrX} onChange={(event) => updateSetting("qrX", Math.max(5, Math.min(95, Number(event.target.value))))} />
               </label>
 
               <label>
@@ -1141,9 +1139,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {settings.qrY}%
-                </span>
+                <input className="ticket-value-input" type="number" min="5" max="95" step="0.1" aria-label="qrYの数値" value={settings.qrY} onChange={(event) => updateSetting("qrY", Math.max(5, Math.min(95, Number(event.target.value))))} />
               </label>
 
               <label>                大きさ
@@ -1168,9 +1164,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {settings.qrSize}%
-                </span>
+                <input className="ticket-value-input" type="number" min="12" max="55" step="0.1" aria-label="qrSizeの数値" value={settings.qrSize} onChange={(event) => updateSetting("qrSize", Math.max(12, Math.min(55, Number(event.target.value))))} />
               </label>
             </div>
 
@@ -1199,9 +1193,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {settings.numberX}%
-                </span>
+                <input className="ticket-value-input" type="number" min="0" max="100" step="0.1" aria-label="numberXの数値" value={settings.numberX} onChange={(event) => updateSetting("numberX", Math.max(0, Math.min(100, Number(event.target.value))))} />
               </label>
 
               <label>
@@ -1227,9 +1219,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {settings.numberY}%
-                </span>
+                <input className="ticket-value-input" type="number" min="0" max="100" step="0.1" aria-label="numberYの数値" value={settings.numberY} onChange={(event) => updateSetting("numberY", Math.max(0, Math.min(100, Number(event.target.value))))} />
               </label>
 
               <label>
@@ -1255,12 +1245,7 @@ function TicketDesigner({
                   }
                 />
 
-                <span>
-                  {
-                    settings.numberSize
-                  }
-                  px
-                </span>
+                <input className="ticket-value-input" type="number" min="10" max="60" step="1" aria-label="文字サイズの数値" value={settings.numberSize} onChange={(event) => updateSetting("numberSize", Math.max(10, Math.min(60, Number(event.target.value))))} />
               </label>
             </div>
 
