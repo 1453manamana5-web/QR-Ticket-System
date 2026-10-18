@@ -92,7 +92,9 @@ export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<v
 export async function saveTicket(eventId: string, ticket: Ticket): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-  await syncPublishedTicketStatus(eventId, ticket);
+  // 1枚の変更でも公開データ版数を更新し、受付端末が再ダウンロードできるようにする。
+  const currentTickets = await loadEventTickets(eventId);
+  await syncPublishedTicketInventory(eventId, currentTickets);
 }
 
 export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
