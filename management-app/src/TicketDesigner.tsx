@@ -1,7 +1,6 @@
 import {
   type ChangeEvent,
   type CSSProperties,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -313,52 +312,6 @@ function TicketDesigner({
     printableTickets[0] ??
     null;
 
-  const createNumberProposal = () => {
-    if (!previewTicket) return;
-    const requested = Number(numberDraft);
-    if (!/^\d+$/.test(numberDraft.trim()) || !Number.isSafeInteger(requested) || requested < 1) {
-      setNumberNotice("チケット番号は1以上の整数で入力してください。");
-      setNumberProposal(null);
-      return;
-    }
-    const targetIndex = sortedNumberTickets.findIndex(ticket => ticket.id === previewTicket.id);
-    if (targetIndex < 0) return;
-    const usedBefore = new Set(sortedNumberTickets.slice(0, targetIndex).map(ticket => Number(ticket.qrNumber)));
-    if (usedBefore.has(requested)) {
-      setNumberNotice("その番号は前のチケットですでに使われています。別の番号を指定してください。");
-      setNumberProposal(null);
-      return;
-    }
-    const changes: Array<{ id: string; oldNumber: number; newNumber: number }> = [];
-    const used = new Set(usedBefore);
-    let nextNumber = requested;
-    for (let index = targetIndex; index < sortedNumberTickets.length; index += 1) {
-      const ticket = sortedNumberTickets[index];
-      while (used.has(nextNumber)) nextNumber += 1;
-      const oldNumber = Number(ticket.qrNumber);
-      if (oldNumber !== nextNumber) changes.push({ id: ticket.id, oldNumber, newNumber: nextNumber });
-      used.add(nextNumber);
-      nextNumber += 1;
-    }
-    setNumberProposal(changes);
-    setNumberNotice(changes.length === 0 ? "番号はすでにこの並びになっています。変更はありません。" : `${changes.length}枚分の番号変更案を作成しました。内容を確認してから適用してください。`);
-  };
-
-  const applyNumberProposal = async () => {
-    if (!numberProposal?.length) return;
-    setNumberSaving(true);
-    setNumberNotice("");
-    try {
-      await onApplyTicketNumbers(numberProposal.map(item => ({ id: item.id, ticketNumber: item.newNumber })));
-      setNumberProposal(null);
-      setNumberNotice("チケット番号を保存しました。");
-    } catch (error) {
-      console.error("チケット番号の保存に失敗しました。", error);
-      setNumberNotice("番号を保存できませんでした。通信状態を確認して、もう一度お試しください。");
-    } finally {
-      setNumberSaving(false);
-    }
-  };
   const previewTicketStyle:
     PreviewTicketStyle = {
     aspectRatio:
