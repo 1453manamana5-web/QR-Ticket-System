@@ -820,6 +820,10 @@ export default function App() {
 
   const saveEvent = async () => {
     if (publishing) return;
+    if (event.eventStatus === "finished") {
+      setError("過去のイベントは履歴として保存されます。Firebaseへの再公開はできません。");
+      return;
+    }
     const normalizedName = eventName.trim();
     if (!event.eventId) {
       setError("先にイベントを作成してください。");
@@ -1729,8 +1733,15 @@ export default function App() {
           <div><span>公開状態</span><strong className={bundle ? "event-published" : ""}>{bundle ? "Firebaseへ公開済み" : "未公開"}</strong></div>
         </div>
         <div className="event-primary-actions">
-          <button className="primary-action" disabled={publishing} onClick={() => void saveEvent()}>
-            {publishing ? "保存・公開中…" : "保存してFirebaseへ公開"}
+          <button
+            className="primary-action"
+            disabled={publishing || event.eventStatus === "finished"}
+            onClick={() => void saveEvent()}
+            title={event.eventStatus === "finished" ? "過去のイベントは履歴として保存され、再公開できません。" : undefined}
+          >
+            {event.eventStatus === "finished"
+              ? "過去イベント（公開不可）"
+              : publishing ? "保存・公開中…" : "保存してFirebaseへ公開"}
           </button>
         </div>
       </section>}
