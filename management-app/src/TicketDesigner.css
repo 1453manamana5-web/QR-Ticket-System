@@ -1353,3 +1353,37 @@
 .ticket-designer-glass .ticket-touch-canvas {
   touch-action: none;
 }
+
+.ticket-physical-size-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.ticket-physical-size-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ticket-physical-size-inputs input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid #bfc7d1;
+  border-radius: 10px;
+  color: #17191d;
+  background: #fff;
+  font: inherit;
+  -webkit-text-fill-color: #17191d;
+}
+.ticket-designer-glass .ticket-physical-size-inputs input {
+  color: #f7f8fc;
+  border-color: rgba(255,255,255,.17);
+  background: rgba(8,13,24,.45);
+  -webkit-text-fill-color: #f7f8fc;
+}
