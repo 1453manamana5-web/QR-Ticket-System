@@ -4880,3 +4880,42 @@ body:has(.ticket-screen),
     transform: none;
   }
 }
+
+
+.navigation-notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  animation: navigation-notice-fade-in 160ms ease-out;
+}
+.navigation-notice-dialog {
+  width: min(440px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 20px;
+  background: var(--panel, #fff);
+  color: var(--text, #172033);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+  animation: navigation-notice-pop-in 180ms ease-out;
+}
+.navigation-notice-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  line-height: 1.4;
+}
+.navigation-notice-dialog p {
+  margin: 0 0 24px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+@keyframes navigation-notice-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes navigation-notice-pop-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .navigation-notice-backdrop, .navigation-notice-dialog { animation: none; }
+}
