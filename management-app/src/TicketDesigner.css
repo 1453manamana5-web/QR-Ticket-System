@@ -2216,3 +2216,19 @@
   .ticket-designer-glass .ticket-designer-buttons { display: grid !important; grid-template-columns: 1fr 1fr !important; }
   .ticket-designer-glass .ticket-designer-buttons button { min-height: 52px !important; padding: 10px !important; font-size: 15px !important; }
 }
+
+/* Preserve the selected aspect ratio while fitting the complete ticket in the canvas. */
+.ticket-designer-glass .ticket-design-card {
+  width: min(100%, calc((min(58dvh, 680px) - 16px) * var(--ticket-preview-ratio, 1.7778))) !important;
+  max-width: 100% !important;
+  max-height: calc(min(58dvh, 680px) - 16px) !important;
+  height: auto !important;
+  aspect-ratio: var(--ticket-preview-ratio, 16 / 9) !important;
+}
+@media (max-width: 700px) {
+  .ticket-designer-glass .ticket-design-card {
+    width: min(100%, calc((48dvh - 10px) * var(--ticket-preview-ratio, 1.7778))) !important;
+    max-height: calc(48dvh - 10px) !important;
+    aspect-ratio: var(--ticket-preview-ratio, 16 / 9) !important;
+  }
+}
