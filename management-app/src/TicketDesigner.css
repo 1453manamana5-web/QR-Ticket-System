@@ -1753,3 +1753,214 @@
     max-height: 90px;
   }
 }
+
+
+/* Corrective studio pass: match the management app's light, high-contrast UI */
+.ticket-designer-background.ticket-designer-glass {
+  padding: 0 !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  color: #17211b !important;
+  background: #edf1ee !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.ticket-designer-glass .ticket-designer-window {
+  width: 100% !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 20px 24px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: #17211b !important;
+  background: #f5f7f5 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+.ticket-designer-glass .ticket-designer-header {
+  padding: 0 0 14px !important;
+  border-bottom: 1px solid #d7dfd9 !important;
+}
+.ticket-designer-glass .ticket-designer-header h2 {
+  color: #17211b !important;
+  font-size: clamp(24px, 2vw, 32px) !important;
+  letter-spacing: -.025em !important;
+}
+.ticket-designer-glass .ticket-designer-header p {
+  color: #536259 !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+}
+.ticket-designer-glass .ticket-designer-close {
+  color: #24362b !important;
+  border: 1px solid #d2dbd4 !important;
+  background: #fff !important;
+}
+.ticket-designer-glass .ticket-designer-content {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px) !important;
+  gap: 18px !important;
+  margin-top: 16px !important;
+}
+.ticket-designer-glass .ticket-designer-preview-section {
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+.ticket-designer-glass .ticket-preview-heading h3,
+.ticket-designer-glass .ticket-designer-settings > h3 {
+  color: #1d2a22 !important;
+}
+.ticket-designer-glass .ticket-preview-heading span {
+  color: #33483a !important;
+  border-color: #d5dfd7 !important;
+  background: #fff !important;
+}
+.ticket-designer-glass .ticket-preview-container {
+  padding: 18px !important;
+  overflow: auto !important;
+  border: 1px solid #d3ddd5 !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(#e3e9e4 1px, transparent 1px),
+    linear-gradient(90deg, #e3e9e4 1px, transparent 1px),
+    #eaf0eb !important;
+  background-size: 20px 20px !important;
+  box-shadow: inset 0 1px 3px rgba(22, 48, 31, .06) !important;
+}
+.ticket-designer-glass .ticket-design-card {
+  display: block !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  height: auto !important;
+  min-width: 0 !important;
+  border: 1px solid #cbd5ce !important;
+  border-radius: 8px !important;
+  background-color: #fff !important;
+  box-shadow: 0 12px 30px rgba(24, 47, 32, .15) !important;
+}
+.ticket-designer-glass .ticket-no-background {
+  color: #4b5c50 !important;
+}
+.ticket-designer-glass .ticket-designer-settings {
+  color: #1d2a22 !important;
+  border: 1px solid #d7dfd9 !important;
+  border-radius: 18px !important;
+  background: #fff !important;
+  box-shadow: 0 3px 12px rgba(28, 49, 34, .045) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.ticket-designer-glass .ticket-designer-settings > h3 {
+  color: #1b2b20 !important;
+}
+.ticket-designer-glass .ticket-setting-group,
+.ticket-designer-glass .ticket-selected-part,
+.ticket-designer-glass .ticket-print-range {
+  color: #26362b !important;
+  border-color: #e0e7e1 !important;
+  background: #f7f9f7 !important;
+  box-shadow: none !important;
+}
+.ticket-designer-glass .ticket-setting-group h4,
+.ticket-designer-glass .ticket-print-range h3 {
+  color: #1e3024 !important;
+}
+.ticket-designer-glass .ticket-setting-group label,
+.ticket-designer-glass .ticket-setting-group > label,
+.ticket-designer-glass .ticket-physical-size-inputs label,
+.ticket-designer-glass .ticket-range-inputs label {
+  color: #34483a !important;
+}
+.ticket-designer-glass .ticket-setting-group p,
+.ticket-designer-glass .ticket-designer-help,
+.ticket-designer-glass .ticket-range-summary,
+.ticket-designer-glass .ticket-range-summary span,
+.ticket-designer-glass .ticket-selected-part > span,
+.ticket-designer-glass .ticket-selected-part p {
+  color: #526358 !important;
+}
+.ticket-designer-glass .ticket-setting-group input:not([type="range"]),
+.ticket-designer-glass .ticket-setting-group select,
+.ticket-designer-glass .ticket-range-inputs select,
+.ticket-designer-glass .ticket-physical-size-inputs input,
+.ticket-designer-glass .ticket-value-input {
+  color: #17211b !important;
+  -webkit-text-fill-color: #17211b !important;
+  border-color: #cbd6cd !important;
+  background: #fff !important;
+}
+.ticket-designer-glass .ticket-setting-group input[type="range"] {
+  accent-color: #26734b !important;
+}
+.ticket-designer-glass .ticket-selected-part button {
+  color: #304337 !important;
+  border-color: #d6e0d8 !important;
+  background: #fff !important;
+}
+.ticket-designer-glass .ticket-selected-part button.active {
+  color: #17492d !important;
+  border-color: #77ad8a !important;
+  background: #e1f1e6 !important;
+  box-shadow: inset 0 0 0 1px rgba(38,115,75,.08) !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools {
+  border: 1px solid #d1dcd3 !important;
+  background: rgba(255,255,255,.96) !important;
+  box-shadow: 0 3px 12px rgba(22,48,31,.12) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools button {
+  color: #1e3d2a !important;
+  background: #f1f6f2 !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools span {
+  color: #263c2d !important;
+}
+.ticket-designer-glass .ticket-designer-buttons button {
+  color: #25372a !important;
+  -webkit-text-fill-color: #25372a !important;
+  border-color: #d0dad2 !important;
+  background: #fff !important;
+}
+.ticket-designer-glass .ticket-designer-buttons .ticket-design-print {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  border-color: #246b43 !important;
+  background: #26734b !important;
+}
+.ticket-designer-glass .ticket-designer-buttons .ticket-design-print:hover {
+  background: #1e603d !important;
+}
+.ticket-designer-glass .ticket-print-range {
+  max-height: 140px !important;
+}
+@media (max-width: 900px) {
+  .ticket-designer-glass .ticket-designer-window {
+    padding: 12px !important;
+  }
+  .ticket-designer-glass .ticket-designer-content {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 310px) !important;
+    gap: 12px !important;
+  }
+  .ticket-designer-glass .ticket-preview-container {
+    padding: 12px !important;
+  }
+}
+@media (max-width: 680px) {
+  .ticket-designer-glass .ticket-designer-window {
+    padding: 10px !important;
+  }
+  .ticket-designer-glass .ticket-designer-content {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(300px, 1fr) minmax(220px, 42vh) !important;
+  }
+  .ticket-designer-glass .ticket-design-card {
+    width: max(100%, 640px) !important;
+  }
+  .ticket-designer-glass .ticket-designer-settings {
+    padding: 12px !important;
+  }
+}
