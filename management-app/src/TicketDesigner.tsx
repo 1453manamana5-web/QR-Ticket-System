@@ -1157,9 +1157,24 @@ function TicketDesigner({
             </div>
 
             <div className="ticket-setting-group">
-              <h4>
-                チケット番号
-              </h4>
+              <h4>チケット番号</h4>
+              <div className="ticket-number-editor">
+                <p>プレビュー中のチケット番号：<strong>{previewTicket?.qrNumber ?? "—"}</strong></p>
+                <label className="ticket-number-edit-field">
+                  変更後の番号
+                  <input type="number" min="1" step="1" inputMode="numeric" value={numberDraft} onChange={event => { setNumberDraft(event.target.value); setNumberProposal(null); setNumberNotice(""); }} />
+                </label>
+                <button type="button" className="ticket-number-suggest-button" onClick={createNumberProposal}>ほかの番号も提案</button>
+                {numberNotice && <p className="ticket-number-notice" role="status">{numberNotice}</p>}
+                {numberProposal && numberProposal.length > 0 && (
+                  <div className="ticket-number-proposal">
+                    <strong>番号変更案（確認用）</strong>
+                    <ul>{numberProposal.slice(0, 12).map(item => <li key={item.id}>{String(item.oldNumber).padStart(6, "0")} → <strong>{String(item.newNumber).padStart(6, "0")}</strong></li>)}</ul>
+                    {numberProposal.length > 12 && <p>ほか {numberProposal.length - 12} 枚</p>}
+                    <button type="button" className="ticket-number-apply-button" onClick={() => { void applyNumberProposal(); }} disabled={numberSaving}>{numberSaving ? "保存中…" : "この番号案を適用"}</button>
+                  </div>
+                )}
+              </div>
 
               <label>
                 横位置
