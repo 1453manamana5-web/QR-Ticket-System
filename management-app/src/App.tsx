@@ -143,6 +143,13 @@ export default function App() {
   const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number } | null>(null);
   const pageOpeningSequence = useRef(0);
   const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
+    if (nextPage === "チケット管理" && (!selectedHistoryEventId || !event.eventId || event.eventStatus === "finished")) {
+      setError(!selectedHistoryEventId || !event.eventId
+        ? "チケット管理を開くには、先にイベント管理でイベントを選択してください。"
+        : "終了済みのイベントはチケット管理を開けません。開催中または終了していないイベントを選択してください。");
+      setPage("イベント管理");
+      return;
+    }
     if (nextPage === page) return;
     const sourceElement = source ?? Array.from(document.querySelectorAll<HTMLElement>("[data-nav-label]"))
       .find(element => element.dataset.navLabel === nextPage);
