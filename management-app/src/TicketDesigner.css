@@ -1387,3 +1387,43 @@
   background: rgba(8,13,24,.45);
   -webkit-text-fill-color: #f7f8fc;
 }
+
+.ticket-selected-part {
+  margin: 14px 0 4px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 16px;
+  background: rgba(255,255,255,.055);
+}
+.ticket-selected-part > span {
+  display: block;
+  margin-bottom: 9px;
+  color: rgba(238,242,255,.62);
+  font-size: 11px;
+  font-weight: 700;
+}
+.ticket-selected-part > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.ticket-selected-part button {
+  min-height: 38px;
+  border: 1px solid rgba(255,255,255,.13);
+  border-radius: 11px;
+  color: rgba(246,248,255,.8);
+  background: rgba(255,255,255,.05);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ticket-selected-part button.active {
+  border-color: rgba(163,190,255,.55);
+  color: #fff;
+  background: linear-gradient(135deg, rgba(105,151,255,.36), rgba(169,133,255,.24));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+.ticket-selected-part p {
+  margin: 8px 0 0;
+  color: rgba(238,242,255,.55);
+  font-size: 11px;
+}
