@@ -336,7 +336,7 @@ function TicketDesigner({
   const createNumberProposal = () => {
     if (!previewTicket) return;
     const requested = Number(numberDraft);
-    if (!/^\\d+$/.test(numberDraft.trim()) || !Number.isSafeInteger(requested) || requested < 1) {
+    if (!/^\d+$/.test(numberDraft.trim()) || !Number.isSafeInteger(requested) || requested < 1) {
       setNumberNotice("チケット番号は1以上の整数で入力してください。");
       setNumberProposal(null);
       return;
