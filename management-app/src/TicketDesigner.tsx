@@ -177,6 +177,7 @@ function TicketDesigner({
   );
   const [previewZoom, setPreviewZoom] = useState(1);
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
+  const [selectedPart, setSelectedPart] = useState<"qr" | "number">("qr");
   const pinchStartDistance = useRef<number | null>(null);
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
@@ -730,6 +731,7 @@ function TicketDesigner({
                   <div
                     className="ticket-design-qr ticket-draggable-part"
                     onPointerDown={(event) => {
+                      setSelectedPart("qr");
                       dragTarget.current = "qr";
                       dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
                       event.currentTarget.setPointerCapture(event.pointerId);
@@ -759,6 +761,7 @@ function TicketDesigner({
                   <div
                     className="ticket-design-number ticket-draggable-part"
                     onPointerDown={(event) => {
+                      setSelectedPart("number");
                       dragTarget.current = "number";
                       dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
                       event.currentTarget.setPointerCapture(event.pointerId);
@@ -1111,10 +1114,17 @@ function TicketDesigner({
               <p className="ticket-designer-help">自由設定では幅・高さがそれぞれ印刷実寸になります。画面の拡大率には影響しません。</p>
             </div>
 
+            <div className="ticket-selected-part">
+              <span>選択中のパーツ</span>
+              <div>
+                <button type="button" className={selectedPart === "qr" ? "active" : ""} onClick={() => setSelectedPart("qr")}>QRコード</button>
+                <button type="button" className={selectedPart === "number" ? "active" : ""} onClick={() => setSelectedPart("number")}>チケット番号</button>
+              </div>
+              <p>キャンバス上のパーツをタップしても切り替わります。</p>
+            </div>
+            {selectedPart === "qr" && (
             <div className="ticket-setting-group">
-              <h4>
-                QRコード
-              </h4>
+              <h4>QRコード</h4>
 
               <label>
                 横位置
@@ -1194,6 +1204,8 @@ function TicketDesigner({
               </label>
             </div>
 
+            )}
+            {selectedPart === "number" && (
             <div className="ticket-setting-group">
               <h4>チケット番号</h4>
               <label>
@@ -1274,6 +1286,7 @@ function TicketDesigner({
                 <input className="ticket-value-input" type="number" min="10" max="60" step="1" aria-label="文字サイズの数値" value={settings.numberSize} onChange={(event) => updateSetting("numberSize", Math.max(10, Math.min(60, Number(event.target.value))))} />
               </label>
             </div>
+            )}
 
             <div className="ticket-setting-group">
               <h4>
