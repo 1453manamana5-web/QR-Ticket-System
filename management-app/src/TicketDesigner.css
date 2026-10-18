@@ -1427,3 +1427,329 @@
   color: rgba(238,242,255,.55);
   font-size: 11px;
 }
+
+
+/* Full redesign: canvas-first editor with a compact inspector */
+.ticket-designer-background.ticket-designer-glass {
+  padding: 0 !important;
+  display: block !important;
+  overflow: hidden !important;
+  background:
+    radial-gradient(ellipse at 18% 12%, rgba(77, 112, 201, .18), transparent 42%),
+    radial-gradient(ellipse at 85% 82%, rgba(115, 73, 166, .17), transparent 40%),
+    #080c15 !important;
+  color: #f7f8ff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.ticket-designer-glass .ticket-designer-window {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 18px 22px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: #f7f8ff !important;
+  background:
+    linear-gradient(135deg, rgba(21, 28, 44, .96), rgba(9, 13, 24, .98)) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.ticket-designer-glass .ticket-designer-header {
+  flex: 0 0 auto !important;
+  min-height: 54px;
+  align-items: center !important;
+  padding: 0 0 13px !important;
+  border-bottom: 1px solid rgba(255,255,255,.12) !important;
+}
+.ticket-designer-glass .ticket-designer-header h2 {
+  color: #f8f9ff !important;
+  font-size: clamp(21px, 2vw, 30px) !important;
+  line-height: 1.15;
+  letter-spacing: -.04em;
+}
+.ticket-designer-glass .ticket-designer-header p {
+  margin-top: 5px !important;
+  color: rgba(224,232,255,.56) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+.ticket-designer-glass .ticket-designer-close {
+  width: 40px !important;
+  height: 40px !important;
+  border: 1px solid rgba(255,255,255,.16) !important;
+  border-radius: 13px !important;
+  color: #f7f8ff !important;
+  background: rgba(255,255,255,.07) !important;
+  box-shadow: none !important;
+  font-size: 27px !important;
+}
+.ticket-designer-glass .ticket-designer-content {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(285px, 330px) !important;
+  align-items: stretch !important;
+  gap: 16px !important;
+  margin-top: 14px !important;
+  overflow: hidden !important;
+}
+.ticket-designer-glass .ticket-designer-preview-section {
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+.ticket-designer-glass .ticket-preview-heading {
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  margin: 0 0 10px !important;
+  padding: 0 2px !important;
+}
+.ticket-designer-glass .ticket-preview-heading h3 {
+  color: #f7f8ff !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: .01em;
+}
+.ticket-designer-glass .ticket-preview-heading span {
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  color: rgba(235,240,255,.76) !important;
+  background: rgba(255,255,255,.045);
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+.ticket-designer-glass .ticket-preview-container {
+  position: relative !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: clamp(12px, 2vw, 28px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: auto !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px),
+    radial-gradient(ellipse at center, rgba(108,135,198,.12), transparent 68%),
+    #0b101c !important;
+  background-size: 24px 24px, 24px 24px, auto, auto !important;
+  box-shadow: inset 0 0 50px rgba(0,0,0,.18) !important;
+  touch-action: none !important;
+}
+.ticket-designer-glass .ticket-design-card {
+  flex: 0 0 auto !important;
+  width: min(100%, 1500px) !important;
+  max-width: none !important;
+  max-height: none !important;
+  height: auto !important;
+  box-sizing: border-box !important;
+  border: 1px solid rgba(255,255,255,.38) !important;
+  border-radius: 7px !important;
+  background-color: #fff !important;
+  box-shadow:
+    0 34px 100px rgba(0,0,0,.56),
+    0 0 0 1px rgba(255,255,255,.08) !important;
+  transition: transform .1s ease-out !important;
+}
+.ticket-designer-glass .ticket-design-qr {
+  touch-action: none !important;
+}
+.ticket-designer-glass .ticket-design-number {
+  touch-action: none !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools {
+  top: 12px !important;
+  right: 12px !important;
+  padding: 5px !important;
+  gap: 4px !important;
+  border: 1px solid rgba(255,255,255,.15) !important;
+  border-radius: 13px !important;
+  background: rgba(14,19,31,.78) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools button {
+  min-width: 29px !important;
+  min-height: 29px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+}
+.ticket-designer-glass .ticket-canvas-zoom-tools span {
+  font-size: 11px !important;
+}
+.ticket-designer-glass .ticket-designer-settings {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+  overflow: auto !important;
+  padding: 14px !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  border-radius: 20px !important;
+  color: #f7f8ff !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.075), rgba(255,255,255,.025)) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.055) !important;
+  backdrop-filter: blur(22px) !important;
+  -webkit-backdrop-filter: blur(22px) !important;
+}
+.ticket-designer-glass .ticket-designer-settings > h3 {
+  color: #f7f8ff !important;
+  font-size: 17px !important;
+  margin-bottom: 12px !important;
+}
+.ticket-designer-glass .ticket-setting-group,
+.ticket-designer-glass .ticket-selected-part {
+  margin: 10px 0 0 !important;
+  padding: 12px !important;
+  border: 1px solid rgba(255,255,255,.1) !important;
+  border-radius: 14px !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: none !important;
+}
+.ticket-designer-glass .ticket-setting-group h4 {
+  margin-bottom: 10px !important;
+  color: #f7f8ff !important;
+  font-size: 13px !important;
+}
+.ticket-designer-glass .ticket-setting-group label,
+.ticket-designer-glass .ticket-setting-group > label {
+  color: rgba(240,243,255,.82) !important;
+  font-size: 11px !important;
+}
+.ticket-designer-glass .ticket-setting-group input,
+.ticket-designer-glass .ticket-setting-group select,
+.ticket-designer-glass .ticket-physical-size-inputs input {
+  min-height: 32px !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  border-radius: 8px !important;
+  color: #f7f8ff !important;
+  background: rgba(5,9,17,.58) !important;
+  -webkit-text-fill-color: #f7f8ff !important;
+}
+.ticket-designer-glass .ticket-setting-group input[type="range"] {
+  min-height: 16px !important;
+  accent-color: #a8c2ff;
+}
+.ticket-designer-glass .ticket-value-input {
+  width: 57px !important;
+  min-height: 30px !important;
+  padding: 3px !important;
+  font-size: 11px !important;
+}
+.ticket-designer-glass .ticket-selected-part {
+  margin-top: 0 !important;
+}
+.ticket-designer-glass .ticket-selected-part button {
+  min-height: 34px !important;
+  font-size: 11px !important;
+}
+.ticket-designer-glass .ticket-print-range {
+  flex: 0 0 auto !important;
+  max-height: 155px;
+  overflow: auto;
+  margin-top: 12px !important;
+  padding: 12px !important;
+  border: 1px solid rgba(255,255,255,.1) !important;
+  border-radius: 15px !important;
+  color: #f7f8ff !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: none !important;
+}
+.ticket-designer-glass .ticket-print-range h3 {
+  margin-bottom: 8px !important;
+  color: #f7f8ff !important;
+  font-size: 13px !important;
+}
+.ticket-designer-glass .ticket-range-inputs label,
+.ticket-designer-glass .ticket-range-summary,
+.ticket-designer-glass .ticket-range-summary span {
+  color: rgba(239,243,255,.72) !important;
+  font-size: 10px !important;
+}
+.ticket-designer-glass .ticket-range-inputs select {
+  min-height: 29px !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  border-radius: 7px !important;
+  color: #f7f8ff !important;
+  background: rgba(5,9,17,.58) !important;
+  -webkit-text-fill-color: #f7f8ff !important;
+}
+.ticket-designer-glass .ticket-designer-buttons {
+  flex: 0 0 auto !important;
+  position: static !important;
+  padding: 12px 0 0 !important;
+  background: transparent !important;
+}
+.ticket-designer-glass .ticket-designer-buttons button {
+  min-height: 38px !important;
+  padding: 7px 12px !important;
+  border: 1px solid rgba(255,255,255,.13) !important;
+  border-radius: 11px !important;
+  color: #f7f8ff !important;
+  background: rgba(255,255,255,.07) !important;
+  font-size: 12px !important;
+  -webkit-text-fill-color: #f7f8ff !important;
+}
+.ticket-designer-glass .ticket-designer-buttons .ticket-design-print {
+  background: linear-gradient(135deg, rgba(110,151,255,.36), rgba(161,119,255,.27)) !important;
+}
+.ticket-designer-glass .ticket-designer-help,
+.ticket-designer-glass .ticket-setting-group p {
+  color: rgba(227,234,255,.5) !important;
+  font-size: 10px !important;
+}
+.ticket-designer-glass .ticket-physical-size-inputs {
+  gap: 7px !important;
+}
+.ticket-designer-glass .ticket-physical-size-inputs label {
+  font-size: 10px !important;
+}
+.ticket-designer-glass .ticket-physical-size-inputs input {
+  padding: 5px !important;
+  font-size: 11px !important;
+}
+@media (max-width: 900px) {
+  .ticket-designer-glass .ticket-designer-window {
+    padding: 12px !important;
+  }
+  .ticket-designer-glass .ticket-designer-content {
+    grid-template-columns: minmax(0, 1fr) minmax(245px, 285px) !important;
+    gap: 10px !important;
+  }
+}
+@media (max-width: 680px) {
+  .ticket-designer-glass .ticket-designer-window {
+    padding: 10px !important;
+  }
+  .ticket-designer-glass .ticket-designer-content {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(260px, 1fr) minmax(200px, 42vh) !important;
+    overflow: hidden !important;
+  }
+  .ticket-designer-glass .ticket-designer-settings {
+    height: auto !important;
+    max-height: none !important;
+  }
+  .ticket-designer-glass .ticket-preview-container {
+    padding: 10px !important;
+    border-radius: 15px !important;
+  }
+  .ticket-designer-glass .ticket-print-range {
+    max-height: 90px;
+  }
+}
