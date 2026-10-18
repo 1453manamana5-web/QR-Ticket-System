@@ -21,9 +21,16 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
   if (!bundleSnapshot.exists()) return null;
   const data = bundleSnapshot.data() as Partial<PublishedEventBundle>;
   if (data.authToken !== authToken || data.event?.eventId !== eventId ||
-      !Array.isArray(data.tickets) || typeof data.ticketCount !== "number" ||
-      data.ticketCount !== data.tickets.length) return null;
-  return data as PublishedEventBundle;
+      typeof data.ticketCount !== "number") return null;
+
+  // チケット一覧はサイズ制限のある単一バンドルではなく、イベント配下の一覧を正本にする。
+  const savedTickets = await getDocs(collection(db, "events", eventId, "tickets"));
+  let tickets = savedTickets.docs.map(item => item.data() as Ticket);
+  // 旧形式のバンドルだけにチケットが残っている場合は互換用に復元する。
+  if (tickets.length === 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
+    tickets = data.tickets;
+  }
+  return { ...data, tickets, ticketCount: tickets.length } as PublishedEventBundle;
 }
 
 export async function saveEventMetadata(event: Event): Promise<void> {
@@ -84,10 +91,11 @@ export async function publishEventBundle(
 
   // 先にチケットを含む公開バンドルを保存し、その後イベント一覧のメタデータを更新する。
   // merge:true にして、同時に保存される他のイベント管理情報を消さない。
+  // Firestore文書のサイズ上限を避けるため、バンドルには一覧を埋め込まず件数だけを保存する。
+  // チケット本体は上で events/{eventId}/tickets に保存済み。
   await setDoc(doc(db, "eventBundles", authToken), {
     event: publishedEvent,
     settings,
-    tickets: publishedTickets,
     ticketCount: publishedTickets.length,
     authToken,
     publishedAt: bundle.publishedAt,
