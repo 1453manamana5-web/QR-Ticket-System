@@ -168,11 +168,15 @@ function TicketDesigner({
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
-      () =>
-        loadDesignSettings(
-          eventName
-        )
+      () => loadDesignSettings(eventName)
     );
+  const [showEditor, setShowEditor] = useState(
+    () => loadDesignSettings(eventName).backgroundImage !== ""
+  );
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const pinchStartDistance = useRef<number | null>(null);
+  const dragTarget = useRef<"qr" | "number" | null>(null);
+  const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
   const [
     startIndex,
@@ -396,6 +400,7 @@ function TicketDesigner({
       }
 
       const image = reader.result;
+      setShowEditor(true);
 
       updateSetting(
         "backgroundImage",
@@ -605,17 +610,43 @@ function TicketDesigner({
     );
   }
 
+  if (!showEditor) {
+    return (
+      <div className="ticket-designer-background ticket-designer-glass">
+        <section className="ticket-image-start">
+          <header className="ticket-image-start-header">
+            <div>
+              <span className="ticket-glass-eyebrow">TICKET STUDIO</span>
+              <h2>チケットデザインを作成</h2>
+              <p>まずはベースにするチケット画像を選択してください。</p>
+            </div>
+            <button type="button" className="ticket-designer-close" onClick={onClose} aria-label="閉じる">×</button>
+          </header>
+          <label className="ticket-image-dropzone">
+            <input type="file" accept="image/*" onChange={handleBackgroundImage} />
+            <span className="ticket-image-icon">＋</span>
+            <strong>チケット画像をここから選択</strong>
+            <span>写真ライブラリ・ファイルから画像を読み込めます</span>
+            <span className="ticket-image-actions"><span>写真を選択</span><span>ファイルを選択</span></span>
+          </label>
+          <button type="button" className="ticket-glass-secondary" onClick={() => setShowEditor(true)}>画像を使わず新規作成</button>
+          <p className="ticket-image-note">PNG・JPEG・WebPなどの画像に対応。画像はチケットの背景として読み込みます。</p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="ticket-designer-background">
       <section className="ticket-designer-window">
         <header className="ticket-designer-header">
           <div>
             <h2>
-              チケットデザイン・印刷
+              チケットデザインスタジオ
             </h2>
 
             <p>
-              背景画像にQRコードとチケット番号を配置します
+              画像をベースに、チケットを直接操作してデザインします
             </p>
           </div>
 
@@ -633,7 +664,7 @@ function TicketDesigner({
           <section className="ticket-designer-preview-section">
             <div className="ticket-preview-heading">
               <h3>
-                印刷プレビュー
+                チケットキャンバス
               </h3>
 
               <span>
@@ -648,7 +679,33 @@ function TicketDesigner({
               </span>
             </div>
 
-            <div className="ticket-preview-container">
+            <div
+              className="ticket-preview-container ticket-touch-canvas"
+              onTouchStart={(event) => {
+                if (event.touches.length === 2) {
+                  const dx = event.touches[0].clientX - event.touches[1].clientX;
+                  const dy = event.touches[0].clientY - event.touches[1].clientY;
+                  pinchStartDistance.current = Math.hypot(dx, dy);
+                }
+              }}
+              onTouchMove={(event) => {
+                if (event.touches.length === 2 && pinchStartDistance.current) {
+                  const dx = event.touches[0].clientX - event.touches[1].clientX;
+                  const dy = event.touches[0].clientY - event.touches[1].clientY;
+                  const distance = Math.hypot(dx, dy);
+                  setPreviewZoom(current => Math.max(0.5, Math.min(2.5, current * distance / pinchStartDistance.current!)));
+                  pinchStartDistance.current = distance;
+                  event.preventDefault();
+                }
+              }}
+              onTouchEnd={() => { pinchStartDistance.current = null; }}
+            >
+              <div className="ticket-canvas-zoom-tools">
+                <button type="button" onClick={() => setPreviewZoom(current => Math.max(0.5, +(current - 0.1).toFixed(2)))} aria-label="縮小">−</button>
+                <span>{Math.round(previewZoom * 100)}%</span>
+                <button type="button" onClick={() => setPreviewZoom(current => Math.min(2.5, +(current + 0.1).toFixed(2)))} aria-label="拡大">＋</button>
+                <button type="button" onClick={() => setPreviewZoom(1)}>リセット</button>
+              </div>
               {previewTicket !==
                 null && (
                 <div
@@ -665,7 +722,20 @@ function TicketDesigner({
                   )}
 
                   <div
-                    className="ticket-design-qr"
+                    className="ticket-design-qr ticket-draggable-part"
+                    onPointerDown={(event) => {
+                      dragTarget.current = "qr";
+                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      event.stopPropagation();
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragTarget.current !== "qr") return;
+                      const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
+                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / bounds.width * 100)));
+                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / bounds.height * 100)));
+                    }}
+                    onPointerUp={() => { dragTarget.current = null; }}
                     style={{
                       left: `${settings.qrX}%`,
                       top: `${settings.qrY}%`,
@@ -681,7 +751,20 @@ function TicketDesigner({
                   </div>
 
                   <div
-                    className="ticket-design-number"
+                    className="ticket-design-number ticket-draggable-part"
+                    onPointerDown={(event) => {
+                      dragTarget.current = "number";
+                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      event.stopPropagation();
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragTarget.current !== "number") return;
+                      const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
+                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / bounds.width * 100)));
+                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / bounds.height * 100)));
+                    }}
+                    onPointerUp={() => { dragTarget.current = null; }}
                     style={{
                       left: `${settings.numberX}%`,
                       top: `${settings.numberY}%`,
