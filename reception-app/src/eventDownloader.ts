@@ -102,30 +102,19 @@ export async function downloadEventData(
     bundle.authToken !== payload.authToken ||
     bundle.event?.eventId !== payload.eventId ||
     bundle.event?.eventName !== payload.eventName ||
-    bundle.event?.dataVersion !== payload.dataVersion ||
-    !Array.isArray(bundle.tickets) ||
-    typeof bundle.ticketCount !== "number"
+    bundle.event?.dataVersion !== payload.dataVersion
   ) {
     throw new Error("EVENT_DATA_INVALID");
   }
 
-  let tickets = bundle.tickets;
+  // チケットの正本はイベント配下のサブコレクション。単一文書に全件を格納すると
+  // Firestoreの文書サイズ上限や古い枚数情報により、受付端末へ反映されなくなる。
+  const savedTickets = await getDocs(collection(db, "events", payload.eventId, "tickets"));
+  let tickets = savedTickets.docs.map(item => item.data() as Ticket);
 
-  // 古い公開バンドルが「0枚」のままでも、イベント配下に保存済みの
-  // チケットがあればそちらから復元する。空バンドルをそのまま受付端末へ保存しない。
-  if (tickets.length === 0) {
-    try {
-      const savedTickets = await getDocs(collection(db, "events", payload.eventId, "tickets"));
-      if (!savedTickets.empty) {
-        tickets = savedTickets.docs.map(item => item.data() as Ticket);
-      }
-    } catch (reason) {
-      console.warn("公開バンドルが空のためチケット一覧を復元しようとしましたが、取得できませんでした", reason);
-    }
-  }
-
-  if (bundle.ticketCount !== bundle.tickets.length && tickets.length === bundle.tickets.length) {
-    throw new Error("EVENT_DATA_INVALID");
+  // 旧形式の公開バンドルからの移行互換。新形式では必ずサブコレクションが正本。
+  if (tickets.length === 0 && Array.isArray(bundle.tickets) && bundle.tickets.length > 0) {
+    tickets = bundle.tickets;
   }
 
   const event = bundle.event;
