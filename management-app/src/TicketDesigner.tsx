@@ -642,7 +642,7 @@ function TicketDesigner({
   }
 
   return (
-    <div className="ticket-designer-background">
+    <div className="ticket-designer-background ticket-designer-glass">
       <section className="ticket-designer-window">
         <header className="ticket-designer-header">
           <div>
