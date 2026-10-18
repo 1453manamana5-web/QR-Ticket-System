@@ -980,7 +980,7 @@ function TicketDesigner({
                     } else {
                       updateSetting("cardRatio", nextRatio);
                     }
-                  }
+                  }}
                 >
                   <option value="16:9">
                     16:9
