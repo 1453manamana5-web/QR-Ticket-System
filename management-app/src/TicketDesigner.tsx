@@ -57,6 +57,7 @@ type TicketDesignSettings = {
 };
 
 type PreviewTicketStyle = CSSProperties & {
+  "--ticket-preview-ratio": string;
   "--ticket-print-width": string;
   "--ticket-print-height": string;
   "--ticket-print-gap": string;
@@ -325,6 +326,9 @@ function TicketDesigner({
     PreviewTicketStyle = {
     aspectRatio:
       `${ratio.width} / ${ratio.height}`,
+
+    "--ticket-preview-ratio":
+      String(ratio.width / ratio.height),
 
     backgroundImage:
       settings.backgroundImage === ""
