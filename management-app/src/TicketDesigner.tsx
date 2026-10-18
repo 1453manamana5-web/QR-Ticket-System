@@ -710,9 +710,11 @@ function TicketDesigner({
                 null && (
                 <div
                   className="ticket-design-card"
-                  style={
-                    previewTicketStyle
-                  }
+                  style={{
+                    ...previewTicketStyle,
+                    transform: "scale(" + previewZoom + ")",
+                    transformOrigin: "center center",
+                  }}
                 >
                   {settings.backgroundImage ===
                     "" && (
