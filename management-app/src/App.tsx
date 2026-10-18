@@ -1018,7 +1018,7 @@ export default function App() {
     );
     if (entered === null) return;
     const normalized = entered.trim();
-    if (!/^\\d+$/.test(normalized) || !Number.isSafeInteger(Number(normalized)) || Number(normalized) < 1) {
+    if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(Number(normalized)) || Number(normalized) < 1) {
       setError("チケット番号は1以上の整数で入力してください。");
       return;
     }
