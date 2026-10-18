@@ -144,9 +144,9 @@ export default function App() {
   const pageOpeningSequence = useRef(0);
   const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
     if (nextPage === "チケット管理" && (!selectedHistoryEventId || !event.eventId || event.eventStatus === "finished")) {
-      setError(!selectedHistoryEventId || !event.eventId
-        ? "チケット管理を開くには、先にイベント管理でイベントを選択してください。"
-        : "終了済みのイベントはチケット管理を開けません。開催中または終了していないイベントを選択してください。");
+      setNavigationNotice(!selectedHistoryEventId || !event.eventId
+        ? "チケット管理を開けません。先に「イベント管理」で、チケットを管理したいイベントのカードを選択してください。"
+        : "チケット管理を開けません。このイベントは終了済みです。「イベント管理」で、終了していないイベントを選択してください。");
       setPage("イベント管理");
       return;
     }
@@ -249,6 +249,7 @@ export default function App() {
   }>({ eventId: "", eventName: "", eventDate: "", tickets: [], records: [], loading: false, error: false });
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
+  const [navigationNotice, setNavigationNotice] = useState("");
   const [eventName, setEventName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -2761,6 +2762,14 @@ function NavIcon({type}:{type:string}){
   }
 
   return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    {navigationNotice && <div className="navigation-notice-backdrop">
+      <section className="navigation-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="navigation-notice-title">
+        <h2 id="navigation-notice-title">チケット管理を開けません</h2>
+        <p>{navigationNotice}</p>
+        <button className="primary-action" type="button" onClick={() => setNavigationNotice("")}>確認しました</button>
+      </section>
+    </div>}
+
     <aside
       className="sidebar"
       onPointerDown={handleSidebarPointerDown}
