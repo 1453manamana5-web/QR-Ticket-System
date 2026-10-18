@@ -963,14 +963,20 @@ function TicketDesigner({
                   value={
                     settings.cardRatio
                   }
-                  onChange={(
-                    event
-                  ) =>
-                    updateSetting(
-                      "cardRatio",
-                      event.target
-                        .value as CardRatio
-                    )
+                  onChange={(event) => {
+                    const nextRatio = event.target.value as CardRatio;
+                    if (nextRatio === "custom") {
+                      const currentHeight = safePrintWidth * (ratio.height / ratio.width);
+                      setSettings(current => ({
+                        ...current,
+                        cardRatio: "custom",
+                        customWidth: current.printWidthMm,
+                        customHeight: currentHeight,
+                        printHeightMm: currentHeight,
+                      }));
+                    } else {
+                      updateSetting("cardRatio", nextRatio);
+                    }
                   }
                 >
                   <option value="16:9">
@@ -1077,7 +1083,7 @@ function TicketDesigner({
                     onChange={(event) => {
                       const next = Math.max(30, Math.min(250, Number(event.target.value) * (sizeUnit === "cm" ? 10 : 1)));
                       updateSetting("printWidthMm", next);
-                      if (settings.cardRatio === "custom") updateSetting("customWidth", next);
+                      if (settings.cardRatio === "custom") setSettings(current => ({ ...current, customWidth: next, customHeight: current.printHeightMm }));
                     }}
                   />
                 </label>
