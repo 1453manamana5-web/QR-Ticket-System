@@ -2644,3 +2644,68 @@
   touch-action: none !important;
   overscroll-behavior: contain;
 }
+
+
+/* Calibrated physical-size preview: width is driven by mm × CSS px/mm × user calibration. */
+.ticket-designer-glass .ticket-actual-size-preview {
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  flex: 0 0 auto !important;
+}
+.ticket-designer-glass .ticket-actual-size-preview-wrap {
+  justify-content: flex-start !important;
+  overflow: auto !important;
+}
+.ticket-designer-glass .ticket-screen-calibration {
+  margin: 18px 0 !important;
+  padding: 16px !important;
+  border: 1px solid #dfe4ea !important;
+  border-radius: 14px !important;
+  background: #f8fafc !important;
+}
+.ticket-designer-glass .ticket-screen-calibration > strong {
+  display: block !important;
+  color: #172033 !important;
+  font-size: 16px !important;
+}
+.ticket-designer-glass .ticket-screen-calibration p {
+  margin: 8px 0 12px !important;
+  color: #596475 !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+.ticket-designer-glass .ticket-calibration-ruler {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-height: 28px !important;
+  overflow: visible !important;
+}
+.ticket-designer-glass .ticket-calibration-ruler span {
+  display: block !important;
+  flex: 0 0 auto !important;
+  height: 8px !important;
+  border-left: 1px solid #17633b !important;
+  border-right: 1px solid #17633b !important;
+  border-top: 2px solid #17633b !important;
+  border-bottom: 2px solid #17633b !important;
+  background: rgb(40 120 75 / 12%) !important;
+}
+.ticket-designer-glass .ticket-calibration-ruler small {
+  margin-left: 10px !important;
+  color: #17633b !important;
+  white-space: nowrap !important;
+  font-weight: 800 !important;
+}
+.ticket-designer-glass .ticket-calibration-control {
+  display: grid !important;
+  grid-template-columns: 72px minmax(0, 1fr) 52px !important;
+  align-items: center !important;
+  gap: 12px !important;
+  color: #172033 !important;
+  font-size: 14px !important;
+}
+.ticket-designer-glass .ticket-calibration-control input { width: 100% !important; }
+.ticket-designer-glass .ticket-calibration-control output { text-align: right !important; font-weight: 800 !important; }
