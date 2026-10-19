@@ -182,6 +182,8 @@ function TicketDesigner({
   const [selectedPart, setSelectedPart] = useState<"qr" | "number" | null>(null);
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartZoom = useRef(1);
+  const liveZoom = useRef(1);
+  const ticketCardRef = useRef<HTMLDivElement | null>(null);
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
@@ -697,34 +699,48 @@ function TicketDesigner({
                 if (event.touches.length === 2) {
                   const dx = event.touches[0].clientX - event.touches[1].clientX;
                   const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  pinchStartDistance.current = Math.hypot(dx, dy);
-                  pinchStartZoom.current = previewZoom;
-                }
-              }}
-              onTouchMove={(event) => {
-                if (event.touches.length === 2 && pinchStartDistance.current) {
-                  const dx = event.touches[0].clientX - event.touches[1].clientX;
-                  const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  const distance = Math.hypot(dx, dy);
-                  setPreviewZoom(Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current)));
+                  pinchStartDistance.current = Math.max(1, Math.hypot(dx, dy));
+                  pinchStartZoom.current = liveZoom.current;
+                  dragTarget.current = null;
                   event.preventDefault();
                 }
               }}
-              onTouchEnd={() => { pinchStartDistance.current = null; }}
+              onTouchMove={(event) => {
+                if (event.touches.length === 2 && pinchStartDistance.current !== null) {
+                  const dx = event.touches[0].clientX - event.touches[1].clientX;
+                  const dy = event.touches[0].clientY - event.touches[1].clientY;
+                  const distance = Math.hypot(dx, dy);
+                  const nextZoom = Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current));
+                  liveZoom.current = nextZoom;
+                  // Update only the ticket transform during the gesture; do not re-render
+                  // the entire editor for every touch-move event.
+                  if (ticketCardRef.current) {
+                    ticketCardRef.current.style.transform = `scale(${nextZoom}) translateZ(0)`;
+                  }
+                  event.preventDefault();
+                }
+              }}
+              onTouchEnd={(event) => {
+                if (event.touches.length < 2 && pinchStartDistance.current !== null) {
+                  pinchStartDistance.current = null;
+                  setPreviewZoom(liveZoom.current);
+                }
+              }}
             >
               <div className="ticket-canvas-zoom-tools">
-                <button type="button" onClick={() => setPreviewZoom(current => Math.max(0.5, +(current - 0.1).toFixed(2)))} aria-label="縮小">−</button>
+                <button type="button" onClick={() => { const next = Math.max(0.5, +(liveZoom.current - 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="縮小">−</button>
                 <span>{Math.round(previewZoom * 100)}%</span>
-                <button type="button" onClick={() => setPreviewZoom(current => Math.min(2.5, +(current + 0.1).toFixed(2)))} aria-label="拡大">＋</button>
-                <button type="button" onClick={() => setPreviewZoom(1)}>リセット</button>
+                <button type="button" onClick={() => { const next = Math.min(3, +(liveZoom.current + 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="拡大">＋</button>
+                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); }}>リセット</button>
               </div>
               {previewTicket !==
                 null && (
                 <div
+                  ref={ticketCardRef}
                   className="ticket-design-card"
                   style={{
                     ...previewTicketStyle,
-                    transform: "scale(" + previewZoom + ")",
+                    transform: "scale(" + previewZoom + ") translateZ(0)",
                     transformOrigin: "center center",
                   }}
                 >
@@ -751,9 +767,13 @@ function TicketDesigner({
                     }}
                     onPointerMove={(event) => {
                       if (dragTarget.current !== "qr") return;
-                      const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
-                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / bounds.width * 100)));
-                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / bounds.height * 100)));
+                      const card = event.currentTarget.parentElement as HTMLDivElement;
+                      const scale = Math.max(0.5, liveZoom.current);
+                      const baseWidth = card.offsetWidth;
+                      const baseHeight = card.offsetHeight;
+                      if (!baseWidth || !baseHeight) return;
+                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
+                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
                     }}
                     onPointerUp={() => { dragTarget.current = null; }}
                     style={{
@@ -786,9 +806,13 @@ function TicketDesigner({
                     }}
                     onPointerMove={(event) => {
                       if (dragTarget.current !== "number") return;
-                      const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
-                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / bounds.width * 100)));
-                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / bounds.height * 100)));
+                      const card = event.currentTarget.parentElement as HTMLDivElement;
+                      const scale = Math.max(0.5, liveZoom.current);
+                      const baseWidth = card.offsetWidth;
+                      const baseHeight = card.offsetHeight;
+                      if (!baseWidth || !baseHeight) return;
+                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
+                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
                     }}
                     onPointerUp={() => { dragTarget.current = null; }}
                     style={{
