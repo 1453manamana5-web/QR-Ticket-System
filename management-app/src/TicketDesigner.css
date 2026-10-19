@@ -2631,3 +2631,16 @@
     display: flex !important;
   }
 }
+
+
+/* Smooth GPU-accelerated zoom; avoid CSS easing lag during finger movement. */
+.ticket-designer-glass .ticket-design-card {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transition: none !important;
+}
+.ticket-designer-glass .ticket-touch-canvas {
+  touch-action: none !important;
+  overscroll-behavior: contain;
+}
