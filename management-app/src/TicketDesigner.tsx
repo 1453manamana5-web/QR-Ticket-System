@@ -638,20 +638,17 @@ function TicketDesigner({
       printWindow.document.body.appendChild(sheet);
       printWindow.document.close();
 
-      // 印刷専用タブを先に生成してからダイアログを開く。
-      printWindow.focus();
-      printWindow.onload = () => {
+      // loadイベントとreadyStateの両方から呼ばれても、印刷ダイアログは一度だけ開く。
+      let printStarted = false;
+      const startPrint = () => {
+        if (printStarted || printWindow.closed) return;
+        printStarted = true;
         printWindow.focus();
         printWindow.print();
       };
-      // document.write後にloadがすでに発火したブラウザー用。
+      printWindow.addEventListener("load", startPrint, { once: true });
       if (printWindow.document.readyState === "complete") {
-        window.setTimeout(() => {
-          if (!printWindow.closed) {
-            printWindow.focus();
-            printWindow.print();
-          }
-        }, 250);
+        window.setTimeout(startPrint, 300);
       }
     } catch (error) {
       console.error("印刷画面を開けませんでした。", error);
