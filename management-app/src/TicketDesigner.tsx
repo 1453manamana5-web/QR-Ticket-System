@@ -663,13 +663,14 @@ function TicketDesigner({
     <div className="ticket-designer-background ticket-designer-glass">
       <section className="ticket-designer-window">
         <header className="ticket-designer-header">
-          <div>
+          <div className="ticket-designer-title-group">
+            <span className="ticket-glass-eyebrow">TICKET STUDIO <span>／</span> {eventName || "イベント未選択"}</span>
             <h2>
-              チケットデザインスタジオ
+              チケットデザイン
             </h2>
 
             <p>
-              画像をベースに、チケットを直接操作してデザインします
+              プレビューを直接操作して、配置・サイズ・印刷設定をまとめて編集
             </p>
           </div>
 
