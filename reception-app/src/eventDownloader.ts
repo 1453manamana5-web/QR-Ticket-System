@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromServer, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -19,7 +19,7 @@ export async function downloadCurrentFirebaseEventData(
   // Firestoreルールが公開対象イベントだけを許可する構成でも取得できるよう、
   // 全イベントを読まず receptionTarget=true の文書だけをサーバー側で検索する。
   const publishedEventsQuery = query(collection(db, "events"), where("receptionTarget", "==", true));
-  const snapshot = await getDocs(publishedEventsQuery);
+  const snapshot = await getDocsFromServer(publishedEventsQuery);
   const candidates = snapshot.docs
     .map(item => item.data() as Event & { authToken?: unknown; receptionTarget?: unknown })
     .filter(item =>
@@ -109,7 +109,7 @@ export async function downloadEventData(
 
   // チケットの正本はイベント配下のサブコレクション。単一文書に全件を格納すると
   // Firestoreの文書サイズ上限や古い枚数情報により、受付端末へ反映されなくなる。
-  const savedTickets = await getDocs(collection(db, "events", payload.eventId, "tickets"));
+  const savedTickets = await getDocsFromServer(collection(db, "events", payload.eventId, "tickets"));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
 
   // 旧形式の公開バンドルからの移行互換。新形式では必ずサブコレクションが正本。
