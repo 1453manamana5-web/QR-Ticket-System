@@ -1424,7 +1424,7 @@ function TicketDesigner({
               <span>高さ</span><strong>{printHeightMm.toFixed(1)} mm（{(printHeightMm / 10).toFixed(2)} cm）</strong>
             </div>
             <div className="ticket-actual-size-preview-wrap">
-              <div className="ticket-actual-size-preview" style={{ "--ticket-actual-size-width": `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" } as CSSProperties & { "--ticket-actual-size-width": string }>
+              <div className="ticket-actual-size-preview" style={({ "--ticket-actual-size-width": `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" } as CSSProperties & { "--ticket-actual-size-width": string })}
                 <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
