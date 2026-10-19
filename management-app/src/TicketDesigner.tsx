@@ -179,6 +179,14 @@ function TicketDesigner({
   const [previewZoom, setPreviewZoom] = useState(1);
   const [showActualSize, setShowActualSize] = useState(false);
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
+  const [screenScale, setScreenScale] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("qr-ticket-screen-scale"));
+      return Number.isFinite(saved) && saved >= 0.5 && saved <= 2.5 ? saved : 1;
+    } catch {
+      return 1;
+    }
+  });
   const [selectedPart, setSelectedPart] = useState<"qr" | "number" | null>(null);
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartZoom = useRef(1);
@@ -679,7 +687,7 @@ function TicketDesigner({
               <h3>
                 チケットキャンバス
               </h3>
-              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実際のサイズを見る</button>
+              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実寸・印刷サイズを確認</button>
 
               <span>
                 {safePrintWidth.toFixed(
@@ -1406,8 +1414,8 @@ function TicketDesigner({
           <section className="ticket-actual-size-dialog">
             <header>
               <div>
-                <h2>チケットの実際のサイズ</h2>
-                <p>印刷時に指定される実寸を確認できます。</p>
+                <h2>チケットの実寸確認</h2>
+                <p>画面表示を定規で校正すると、画面上でも指定寸法に合わせて表示できます。</p>
               </div>
               <button type="button" onClick={() => setShowActualSize(false)} aria-label="閉じる">×</button>
             </header>
@@ -1416,14 +1424,31 @@ function TicketDesigner({
               <span>高さ</span><strong>{printHeightMm.toFixed(1)} mm（{(printHeightMm / 10).toFixed(2)} cm）</strong>
             </div>
             <div className="ticket-actual-size-preview-wrap">
-              <div className="ticket-actual-size-preview" style={{ aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" }}>
+              <div className="ticket-actual-size-preview" style={{ width: `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" }}>
                 <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
-                <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{previewTicket?.qrNumber ?? ""}</div>
+                <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize * screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
               </div>
             </div>
-            <p className="ticket-actual-size-note">画面上の見え方は端末の表示倍率により異なります。上記のmm/cm表記が印刷時の指定寸法です。</p>
+            <div className="ticket-screen-calibration">
+              <strong>画面表示の校正</strong>
+              <p>下の線が、手元の定規で正確に10 cmになるように調整してください。校正後は、この画面のチケット表示を指定寸法に合わせます。</p>
+              <div className="ticket-calibration-ruler">
+                <span style={{ width: `${100 * (96 / 25.4) * screenScale}px` }} />
+                <small>10 cm</small>
+              </div>
+              <label className="ticket-calibration-control">
+                <span>表示倍率</span>
+                <input type="range" min="0.5" max="2.5" step="0.01" value={screenScale} onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setScreenScale(next);
+                  try { localStorage.setItem("qr-ticket-screen-scale", String(next)); } catch {}
+                }} />
+                <output>{Math.round(screenScale * 100)}%</output>
+              </label>
+              <p className="ticket-actual-size-note">校正はこのブラウザーの画面表示用です。印刷寸法は上記のmm/cm指定を使い、印刷設定は「実際のサイズ」または倍率100%にしてください。</p>
+            </div>
             <button type="button" className="ticket-actual-size-done" onClick={() => setShowActualSize(false)}>編集に戻る</button>
           </section>
         </div>
