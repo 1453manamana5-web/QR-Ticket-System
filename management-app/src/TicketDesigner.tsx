@@ -177,6 +177,8 @@ function TicketDesigner({
     () => loadDesignSettings(eventName).backgroundImage !== ""
   );
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const panDragStart = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
   const [showActualSize, setShowActualSize] = useState(false);
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
   const [screenScale, setScreenScale] = useState(() => {
@@ -723,7 +725,7 @@ function TicketDesigner({
                   // Update only the ticket transform during the gesture; do not re-render
                   // the entire editor for every touch-move event.
                   if (ticketCardRef.current) {
-                    ticketCardRef.current.style.transform = `scale(${nextZoom}) translateZ(0)`;
+                    ticketCardRef.current.style.transform = `translate(${previewPan.x}px, ${previewPan.y}px) scale(${nextZoom}) translateZ(0)`;
                   }
                   event.preventDefault();
                 }
@@ -739,16 +741,31 @@ function TicketDesigner({
                 <button type="button" onClick={() => { const next = Math.max(0.5, +(liveZoom.current - 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="縮小">−</button>
                 <span>{Math.round(previewZoom * 100)}%</span>
                 <button type="button" onClick={() => { const next = Math.min(3, +(liveZoom.current + 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="拡大">＋</button>
-                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); }}>リセット</button>
+                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); if (ticketCardRef.current) ticketCardRef.current.style.transform = "translate(0px, 0px) scale(1) translateZ(0)"; }}>位置・倍率をリセット</button>
               </div>
               {previewTicket !==
                 null && (
                 <div
                   ref={ticketCardRef}
                   className="ticket-design-card"
+                  onPointerDown={(event) => {
+                    if ((event.target as HTMLElement).closest(".ticket-draggable-part")) return;
+                    panDragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: previewPan.x, panY: previewPan.y };
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    event.preventDefault();
+                  }}
+                  onPointerMove={(event) => {
+                    const start = panDragStart.current;
+                    if (!start || start.pointerId !== event.pointerId) return;
+                    setPreviewPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
+                  }}
+                  onPointerUp={(event) => {
+                    if (panDragStart.current?.pointerId === event.pointerId) panDragStart.current = null;
+                  }}
+                  onPointerCancel={() => { panDragStart.current = null; }}
                   style={{
                     ...previewTicketStyle,
-                    transform: "scale(" + previewZoom + ") translateZ(0)",
+                    transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom}) translateZ(0)`,
                     transformOrigin: "center center",
                   }}
                 >
