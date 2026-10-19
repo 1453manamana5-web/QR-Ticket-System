@@ -2648,7 +2648,7 @@
 
 /* Calibrated physical-size preview: width is driven by mm × CSS px/mm × user calibration. */
 .ticket-designer-glass .ticket-actual-size-preview {
-  width: auto !important;
+  width: var(--ticket-actual-size-width) !important;
   max-width: none !important;
   height: auto !important;
   flex: 0 0 auto !important;
