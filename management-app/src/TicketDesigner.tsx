@@ -767,7 +767,7 @@ function TicketDesigner({
                   style={{
                     ...previewTicketStyle,
                     transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom}) translateZ(0)`,
-                    transformOrigin: "center center",
+                    transformOrigin: "top left",
                   }}
                 >
                   {settings.backgroundImage ===
