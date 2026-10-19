@@ -684,301 +684,7 @@ function TicketDesigner({
         </header>
 
         <main className="ticket-designer-content">
-          <section className="ticket-designer-preview-section">
-            <div className="ticket-preview-heading">
-              <h3>
-                チケットキャンバス
-              </h3>
-              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実寸・印刷サイズを確認</button>
-
-              <span>
-                {safePrintWidth.toFixed(
-                  1
-                )}
-                mm ×{" "}
-                {printHeightMm.toFixed(
-                  1
-                )}
-                mm
-              </span>
-            </div>
-
-            <div
-              className="ticket-preview-container ticket-touch-canvas"
-              onTouchStart={(event) => {
-                if (event.touches.length === 2) {
-                  const dx = event.touches[0].clientX - event.touches[1].clientX;
-                  const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  pinchStartDistance.current = Math.max(1, Math.hypot(dx, dy));
-                  pinchStartZoom.current = liveZoom.current;
-                  dragTarget.current = null;
-                  panDragStart.current = null;
-                  event.preventDefault();
-                }
-              }}
-              onTouchMove={(event) => {
-                if (event.touches.length === 2 && pinchStartDistance.current !== null) {
-                  const dx = event.touches[0].clientX - event.touches[1].clientX;
-                  const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  const distance = Math.hypot(dx, dy);
-                  const nextZoom = Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current));
-                  liveZoom.current = nextZoom;
-                  // Update only the ticket transform during the gesture; do not re-render
-                  // the entire editor for every touch-move event.
-                  if (ticketCardRef.current) {
-                    ticketCardRef.current.style.transform = `translate(${previewPan.x}px, ${previewPan.y}px) scale(${nextZoom}) translateZ(0)`;
-                  }
-                  event.preventDefault();
-                }
-              }}
-              onTouchEnd={(event) => {
-                if (event.touches.length < 2 && pinchStartDistance.current !== null) {
-                  pinchStartDistance.current = null;
-                  setPreviewZoom(liveZoom.current);
-                }
-              }}
-            >
-              <div className="ticket-canvas-zoom-tools">
-                <button type="button" onClick={() => { const next = Math.max(0.5, +(liveZoom.current - 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="縮小">−</button>
-                <span>{Math.round(previewZoom * 100)}%</span>
-                <button type="button" onClick={() => { const next = Math.min(3, +(liveZoom.current + 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="拡大">＋</button>
-                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); if (ticketCardRef.current) ticketCardRef.current.style.transform = "translate(0px, 0px) scale(1) translateZ(0)"; }}>位置・倍率をリセット</button>
-              </div>
-              {previewTicket !==
-                null && (
-                <div
-                  ref={ticketCardRef}
-                  className="ticket-design-card"
-                  onPointerDown={(event) => {
-                    if ((event.target as HTMLElement).closest(".ticket-draggable-part")) return;
-                    panDragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: previewPan.x, panY: previewPan.y };
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    event.preventDefault();
-                  }}
-                  onPointerMove={(event) => {
-                    const start = panDragStart.current;
-                    if (!start || start.pointerId !== event.pointerId) return;
-                    setPreviewPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
-                  }}
-                  onPointerUp={(event) => {
-                    if (panDragStart.current?.pointerId === event.pointerId) panDragStart.current = null;
-                  }}
-                  onPointerCancel={() => { panDragStart.current = null; }}
-                  style={{
-                    ...previewTicketStyle,
-                    transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom}) translateZ(0)`,
-                    transformOrigin: "top left",
-                  }}
-                >
-                  {settings.backgroundImage ===
-                    "" && (
-                    <div className="ticket-no-background">
-                      背景画像を選択してください
-                    </div>
-                  )}
-
-                  <div
-                    className="ticket-design-qr ticket-draggable-part"
-                    onPointerDown={(event) => {
-                      if (selectedPart !== "qr") {
-                        setSelectedPart("qr");
-                        dragTarget.current = null;
-                        event.stopPropagation();
-                        return;
-                      }
-                      dragTarget.current = "qr";
-                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      event.stopPropagation();
-                    }}
-                    onPointerMove={(event) => {
-                      if (dragTarget.current !== "qr") return;
-                      const card = event.currentTarget.parentElement as HTMLDivElement;
-                      const scale = Math.max(0.5, liveZoom.current);
-                      const baseWidth = card.offsetWidth;
-                      const baseHeight = card.offsetHeight;
-                      if (!baseWidth || !baseHeight) return;
-                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
-                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
-                    }}
-                    onPointerUp={() => { dragTarget.current = null; }}
-                    style={{
-                      left: `${settings.qrX}%`,
-                      top: `${settings.qrY}%`,
-                      width: `${settings.qrSize}%`,
-                    }}
-                  >
-                    <LazyQrCode
-                      value={qrValue(previewTicket)}
-                      size={500}
-                      level="M"
-                      marginSize={1}
-                    />
-                  </div>
-
-                  <div
-                    className="ticket-design-number ticket-draggable-part"
-                    onPointerDown={(event) => {
-                      if (selectedPart !== "number") {
-                        setSelectedPart("number");
-                        dragTarget.current = null;
-                        event.stopPropagation();
-                        return;
-                      }
-                      dragTarget.current = "number";
-                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      event.stopPropagation();
-                    }}
-                    onPointerMove={(event) => {
-                      if (dragTarget.current !== "number") return;
-                      const card = event.currentTarget.parentElement as HTMLDivElement;
-                      const scale = Math.max(0.5, liveZoom.current);
-                      const baseWidth = card.offsetWidth;
-                      const baseHeight = card.offsetHeight;
-                      if (!baseWidth || !baseHeight) return;
-                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
-                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
-                    }}
-                    onPointerUp={() => { dragTarget.current = null; }}
-                    style={{
-                      left: `${settings.numberX}%`,
-                      top: `${settings.numberY}%`,
-                      fontSize:
-                        `${settings.numberSize}px`,
-                    }}
-                  >
-                    {
-                      previewTicket.qrNumber
-                    }
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <section className="ticket-print-range">
-              <h3>
-                印刷する範囲
-              </h3>
-
-              <div className="ticket-range-inputs">
-                <label>
-                  最初のチケット
-
-                  <select
-                    value={
-                      startIndex
-                    }
-                    onChange={(
-                      event
-                    ) => {
-                      const newStart =
-                        Number(
-                          event.target
-                            .value
-                        );
-
-                      setStartIndex(
-                        newStart
-                      );
-
-                      if (
-                        endIndex <
-                        newStart
-                      ) {
-                        setEndIndex(
-                          newStart
-                        );
-                      }
-                    }}
-                  >
-                    {printableTickets.map(
-                      (
-                        ticket,
-                        index
-                      ) => (
-                        <option
-                          key={
-                            ticket.id
-                          }
-                          value={
-                            index
-                          }
-                        >
-                          {
-                            ticket.qrNumber
-                          }
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-
-                <span>～</span>
-
-                <label>
-                  最後のチケット
-
-                  <select
-                    value={
-                      endIndex
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setEndIndex(
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  >
-                    {printableTickets.map(
-                      (
-                        ticket,
-                        index
-                      ) => (
-                        <option
-                          key={
-                            ticket.id
-                          }
-                          value={
-                            index
-                          }
-                          disabled={
-                            index <
-                            startIndex
-                          }
-                        >
-                          {
-                            ticket.qrNumber
-                          }
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-              </div>
-
-              <div className="ticket-range-summary">
-                印刷対象：
-
-                <strong>
-                  {
-                    selectedTickets.length
-                  }
-                  枚
-                </strong>
-
-                <span>
-                  ※無効なチケットは除外されます
-                </span>
-              </div>
-            </section>
-          </section>
-
-          <section className="ticket-designer-settings">
+<section className="ticket-designer-settings">
             <h3>
               デザイン設定
             </h3>
@@ -1389,6 +1095,300 @@ function TicketDesigner({
                 <span>mm</span>
               </label>
             </div>
+          </section>
+
+<section className="ticket-designer-preview-section">
+            <div className="ticket-preview-heading">
+              <h3>
+                チケットキャンバス
+              </h3>
+              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実寸・印刷サイズを確認</button>
+
+              <span>
+                {safePrintWidth.toFixed(
+                  1
+                )}
+                mm ×{" "}
+                {printHeightMm.toFixed(
+                  1
+                )}
+                mm
+              </span>
+            </div>
+
+            <div
+              className="ticket-preview-container ticket-touch-canvas"
+              onTouchStart={(event) => {
+                if (event.touches.length === 2) {
+                  const dx = event.touches[0].clientX - event.touches[1].clientX;
+                  const dy = event.touches[0].clientY - event.touches[1].clientY;
+                  pinchStartDistance.current = Math.max(1, Math.hypot(dx, dy));
+                  pinchStartZoom.current = liveZoom.current;
+                  dragTarget.current = null;
+                  panDragStart.current = null;
+                  event.preventDefault();
+                }
+              }}
+              onTouchMove={(event) => {
+                if (event.touches.length === 2 && pinchStartDistance.current !== null) {
+                  const dx = event.touches[0].clientX - event.touches[1].clientX;
+                  const dy = event.touches[0].clientY - event.touches[1].clientY;
+                  const distance = Math.hypot(dx, dy);
+                  const nextZoom = Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current));
+                  liveZoom.current = nextZoom;
+                  // Update only the ticket transform during the gesture; do not re-render
+                  // the entire editor for every touch-move event.
+                  if (ticketCardRef.current) {
+                    ticketCardRef.current.style.transform = `translate(${previewPan.x}px, ${previewPan.y}px) scale(${nextZoom}) translateZ(0)`;
+                  }
+                  event.preventDefault();
+                }
+              }}
+              onTouchEnd={(event) => {
+                if (event.touches.length < 2 && pinchStartDistance.current !== null) {
+                  pinchStartDistance.current = null;
+                  setPreviewZoom(liveZoom.current);
+                }
+              }}
+            >
+              <div className="ticket-canvas-zoom-tools">
+                <button type="button" onClick={() => { const next = Math.max(0.5, +(liveZoom.current - 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="縮小">−</button>
+                <span>{Math.round(previewZoom * 100)}%</span>
+                <button type="button" onClick={() => { const next = Math.min(3, +(liveZoom.current + 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="拡大">＋</button>
+                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); if (ticketCardRef.current) ticketCardRef.current.style.transform = "translate(0px, 0px) scale(1) translateZ(0)"; }}>位置・倍率をリセット</button>
+              </div>
+              {previewTicket !==
+                null && (
+                <div
+                  ref={ticketCardRef}
+                  className="ticket-design-card"
+                  onPointerDown={(event) => {
+                    if ((event.target as HTMLElement).closest(".ticket-draggable-part")) return;
+                    panDragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: previewPan.x, panY: previewPan.y };
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    event.preventDefault();
+                  }}
+                  onPointerMove={(event) => {
+                    const start = panDragStart.current;
+                    if (!start || start.pointerId !== event.pointerId) return;
+                    setPreviewPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
+                  }}
+                  onPointerUp={(event) => {
+                    if (panDragStart.current?.pointerId === event.pointerId) panDragStart.current = null;
+                  }}
+                  onPointerCancel={() => { panDragStart.current = null; }}
+                  style={{
+                    ...previewTicketStyle,
+                    transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom}) translateZ(0)`,
+                    transformOrigin: "top left",
+                  }}
+                >
+                  {settings.backgroundImage ===
+                    "" && (
+                    <div className="ticket-no-background">
+                      背景画像を選択してください
+                    </div>
+                  )}
+
+                  <div
+                    className="ticket-design-qr ticket-draggable-part"
+                    onPointerDown={(event) => {
+                      if (selectedPart !== "qr") {
+                        setSelectedPart("qr");
+                        dragTarget.current = null;
+                        event.stopPropagation();
+                        return;
+                      }
+                      dragTarget.current = "qr";
+                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      event.stopPropagation();
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragTarget.current !== "qr") return;
+                      const card = event.currentTarget.parentElement as HTMLDivElement;
+                      const scale = Math.max(0.5, liveZoom.current);
+                      const baseWidth = card.offsetWidth;
+                      const baseHeight = card.offsetHeight;
+                      if (!baseWidth || !baseHeight) return;
+                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
+                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
+                    }}
+                    onPointerUp={() => { dragTarget.current = null; }}
+                    style={{
+                      left: `${settings.qrX}%`,
+                      top: `${settings.qrY}%`,
+                      width: `${settings.qrSize}%`,
+                    }}
+                  >
+                    <LazyQrCode
+                      value={qrValue(previewTicket)}
+                      size={500}
+                      level="M"
+                      marginSize={1}
+                    />
+                  </div>
+
+                  <div
+                    className="ticket-design-number ticket-draggable-part"
+                    onPointerDown={(event) => {
+                      if (selectedPart !== "number") {
+                        setSelectedPart("number");
+                        dragTarget.current = null;
+                        event.stopPropagation();
+                        return;
+                      }
+                      dragTarget.current = "number";
+                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      event.stopPropagation();
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragTarget.current !== "number") return;
+                      const card = event.currentTarget.parentElement as HTMLDivElement;
+                      const scale = Math.max(0.5, liveZoom.current);
+                      const baseWidth = card.offsetWidth;
+                      const baseHeight = card.offsetHeight;
+                      if (!baseWidth || !baseHeight) return;
+                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
+                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
+                    }}
+                    onPointerUp={() => { dragTarget.current = null; }}
+                    style={{
+                      left: `${settings.numberX}%`,
+                      top: `${settings.numberY}%`,
+                      fontSize:
+                        `${settings.numberSize}px`,
+                    }}
+                  >
+                    {
+                      previewTicket.qrNumber
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <section className="ticket-print-range">
+              <h3>
+                印刷する範囲
+              </h3>
+
+              <div className="ticket-range-inputs">
+                <label>
+                  最初のチケット
+
+                  <select
+                    value={
+                      startIndex
+                    }
+                    onChange={(
+                      event
+                    ) => {
+                      const newStart =
+                        Number(
+                          event.target
+                            .value
+                        );
+
+                      setStartIndex(
+                        newStart
+                      );
+
+                      if (
+                        endIndex <
+                        newStart
+                      ) {
+                        setEndIndex(
+                          newStart
+                        );
+                      }
+                    }}
+                  >
+                    {printableTickets.map(
+                      (
+                        ticket,
+                        index
+                      ) => (
+                        <option
+                          key={
+                            ticket.id
+                          }
+                          value={
+                            index
+                          }
+                        >
+                          {
+                            ticket.qrNumber
+                          }
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+
+                <span>～</span>
+
+                <label>
+                  最後のチケット
+
+                  <select
+                    value={
+                      endIndex
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setEndIndex(
+                        Number(
+                          event.target
+                            .value
+                        )
+                      )
+                    }
+                  >
+                    {printableTickets.map(
+                      (
+                        ticket,
+                        index
+                      ) => (
+                        <option
+                          key={
+                            ticket.id
+                          }
+                          value={
+                            index
+                          }
+                          disabled={
+                            index <
+                            startIndex
+                          }
+                        >
+                          {
+                            ticket.qrNumber
+                          }
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+              </div>
+
+              <div className="ticket-range-summary">
+                印刷対象：
+
+                <strong>
+                  {
+                    selectedTickets.length
+                  }
+                  枚
+                </strong>
+
+                <span>
+                  ※無効なチケットは除外されます
+                </span>
+              </div>
+            </section>
           </section>
         </main>
 
