@@ -173,9 +173,8 @@ function TicketDesigner({
     useState<TicketDesignSettings>(
       () => loadDesignSettings(eventName)
     );
-  const [showEditor, setShowEditor] = useState(
-    () => loadDesignSettings(eventName).backgroundImage !== ""
-  );
+  // Open the full editor immediately; the background image is optional.
+  const [showEditor, setShowEditor] = useState(true);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const panDragStart = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
