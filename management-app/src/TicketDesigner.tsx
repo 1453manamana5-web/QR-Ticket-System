@@ -712,6 +712,7 @@ function TicketDesigner({
                   pinchStartDistance.current = Math.max(1, Math.hypot(dx, dy));
                   pinchStartZoom.current = liveZoom.current;
                   dragTarget.current = null;
+                  panDragStart.current = null;
                   event.preventDefault();
                 }
               }}
