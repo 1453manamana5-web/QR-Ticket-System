@@ -116,26 +116,71 @@ export default function App(){
 
   useEffect(()=>{
     let unsubscribe:(()=>void)|undefined;
-    const applyRegistration=(value:{approved:boolean;status:"online"|"offline"|"pending";name:string}|null)=>{
+    const readCachedApproval=()=>{
+      try{
+        const raw=localStorage.getItem("qr-ticket-reception-approved");
+        if(!raw)return null;
+        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown};
+        if(saved.approved!==true||saved.terminalId!==getTerminalId())return null;
+        return {
+          approved:true,
+          status:"offline" as const,
+          name:typeof saved.name==="string"&&saved.name.trim()?saved.name:"受付端末"
+        };
+      }catch{return null;}
+    };
+    const applyRegistration=(incoming:{approved:boolean;status:"online"|"offline"|"pending";name:string}|null)=>{
+      // オフライン時にFirebaseのキャッシュが空でも、オンラインで承認済みだった端末は
+      // ローカルの承認記録を使う。オンラインで承認取消が確認できた場合は従来どおり停止する。
+      const value=(!navigator.onLine&&!incoming?.approved)?readCachedApproval():incoming;
       setTerminalRegistration(value);
-      if(value?.name) setTerminalRegistrationName(value.name);
+      if(value?.name)setTerminalRegistrationName(value.name);
       if(value?.approved){
-        if(screen==="registration") setScreen("auth");
+        if(navigator.onLine){
+          try{
+            localStorage.setItem("qr-ticket-reception-approved",JSON.stringify({
+              approved:true,
+              name:value.name,
+              terminalId:getTerminalId(),
+              savedAt:new Date().toISOString()
+            }));
+          }catch(reason){console.warn("受付承認状態を端末に保存できませんでした",reason);}
+        }
+        if(screen==="registration")setScreen("auth");
       }else{
-        // Firebase側で受付承認が外れた場合は、以前のローカルイベントを使って受付画面へ進ませない。
-        setAuthPayload(null);
-        setLocalEvent(null);
-        setResult(null);
-        setScreen("registration");
+        if(navigator.onLine){
+          try{localStorage.removeItem("qr-ticket-reception-approved");}catch{}
+        }
+        // オフライン時は、未取得を「承認取消」と誤認して保存済みデータを消さない。
+        if(navigator.onLine){
+          setAuthPayload(null);
+          setLocalEvent(null);
+          setResult(null);
+          setScreen("registration");
+        }else if(!value){
+          setScreen("registration");
+        }
       }
     };
-    void getTerminalRegistration().then(applyRegistration).catch(reason=>console.error("受付端末登録状態の取得に失敗しました",reason));
+    void getTerminalRegistration().then(applyRegistration).catch(reason=>{
+      console.error("受付端末登録状態の取得に失敗しました",reason);
+      if(!navigator.onLine)applyRegistration(null);
+    });
     try{
-      unsubscribe=subscribeTerminalRegistration(applyRegistration,reason=>console.error("受付端末登録状態の購読に失敗しました",reason));
+      unsubscribe=subscribeTerminalRegistration(applyRegistration,reason=>{
+        console.error("受付端末登録状態の購読に失敗しました",reason);
+        if(!navigator.onLine)applyRegistration(null);
+      });
     }catch(reason){
       console.error("受付端末登録状態の購読開始に失敗しました",reason);
+      if(!navigator.onLine)applyRegistration(null);
     }
-    return()=>unsubscribe?.();
+    const handleOffline=()=>applyRegistration(null);
+    window.addEventListener("offline",handleOffline);
+    return()=>{
+      unsubscribe?.();
+      window.removeEventListener("offline",handleOffline);
+    };
   },[screen]);
 
   const receiveEventByCommunication=useCallback(async()=>{
