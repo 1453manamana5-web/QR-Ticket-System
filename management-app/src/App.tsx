@@ -959,23 +959,33 @@ export default function App() {
     if (!window.confirm("「" + target.eventName + "」をイベント履歴から削除しますか？")) return;
 
     const remaining = eventHistory.filter(item => item.eventId !== eventId);
-    if (remaining.length === 0) {
-      setError("最後のイベントは削除できません。新しいイベントを作成してから削除してください。");
-      return;
-    }
 
     setError("");
     deletedEventIdsRef.current.add(eventId);
     try {
       // Firebase側の削除完了を待ってから画面側も更新する。
-      // onSnapshotの古いスナップショットで削除済みイベントが一瞬復活するのを防ぐ。
+      // 最後のイベントも削除可能にし、削除後は未選択状態へ戻す。
       await deleteFirebaseEvent(eventId);
       setEventHistory(remaining);
-      selectHistoryEvent(remaining[0]);
+      if (remaining.length > 0) {
+        selectHistoryEvent(remaining[0]);
+      } else {
+        setEvent(baseEvent);
+        setEventName("");
+        setEventDate("");
+        setStartTime("");
+        setEndTime("");
+        setSavedEventName("");
+        setSelectedHistoryEventId("");
+        setSelectedAnalysisEventId("");
+        setTickets([]);
+        setMembers([]);
+        setBundle(null);
+      }
     } catch (reason) {
       deletedEventIdsRef.current.delete(eventId);
       console.error(reason);
-      setError("イベントをFirebaseから削除できませんでした。権限・接続を確認してください。");
+      setError("イベントをFirebaseから削除できませんでした。権限・接続を確認してください。削除権限または接続状態を確認してください。");
     }
   };
 
