@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -35,7 +35,7 @@ export function subscribeEvents(onChange: (events: Event[]) => void, onError: (e
 async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]): Promise<void> {
   const db = getFirebaseDb();
   const eventRef = doc(db, "events", eventId);
-  const eventSnapshot = await getDoc(eventRef);
+  const eventSnapshot = await getDocFromServer(eventRef);
   if (!eventSnapshot.exists()) throw new Error("EVENT_NOT_FOUND");
   const eventData = eventSnapshot.data();
   const authToken = typeof eventData.authToken === "string" ? eventData.authToken : "";
@@ -46,7 +46,7 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
 
   if (authToken) {
     bundleRef = doc(db, "eventBundles", authToken);
-    const bundleSnapshot = await getDoc(bundleRef);
+    const bundleSnapshot = await getDocFromServer(bundleRef);
     if (bundleSnapshot.exists()) {
       savedBundle = bundleSnapshot.data();
       nextDataVersion += 1;
@@ -263,7 +263,7 @@ export async function saveAppSettings(deviceId: string, settings: Record<string,
 
 export async function loadEventTickets(eventId: string): Promise<Ticket[]> {
   const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "events", eventId, "tickets"));
+  const snapshot = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
   return snapshot.docs.map(item => item.data() as Ticket);
 }
 
