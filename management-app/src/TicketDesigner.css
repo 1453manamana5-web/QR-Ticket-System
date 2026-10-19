@@ -2644,6 +2644,15 @@
   touch-action: none !important;
   overscroll-behavior: contain;
 }
+.ticket-designer-glass .ticket-design-card {
+  cursor: grab;
+}
+.ticket-designer-glass .ticket-design-card:active {
+  cursor: grabbing;
+}
+.ticket-designer-glass .ticket-draggable-part {
+  touch-action: none;
+}
 
 
 /* Calibrated physical-size preview: width is driven by mm × CSS px/mm × user calibration. */
