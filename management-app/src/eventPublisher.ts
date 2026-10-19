@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, setDoc, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -24,7 +24,7 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
       typeof data.ticketCount !== "number") return null;
 
   // チケット一覧はサイズ制限のある単一バンドルではなく、イベント配下の一覧を正本にする。
-  const savedTickets = await getDocs(collection(db, "events", eventId, "tickets"));
+  const savedTickets = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
   // 旧形式のバンドルだけにチケットが残っている場合は互換用に復元する。
   if (tickets.length === 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
@@ -56,11 +56,17 @@ export async function publishEventBundle(
   const authToken = createAuthToken();
   // React stateが未読込の瞬間に公開操作されても、Firestoreに保存済みのチケットを空配信しない。
   // 明示的なチケット一覧が空の場合だけ、Firestoreの保存済み一覧を復元元として使う。
-  let publishedTickets = tickets;
-  if (publishedTickets.length === 0) {
-    const savedTicketsSnapshot = await getDocs(collection(db, "events", event.eventId, "tickets"));
-    if (!savedTicketsSnapshot.empty) {
-      publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
+  const savedTicketsSnapshot = await getDocsFromServer(collection(db, "events", event.eventId, "tickets"));
+  let publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
+  // 未保存の旧形式データしかない場合に限り、呼び出し元のチケットを移行元として保存する。
+  if (publishedTickets.length === 0 && tickets.length > 0) {
+    publishedTickets = tickets;
+    for (let start = 0; start < publishedTickets.length; start += 450) {
+      const batch = writeBatch(db);
+      for (const ticket of publishedTickets.slice(start, start + 450)) {
+        batch.set(doc(db, "events", event.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+      }
+      await batch.commit();
     }
   }
   const existingEvents = await getDocs(collection(db, "events"));
@@ -80,14 +86,7 @@ export async function publishEventBundle(
     publishedAt: new Date().toISOString(),
   };
 
-  // 管理端末のリアルタイム一覧と受付用バンドルで、同じチケット群を使う。
-  for (let start = 0; start < publishedTickets.length; start += 450) {
-    const batch = writeBatch(db);
-    for (const ticket of publishedTickets.slice(start, start + 450)) {
-      batch.set(doc(db, "events", event.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-    }
-    await batch.commit();
-  }
+  // 管理端末と受付端末の両方で、上でサーバーから確認した同じチケット群を参照する。
 
   // 先にチケットを含む公開バンドルを保存し、その後イベント一覧のメタデータを更新する。
   // merge:true にして、同時に保存される他のイベント管理情報を消さない。
