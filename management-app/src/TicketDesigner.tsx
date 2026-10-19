@@ -569,42 +569,93 @@ function TicketDesigner({
   };
 
   const printTickets = () => {
-    if (
-      selectedTickets.length === 0
-    ) {
-      alert(
-        "印刷できるチケットがありません。"
-      );
-
+    if (selectedTickets.length === 0) {
+      alert("印刷できるチケットがありません。");
       return;
     }
 
     /*
-      iPad Safariでは、確認ダイアログや非同期処理を挟むと
-      印刷操作がユーザーの直接操作として扱われず、
-      window.print()が無視される場合があります。
-
-      印刷ボタンを押した同じ処理内で、
-     直接window.print()を実行します。
+      Safariやホーム画面起動では、現在の画面に対する
+      window.print() が反応しないことがあります。
+      ユーザー操作中に印刷専用ウィンドウを開き、
+      チケット一覧だけを複製して印刷します。
     */
     try {
-      window.focus();
+      const sourceSheet = document.querySelector<HTMLElement>(".ticket-print-sheet");
+      if (!sourceSheet) {
+        throw new Error("印刷用チケット一覧が見つかりません。");
+      }
 
-      /*
-        印刷用DOMとCSSを確実に再計算させます。
-      */
-      void document.body.offsetHeight;
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        // ポップアップが制限されている環境では従来の印刷方法へフォールバック。
+        window.focus();
+        void document.body.offsetHeight;
+        window.print();
+        return;
+      }
 
-      window.print();
+      const sheet = sourceSheet.cloneNode(true) as HTMLElement;
+      sheet.style.display = "flex";
+      sheet.style.visibility = "visible";
+
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${eventName || "チケット"} - 印刷</title>
+<style>
+  @page { size: auto; margin: 8mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
+  .ticket-print-sheet {
+    display: flex; flex-flow: row wrap; align-content: flex-start; align-items: flex-start;
+    justify-content: flex-start; gap: var(--ticket-print-gap, 4mm); width: 100%;
+    margin: 0; padding: 0; border: 0; background: #fff;
+  }
+  .ticket-print-card {
+    position: relative; flex: 0 0 var(--ticket-print-width, 90mm);
+    width: var(--ticket-print-width, 90mm); height: var(--ticket-print-height, 50.625mm);
+    min-width: var(--ticket-print-width, 90mm); min-height: var(--ticket-print-height, 50.625mm);
+    max-width: var(--ticket-print-width, 90mm); max-height: var(--ticket-print-height, 50.625mm);
+    overflow: hidden; background-color: #fff; background-position: center;
+    background-size: contain; background-repeat: no-repeat;
+    break-inside: avoid; page-break-inside: avoid;
+    print-color-adjust: exact; -webkit-print-color-adjust: exact;
+  }
+  .ticket-design-qr, .ticket-design-number { position: absolute; }
+  .ticket-design-qr { z-index: 3; aspect-ratio: 1 / 1; padding: .8%; background: #fff; transform: translate(-50%, -50%); }
+  .ticket-design-qr svg { display: block; width: 100%; height: 100%; }
+  .ticket-design-number { z-index: 2; max-width: 65%; color: #000; font-weight: bold; line-height: 1.1; white-space: nowrap; transform: translate(-50%, -50%); }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body></body>
+</html>`);
+      printWindow.document.body.appendChild(sheet);
+      printWindow.document.close();
+
+      // 印刷専用タブを先に生成してからダイアログを開く。
+      printWindow.focus();
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
+      // document.write後にloadがすでに発火したブラウザー用。
+      if (printWindow.document.readyState === "complete") {
+        window.setTimeout(() => {
+          if (!printWindow.closed) {
+            printWindow.focus();
+            printWindow.print();
+          }
+        }, 250);
+      }
     } catch (error) {
-      console.error(
-        "印刷画面を開けませんでした。",
-        error
-      );
-
-      alert(
-        "印刷画面を開けませんでした。Safariで開き直して、もう一度お試しください。"
-      );
+      console.error("印刷画面を開けませんでした。", error);
+      alert("印刷画面を開けませんでした。ポップアップを許可して、もう一度お試しください。");
     }
   };
 
