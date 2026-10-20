@@ -700,6 +700,8 @@ export default function App() {
     };
 
     const syncAutomaticStatus = () => {
+      // 削除処理中のイベントを自動状態更新で再作成しない。
+      if (deletedEventIdsRef.current.has(event.eventId)) return;
       const next = getAutomaticEventStatus(event);
 
       if (next === "finalizing") {
