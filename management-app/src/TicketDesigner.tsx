@@ -575,85 +575,12 @@ function TicketDesigner({
     }
 
     /*
-      Safariやホーム画面起動では、現在の画面に対する
-      window.print() が反応しないことがあります。
-      ユーザー操作中に印刷専用ウィンドウを開き、
-      チケット一覧だけを複製して印刷します。
+      旧アプリの方式に戻す：
+      印刷専用ウィンドウへDOMを複製せず、現在のチケット一覧を
+      TicketDesigner.css の @media print で管理画面だけ隠して印刷する。
+      これにより複製時に背景・QR・サイズ指定が欠落するのを防ぐ。
     */
-    try {
-      const sourceSheet = document.querySelector<HTMLElement>(".ticket-print-sheet");
-      if (!sourceSheet) {
-        throw new Error("印刷用チケット一覧が見つかりません。");
-      }
-
-      const printWindow = window.open("", "_blank");
-      if (!printWindow) {
-        // ポップアップが制限されている環境では従来の印刷方法へフォールバック。
-        window.focus();
-        void document.body.offsetHeight;
-        window.print();
-        return;
-      }
-
-      const sheet = sourceSheet.cloneNode(true) as HTMLElement;
-      sheet.style.display = "flex";
-      sheet.style.visibility = "visible";
-
-      printWindow.document.open();
-      printWindow.document.write(`<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${eventName || "チケット"} - 印刷</title>
-<style>
-  @page { size: auto; margin: 8mm; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
-  .ticket-print-sheet {
-    display: flex; flex-flow: row wrap; align-content: flex-start; align-items: flex-start;
-    justify-content: flex-start; gap: var(--ticket-print-gap, 4mm); width: 100%;
-    margin: 0; padding: 0; border: 0; background: #fff;
-  }
-  .ticket-print-card {
-    position: relative; flex: 0 0 var(--ticket-print-width, 90mm);
-    width: var(--ticket-print-width, 90mm); height: var(--ticket-print-height, 50.625mm);
-    min-width: var(--ticket-print-width, 90mm); min-height: var(--ticket-print-height, 50.625mm);
-    max-width: var(--ticket-print-width, 90mm); max-height: var(--ticket-print-height, 50.625mm);
-    overflow: hidden; background-color: #fff; background-position: center;
-    background-size: contain; background-repeat: no-repeat;
-    break-inside: avoid; page-break-inside: avoid;
-    print-color-adjust: exact; -webkit-print-color-adjust: exact;
-  }
-  .ticket-design-qr, .ticket-design-number { position: absolute; }
-  .ticket-design-qr { z-index: 3; aspect-ratio: 1 / 1; padding: .8%; background: #fff; transform: translate(-50%, -50%); }
-  .ticket-design-qr svg { display: block; width: 100%; height: 100%; }
-  .ticket-design-number { z-index: 2; max-width: 65%; color: #000; font-weight: bold; line-height: 1.1; white-space: nowrap; transform: translate(-50%, -50%); }
-  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-</style>
-</head>
-<body></body>
-</html>`);
-      printWindow.document.body.appendChild(sheet);
-      printWindow.document.close();
-
-      // loadイベントとreadyStateの両方から呼ばれても、印刷ダイアログは一度だけ開く。
-      let printStarted = false;
-      const startPrint = () => {
-        if (printStarted || printWindow.closed) return;
-        printStarted = true;
-        printWindow.focus();
-        printWindow.print();
-      };
-      printWindow.addEventListener("load", startPrint, { once: true });
-      if (printWindow.document.readyState === "complete") {
-        window.setTimeout(startPrint, 300);
-      }
-    } catch (error) {
-      console.error("印刷画面を開けませんでした。", error);
-      alert("印刷画面を開けませんでした。ポップアップを許可して、もう一度お試しください。");
-    }
+    window.print();
   };
 
   if (
