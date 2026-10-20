@@ -595,9 +595,18 @@ function TicketDesigner({
         return;
       }
 
-      const sheet = sourceSheet.cloneNode(true) as HTMLElement;
-      sheet.style.display = "flex";
-      sheet.style.visibility = "visible";
+      const sourceCards = Array.from(sourceSheet.querySelectorAll<HTMLElement>(".ticket-print-card"));
+      const sheetStyle = getComputedStyle(sourceSheet);
+      const widthMm = Number.parseFloat(sheetStyle.getPropertyValue("--ticket-print-width")) || 90;
+      const heightMm = Number.parseFloat(sheetStyle.getPropertyValue("--ticket-print-height")) || 50.625;
+      const gapMm = Number.parseFloat(sheetStyle.getPropertyValue("--ticket-print-gap")) || 4;
+      // A4縦・余白8mmでページ内に収まる枚数を算出し、ページ境界でチケットを分割する。
+      const pageWidthMm = 210 - 16;
+      const pageHeightMm = 297 - 16;
+      const columns = Math.max(1, Math.floor((pageWidthMm + gapMm) / (widthMm + gapMm)));
+      const rows = Math.max(1, Math.floor((pageHeightMm + gapMm) / (heightMm + gapMm)));
+      const cardsPerPage = columns * rows;
+      const pageCount = Math.ceil(sourceCards.length / cardsPerPage);
 
       printWindow.document.open();
       printWindow.document.write(`<!doctype html>
@@ -607,20 +616,31 @@ function TicketDesigner({
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${eventName || "チケット"} - 印刷</title>
 <style>
-  @page { size: auto; margin: 8mm; }
+  @page { size: A4 portrait; margin: 8mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #000; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
-  .ticket-print-sheet {
-    display: flex; flex-flow: row wrap; align-content: flex-start; align-items: flex-start;
-    justify-content: flex-start; gap: var(--ticket-print-gap, 4mm); width: 100%;
-    margin: 0; padding: 0; border: 0; background: #fff;
+  .ticket-print-page {
+    display: grid;
+    grid-template-columns: repeat(${columns}, ${widthMm}mm);
+    grid-auto-rows: ${heightMm}mm;
+    gap: ${gapMm}mm;
+    width: ${pageWidthMm}mm;
+    height: ${pageHeightMm}mm;
+    margin: 0;
+    padding: 0;
+    align-content: start;
+    justify-content: start;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
   }
+  .ticket-print-page:last-child { break-after: auto; page-break-after: auto; }
   .ticket-print-card {
-    position: relative; flex: 0 0 var(--ticket-print-width, 90mm);
-    width: var(--ticket-print-width, 90mm); height: var(--ticket-print-height, 50.625mm);
-    min-width: var(--ticket-print-width, 90mm); min-height: var(--ticket-print-height, 50.625mm);
-    max-width: var(--ticket-print-width, 90mm); max-height: var(--ticket-print-height, 50.625mm);
+    position: relative;
+    width: ${widthMm}mm; height: ${heightMm}mm;
+    min-width: ${widthMm}mm; min-height: ${heightMm}mm;
+    max-width: ${widthMm}mm; max-height: ${heightMm}mm;
     overflow: hidden; background-color: #fff; background-position: center;
     background-size: contain; background-repeat: no-repeat;
     break-inside: avoid; page-break-inside: avoid;
@@ -635,7 +655,16 @@ function TicketDesigner({
 </head>
 <body></body>
 </html>`);
-      printWindow.document.body.appendChild(sheet);
+      const body = printWindow.document.body;
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+        const page = printWindow.document.createElement("section");
+        page.className = "ticket-print-page";
+        const pageCards = sourceCards.slice(pageIndex * cardsPerPage, (pageIndex + 1) * cardsPerPage);
+        for (const sourceCard of pageCards) {
+          page.appendChild(sourceCard.cloneNode(true));
+        }
+        body.appendChild(page);
+      }
       printWindow.document.close();
 
       // loadイベントとreadyStateの両方から呼ばれても、印刷ダイアログは一度だけ開く。
