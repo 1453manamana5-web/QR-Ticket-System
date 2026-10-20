@@ -802,8 +802,14 @@ export default function App() {
       setEventHistory(current => current.map(item => item.eventId === result.event.eventId ? result.event : item));
       setBundle(result);
     } catch (reason) {
-      console.error(reason);
-      setError("イベント情報をFirebaseへ保存・公開できませんでした。Firebase設定とFirestoreの権限を確認してください。");
+      console.error("イベント保存・公開に失敗しました", reason);
+      const errorCode =
+        typeof reason === "object" && reason !== null && "code" in reason && typeof reason.code === "string"
+          ? reason.code
+          : reason instanceof Error
+            ? reason.message
+            : "UNKNOWN";
+      setError("イベント情報をFirebaseへ保存・公開できませんでした（" + errorCode + "）。Firestoreの権限、通信状態、保存済みチケットを確認してください。");
     } finally {
       setPublishing(false);
     }
@@ -922,8 +928,17 @@ export default function App() {
       }
     } catch (reason) {
       deletedEventIdsRef.current.delete(eventId);
-      console.error(reason);
-      setError("イベントをFirebaseから削除できませんでした。接続状態とFirestoreの削除権限を確認してください。");
+      console.error("イベント削除に失敗しました", reason);
+      const errorCode =
+        typeof reason === "object" && reason !== null && "code" in reason && typeof reason.code === "string"
+          ? reason.code
+          : reason instanceof Error
+            ? reason.message
+            : "UNKNOWN";
+      setError(
+        "イベントをFirebaseから削除できませんでした（" + errorCode +
+        "）。permission-denied の場合は、Firestoreルールで events 配下の各サブコレクションと eventBundles の読み取り・削除権限を確認してください。"
+      );
     }
   };
 
