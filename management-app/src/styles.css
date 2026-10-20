@@ -413,9 +413,7 @@
 .ticket-home-grid .ticket-status-box{
   min-height:100px;
 }
-.ticket-home-grid .ticket-status-heading h2{
-  margin-bottom:9px;
-}
+
 .ticket-home-grid .ticket-status-heading>strong{
   font-size:34px;
 }
@@ -574,7 +572,7 @@ body:has(.ticket-screen),
 .ticket-home-grid .ticket-status-grid{
   height:calc(100% - 55px);
 }
-.ticket-back-button{display:none!important}
+
 
 @media(min-width:900px){
   .ticket-home-grid{
