@@ -2,18 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
+import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
-
-const baseEvent: Event = {
-  eventId: "",
-  eventName: "",
-  eventDate: "",
-  startTime: "",
-  endTime: "",
-  eventStatus: "preparing",
-  dataVersion: 1,
-};
 
 type AnalysisRecord = {
   eventId: string;
@@ -74,61 +65,6 @@ const statusLabel: Record<Event["eventStatus"], string> = {
   finalizing: "終了処理中",
   finished: "終了",
 };
-
-function createEventId() {
-  const now = new Date();
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("");
-  const random = crypto.getRandomValues(new Uint32Array(1))[0].toString(36).toUpperCase().slice(0, 4);
-  return `EV-${stamp}-${random}`;
-}
-
-function createTickets(eventId: string, count: number, startNumber = 1, prefix = "TKT"): Ticket[] {
-  return Array.from({ length: count }, (_, index) => {
-    const ticketNumber = startNumber + index;
-    const id = `${prefix}${String(ticketNumber).padStart(6, "0")}`;
-    return {
-      ticketId: id,
-      eventId,
-      basicInfo: { ticketNumber },
-      currentStatus: "unused",
-      valid: true,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-}
-
-function ticketQrValue(eventId: string, ticket: Ticket) {
-  return JSON.stringify({
-    type: "qr-ticket",
-    eventId,
-    ticketId: ticket.ticketId,
-    ticketNumber: ticket.basicInfo.ticketNumber,
-  });
-}
-
-function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
-  if (status === "preparing") return "ready";
-  if (status === "ready") return "active";
-  if (status === "active") return "finalizing";
-  if (status === "finalizing") return "finished";
-  return "finished";
-}
-
-function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
-  const startAt = new Date(target.eventDate + "T" + target.startTime + ":00");
-  const endAt = new Date(target.eventDate + "T" + target.endTime + ":00");
-  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
-
-  const now = new Date();
-  if (now >= endAt && target.eventStatus !== "finalizing" && target.eventStatus !== "finished") return "finalizing";
-  if (now >= startAt && (target.eventStatus === "preparing" || target.eventStatus === "ready")) return "active";
-  return null;
-}
-
 
 export default function App() {
   const [page, setPage] = useState("ホーム");
