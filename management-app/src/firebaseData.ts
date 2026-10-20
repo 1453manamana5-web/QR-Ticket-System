@@ -92,11 +92,38 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
 
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
   const db = getFirebaseDb();
-  // Firestoreの1バッチ上限を避け、数百〜数千枚でも確実に保存する。
-  for (let start = 0; start < tickets.length; start += 450) {
+  // この関数は一覧全体の保存として扱い、一覧から消えた古いドキュメントも同期する。
+  // 既存データをサーバーから取得してから更新し、オフラインキャッシュで削除対象を誤判定しない。
+  const existingSnapshot = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
+  const desiredIds = new Set<string>();
+  for (const ticket of tickets) {
+    if (!ticket.ticketId || desiredIds.has(ticket.ticketId)) {
+      throw new Error("INVALID_OR_DUPLICATE_TICKET_ID");
+    }
+    if (ticket.eventId !== eventId) {
+      throw new Error("TICKET_EVENT_ID_MISMATCH");
+    }
+    desiredIds.add(ticket.ticketId);
+  }
+
+  const writes: Array<{ kind: "delete"; ref: ReturnType<typeof doc> } | { kind: "set"; ref: ReturnType<typeof doc>; ticket: Ticket }> = [];
+  for (const existing of existingSnapshot.docs) {
+    if (!desiredIds.has(existing.id)) writes.push({ kind: "delete", ref: existing.ref });
+  }
+  for (const ticket of tickets) {
+    writes.push({
+      kind: "set",
+      ref: doc(db, "events", eventId, "tickets", ticket.ticketId),
+      ticket,
+    });
+  }
+
+  // Firestoreの1バッチ上限より少ない件数で削除・更新を分割する。
+  for (let start = 0; start < writes.length; start += 450) {
     const batch = writeBatch(db);
-    for (const ticket of tickets.slice(start, start + 450)) {
-      batch.set(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
+    for (const write of writes.slice(start, start + 450)) {
+      if (write.kind === "delete") batch.delete(write.ref);
+      else batch.set(write.ref, write.ticket);
     }
     await batch.commit();
   }
