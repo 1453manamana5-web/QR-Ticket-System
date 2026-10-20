@@ -9,15 +9,33 @@ export type AnalysisRecord = { eventId: string; eventName: string; eventDate: st
 export async function deleteEvent(eventId: string): Promise<void> {
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
+  const eventRef = doc(db, "events", eventId);
 
-  // Firestoreでは親ドキュメントを削除してもサブコレクションは残るため、
-  // イベント配下の運用データもまとめて削除する。
+  // 削除対象のイベントと公開バンドル参照を先にサーバーから確認する。
+  const eventSnapshot = await getDocFromServer(eventRef);
+  const authToken = eventSnapshot.exists() && typeof eventSnapshot.data().authToken === "string"
+    ? eventSnapshot.data().authToken as string
+    : "";
+
+  // 親ドキュメントの削除だけではサブコレクションは消えない。
+  // 大量チケットでも安定して削除できるよう、Firestoreのバッチ上限より少ない件数で分割する。
   const subcollections = ["tickets", "receptionRecords", "analysis", "members", "settings"] as const;
   for (const subcollection of subcollections) {
-    const snapshot = await getDocs(collection(db, "events", eventId, subcollection));
-    await Promise.all(snapshot.docs.map(item => deleteDoc(item.ref)));
+    const snapshot = await getDocsFromServer(collection(db, "events", eventId, subcollection));
+    for (let start = 0; start < snapshot.docs.length; start += 450) {
+      const batch = writeBatch(db);
+      for (const item of snapshot.docs.slice(start, start + 450)) {
+        batch.delete(item.ref);
+      }
+      await batch.commit();
+    }
   }
-  await deleteDoc(doc(db, "events", eventId));
+
+  // 公開バンドルを先に削除し、失敗した場合にイベント本体を残して再試行できるようにする。
+  if (authToken) {
+    await deleteDoc(doc(db, "eventBundles", authToken));
+  }
+  await deleteDoc(eventRef);
 }
 export async function saveEvent(event: Event): Promise<void> {
   const db = getFirebaseDb();

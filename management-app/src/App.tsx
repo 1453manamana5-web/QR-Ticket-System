@@ -700,6 +700,8 @@ export default function App() {
     };
 
     const syncAutomaticStatus = () => {
+      // 削除処理中のイベントを自動状態更新で再作成しない。
+      if (deletedEventIdsRef.current.has(event.eventId)) return;
       const next = getAutomaticEventStatus(event);
 
       if (next === "finalizing") {
@@ -925,28 +927,49 @@ export default function App() {
     }
   };
 
+  const [ticketGenerating, setTicketGenerating] = useState(false);
+
   const generateTickets = async () => {
-    const count = Math.min(5000, Math.max(1, ticketCount));
+    if (!event.eventId) {
+      setError("先にイベントを選択してください。");
+      return;
+    }
+    const count = Math.floor(ticketCount);
+    if (!Number.isFinite(count) || count < 1 || count > 5000) {
+      setError("発行枚数は1〜5000枚で指定してください。");
+      return;
+    }
+    if (ticketGenerating) return;
+
     const prefix = ticketPrefix.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "TKT";
     setTicketPrefix(prefix);
-
-    const existingMaxNumber = tickets.reduce((max, ticket) => {
-      const number = Number(ticket.basicInfo.ticketNumber);
-      return Number.isFinite(number) ? Math.max(max, number) : max;
-    }, 0);
-    const startNumber = Math.max(1, existingMaxNumber + 1);
-    setTicketStartNumber(startNumber);
-
-    const generated = createTickets(event.eventId, count, startNumber, prefix);
-    const merged = [...tickets, ...generated];
-    setTickets(merged);
-    setTicketStatusFilter("all");
+    setTicketGenerating(true);
     setError("");
     try {
+      // React stateは購読更新の途中で古い場合があるため、発行前にサーバーの正本を読む。
+      const savedTickets = await loadEventTickets(event.eventId);
+      const existingMaxNumber = savedTickets.reduce((max, ticket) => {
+        const number = Number(ticket.basicInfo.ticketNumber);
+        return Number.isFinite(number) ? Math.max(max, number) : max;
+      }, 0);
+      const startNumber = Math.max(1, existingMaxNumber + 1);
+      setTicketStartNumber(startNumber);
+
+      const generated = createTickets(event.eventId, count, startNumber, prefix);
+      const mergedById = new Map(savedTickets.map(ticket => [ticket.ticketId, ticket]));
+      for (const ticket of generated) mergedById.set(ticket.ticketId, ticket);
+      const merged = [...mergedById.values()];
+
+      // 保存と件数同期が成功してから画面を更新し、失敗時に成功したように見せない。
       await saveTickets(event.eventId, merged);
+      setTickets(merged);
+      setTicketStatusFilter("all");
+      setTicketCreateModalOpen(false);
     } catch (reason) {
-      console.error(reason);
-      setError("チケットをFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
+      console.error("Ticket generation/save failed", reason);
+      setError("チケットをFirebaseへ保存できませんでした。接続・Firestoreの権限を確認してください。入力内容は保存されていません。");
+    } finally {
+      setTicketGenerating(false);
     }
   };
 
@@ -1930,7 +1953,7 @@ export default function App() {
           </div>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
-            <button className="ticket-modal-primary" onClick={() => { void generateTickets(); setTicketCreateModalOpen(false); }}>QR・チケットを発行</button>
+            <button className="ticket-modal-primary" disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
           </div>
         </div>
       </div>}
