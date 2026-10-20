@@ -923,7 +923,7 @@ export default function App() {
     } catch (reason) {
       deletedEventIdsRef.current.delete(eventId);
       console.error(reason);
-      setError("イベントをFirebaseから削除できませんでした。権限・接続を確認してください。削除権限または接続状態を確認してください。");
+      setError("イベントをFirebaseから削除できませんでした。接続状態とFirestoreの削除権限を確認してください。");
     }
   };
 
@@ -1035,13 +1035,21 @@ export default function App() {
     });
   };
 
-  const deleteTicket = (ticketId: string) => {
+  const deleteTicket = async (ticketId: string) => {
     if (!window.confirm("このチケットを削除しますか？")) return;
-    setTickets(current => current.filter(ticket => ticket.ticketId !== ticketId));
-    void deleteFirebaseTicket(event.eventId, ticketId).catch(reason => {
-      console.error(reason);
-      setError("チケットをFirebaseから削除できませんでした。");
-    });
+    setError("");
+    try {
+      // Firebaseで削除と件数同期が完了するまで、画面から先に消さない。
+      await deleteFirebaseTicket(event.eventId, ticketId);
+    } catch (reason) {
+      console.error("Ticket deletion failed", reason);
+      const code = typeof reason === "object" && reason !== null && "code" in reason
+        ? String((reason as { code: unknown }).code)
+        : "";
+      setError(code === "permission-denied"
+        ? "チケットを削除できません。Firestoreの削除権限を確認してください。"
+        : "チケットをFirebaseから削除できませんでした。接続状態を確認して再試行してください。");
+    }
   };
 
   const eventDataQrValue = bundle ? JSON.stringify({
