@@ -1,8 +1,6 @@
-import { deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, setDoc } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
-import { getFirebaseDb } from "./firebaseClient";
 import { callBackend } from "./firebaseFunctions";
 
 
@@ -75,67 +73,11 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   );
 }
 
-let networkSpeedCache: number | null = null;
-let networkSpeedMeasuredAt = 0;
-const NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
-const NETWORK_PROBE_SIZE_BYTES = 32768;
-
 function getBrowserDownlink(): number | null {
   if (typeof navigator === "undefined") return null;
-
-  const connection = (navigator as Navigator & {
-    connection?: { downlink?: number };
-    mozConnection?: { downlink?: number };
-    webkitConnection?: { downlink?: number };
-  }).connection
-    ?? (navigator as Navigator & { mozConnection?: { downlink?: number } }).mozConnection
-    ?? (navigator as Navigator & { webkitConnection?: { downlink?: number } }).webkitConnection;
-
-  const downlink = connection?.downlink;
-  return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
-}
-
-function createNetworkProbe(): string {
-  return "0123456789abcdef".repeat(NETWORK_PROBE_SIZE_BYTES / 16);
-}
-
-async function measureNetworkSpeed(
-  db: ReturnType<typeof getFirebaseDb>,
-  reference: ReturnType<typeof doc>,
-): Promise<number | null> {
-  const now = Date.now();
-  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) {
-    return networkSpeedCache;
-  }
-
-  const browserDownlink = getBrowserDownlink();
-  if (browserDownlink !== null) {
-    networkSpeedCache = browserDownlink;
-    networkSpeedMeasuredAt = now;
-    return browserDownlink;
-  }
-
-  try {
-    const probe = createNetworkProbe();
-    const startedAt = performance.now();
-    await setDoc(reference, {
-      networkProbe: probe,
-      networkProbeAt: new Date().toISOString(),
-    }, { merge: true });
-    await getDocFromServer(reference);
-
-    const elapsedMs = Math.max(1, performance.now() - startedAt);
-    const roundTripBytes = probe.length * 2;
-    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
-    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
-
-    networkSpeedCache = normalized;
-    networkSpeedMeasuredAt = Date.now();
-    return normalized;
-  } catch (reason) {
-    console.warn("通信速度の測定に失敗しました", reason);
-    return networkSpeedCache;
-  }
+  const connection = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
+  const value = connection?.downlink;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
