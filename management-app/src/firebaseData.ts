@@ -191,6 +191,35 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
   );
 }
 
+function getManagerTerminalId(): string {
+  return localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+}
+export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
+  await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
+    "registerTerminalApplication", input,
+  );
+}
+export async function approveTerminal(targetTerminalId: string): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { approved: boolean }>(
+    "approveTerminalRegistration", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
+  );
+}
+export async function setManagedTerminalMode(targetTerminalId: string, mode: "入口受付" | "出口受付" | "停止"): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string; mode: string }, { updated: boolean }>(
+    "setManagedTerminalMode", { managerTerminalId: getManagerTerminalId(), targetTerminalId, mode },
+  );
+}
+export async function setManagedSubAdmin(targetTerminalId: string, enabled: boolean): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string; enabled: boolean }, { updated: boolean }>(
+    "setTerminalSubAdmin", { managerTerminalId: getManagerTerminalId(), targetTerminalId, enabled },
+  );
+}
+export async function revokeManagedReception(targetTerminalId: string): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { released: boolean }>(
+    "revokeTerminalReception", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
+  );
+}
+
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
   const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
   if (!ownTerminalId || terminal.terminalId !== ownTerminalId) {
