@@ -101,6 +101,15 @@ test("event deletion also removes the separately stored published bundle", async
     authToken: "published-bundle-token",
     eventStatus: "ready",
   });
+  await db.doc("events/event-to-delete/tickets/ticket-private").set({
+    ticketId: "ticket-private", currentStatus: "unused",
+  });
+  await db.doc("events/event-to-delete/receptionRecords/record-private").set({
+    recordId: "record-private", ticketId: "ticket-private",
+  });
+  await db.doc("events/event-to-delete/analysis/analysis-private").set({
+    eventId: "event-to-delete", total: 1,
+  });
   await db.doc("eventBundles/published-bundle-token").set({
     authToken: "published-bundle-token",
     event: { eventId: "event-to-delete" },
@@ -111,5 +120,8 @@ test("event deletion also removes the separately stored published bundle", async
     eventId: "event-to-delete",
   }), { eventId: "event-to-delete", deleted: true });
   assert.equal((await db.doc("events/event-to-delete").get()).exists, false);
+  assert.equal((await db.doc("events/event-to-delete/tickets/ticket-private").get()).exists, false);
+  assert.equal((await db.doc("events/event-to-delete/receptionRecords/record-private").get()).exists, false);
+  assert.equal((await db.doc("events/event-to-delete/analysis/analysis-private").get()).exists, false);
   assert.equal((await db.doc("eventBundles/published-bundle-token").get()).exists, false);
 });
