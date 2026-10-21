@@ -1364,7 +1364,15 @@ export const deleteManagedEvent = onCall(async (call) => {
   if (!eventSnap.exists) {
     return { eventId, deleted: false };
   }
+
+  // Published bundles live in a separate top-level collection, outside the
+  // event's recursive-delete tree. Remove the exact bundle token as well so
+  // deleted events do not leave stale ticket payloads in Firestore.
+  const authToken = eventSnap.get("authToken");
   await db.recursiveDelete(eventRef);
+  if (typeof authToken === "string" && authToken.length > 0 && !authToken.includes("/")) {
+    await db.doc("eventBundles/" + authToken).delete();
+  }
   return { eventId, deleted: true };
 });
 
