@@ -690,6 +690,13 @@ export default function App() {
             (terminal.receptionApproved === true || terminal.receptionApproved === undefined)
           )
           .map(terminal => revokeManagedReception(terminal.terminalId)));
+        if (terminals.some(terminal =>
+          terminal.terminalId === firebaseDeviceId &&
+          (terminal.role === "reception" || terminal.role === "both") &&
+          terminal.receptionApproved !== false
+        )) {
+          await releaseOwnReception();
+        }
         setTerminals(released);
         setSelectedTerminalId(null);
         setTerminalNotice("受付データの回収が完了しました。受付機能の認証を解除しました。");
