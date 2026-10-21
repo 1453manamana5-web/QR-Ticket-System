@@ -780,6 +780,23 @@ export const deleteManagedTerminal = onCall(async (call) => {
 });
 
 /** Let an installation release only its own reception permission. */
+export const cancelOwnTerminalApplication = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const applicationRef = db.doc("terminalApplications/" + terminalId);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const [application, terminal] = await Promise.all([applicationRef.get(), terminalRef.get()]);
+  if (!application.exists || application.get("requestedByUid") !== uid ||
+      application.get("status") !== "pending") {
+    throw new HttpsError("permission-denied", "取り消せる自分の未承認申請がありません。");
+  }
+  if (terminal.exists && terminal.get("approved") === true) {
+    throw new HttpsError("failed-precondition", "承認済み端末は受付権限の解除手続きを使用してください。");
+  }
+  await applicationRef.delete();
+  return { terminalId, cancelled: true };
+});
+
 export const releaseOwnReceptionRegistration = onCall(async (call) => {
   const uid = requireUid(call);
   const terminalId = readId(call.data?.terminalId, "端末ID");
