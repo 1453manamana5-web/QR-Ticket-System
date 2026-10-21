@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.migration.json --noEmit",
-    "build:migration": "tsc -p tsconfig.migration.json"
+    "build:migration": "tsc -p tsconfig.migration.json",
+    "reset:terminals": "npm run build:migration && node lib-migration/scripts/reset-terminal-data.js"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0",
