@@ -223,6 +223,12 @@ export async function setManagedSubAdmin(targetTerminalId: string, enabled: bool
     "setTerminalSubAdmin", { managerTerminalId: getManagerTerminalId(), targetTerminalId, enabled },
   );
 }
+export async function releaseOwnReception(): Promise<void> {
+  const terminalId = getManagerTerminalId();
+  await callBackend<{ terminalId: string }, { released: boolean }>(
+    "releaseOwnReceptionRegistration", { terminalId },
+  );
+}
 export async function revokeManagedReception(targetTerminalId: string): Promise<void> {
   await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { released: boolean }>(
     "revokeTerminalReception", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
