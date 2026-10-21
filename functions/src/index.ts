@@ -418,9 +418,8 @@ export const listManagedTerminals = onCall(async (call) => {
       installation.get("authUid") !== uid || installation.get("terminalId") !== managerTerminalId ||
       installation.get("approved") !== true || manager.get("approved") !== true ||
       manager.get("managementApproved") !== true ||
-      (manager.get("role") !== "management" && manager.get("role") !== "both") ||
-      (manager.get("admin") !== true && manager.get("subAdmin") !== true)) {
-    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+      (manager.get("role") !== "management" && manager.get("role") !== "both")) {
+    throw new HttpsError("permission-denied", "登録済みの管理端末から実行してください。");
   }
   const snapshot = await db.collection("terminals").get();
   return {
