@@ -45,6 +45,9 @@ async function main() {
   if (keepOwnerUid && (keepOwnerUid.length < 8 || keepOwnerUid.length > 128)) {
     throw new Error("RESET_KEEP_OWNER_UID must be a valid Firebase Auth UID.");
   }
+  if (Boolean(keepTerminalId) !== Boolean(keepOwnerUid)) {
+    throw new Error("Set both RESET_KEEP_TERMINAL_ID and RESET_KEEP_OWNER_UID together, or omit both for a non-destructive preview.");
+  }
   if (apply && (!keepTerminalId || !keepOwnerUid)) {
     throw new Error("Apply requires both RESET_KEEP_TERMINAL_ID and RESET_KEEP_OWNER_UID to preserve the recovery admin.");
   }
@@ -52,7 +55,9 @@ async function main() {
   initializeApp({ credential: applicationDefault(), projectId });
   const db = getFirestore();
 
-  if (apply) {
+  // Validate the preservation target in both dry-run and apply mode. This avoids
+  // presenting a preview as safe when the supposed recovery admin is not valid.
+  if (keepTerminalId && keepOwnerUid) {
     const [terminal, owner, installation] = await Promise.all([
       db.doc("terminals/" + keepTerminalId).get(),
       db.doc("terminalOwners/" + keepTerminalId).get(),
