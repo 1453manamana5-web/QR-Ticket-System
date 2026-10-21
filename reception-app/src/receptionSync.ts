@@ -1,8 +1,6 @@
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
-import { getFirebaseDb } from "./firebaseClient";
 import { getTerminalInstallationStatus, releaseOwnReceptionRegistration, submitReceptionRecord } from "./terminalHandoff";
 
 
@@ -101,10 +99,7 @@ function getBrowserDownlink(): number | null {
   return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
 }
 
-async function measureNetworkSpeed(
-  _db: ReturnType<typeof getFirebaseDb>,
-  _reference: ReturnType<typeof doc>,
-): Promise<number | null> {
+async function measureNetworkSpeed(): Promise<number | null> {
   const now = Date.now();
   if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) return networkSpeedCache;
   // Do not write probe payloads into the terminal document. Use browser-provided
@@ -119,40 +114,43 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
   const pendingCount = typeof syncPendingCount === "number"
     ? syncPendingCount
     : (await getPendingSyncItems()).length;
-  const db = getFirebaseDb();
-  const reference = doc(db, "terminals", terminalId);
-  const networkMbps = await measureNetworkSpeed(db, reference);
+  const networkMbps = await measureNetworkSpeed();
   const { updateTerminalHeartbeat } = await import("./terminalHandoff");
   const modeLabel = mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止";
   await updateTerminalHeartbeat(terminalId, modeLabel, pendingCount, networkMbps);
   return networkMbps;
 }
 
-export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
-  if (localStorage.getItem("qr-ticket-terminal-handoff-verified") === "true") {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const status = await getTerminalInstallationStatus();
-        if (cancelled || !status.approved || status.terminalId !== terminalId) return;
-        const value = status.desiredMode;
-        if (value === "入口受付" || value === "出口受付" || value === "停止") {
-          onMode(value, status.desiredModeUpdatedAt ?? null);
-        }
-      } catch (error) {
-        if (!cancelled) onError(error);
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }
-  const db = getFirebaseDb();
-  return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
-    const value = snapshot.data()?.desiredMode;
-    if (value === "入口受付" || value === "出口受付" || value === "停止") { const updatedAt = snapshot.data()?.desiredModeUpdatedAt; onMode(value, typeof updatedAt === "string" ? updatedAt : null); }
-  }, onError);
+export function subscribeTerminalControl(
+  terminalId: string,
+  onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void,
+  onError: (error: unknown) => void,
+): () => void {
+  // Strict Firestore rules deliberately prevent reception clients from reading
+  // terminal documents. Read the desired mode only through the authenticated
+  // server endpoint, even before the local verification marker is populated.
+  let cancelled = false;
+  let lastMode: string | null = null;
+  let lastUpdatedAt: string | null = null;
+  const refresh = async () => {
+    try {
+      const status = await getTerminalInstallationStatus();
+      if (cancelled || !status.approved || status.terminalId !== terminalId) return;
+      const mode = status.desiredMode;
+      if (mode !== "入口受付" && mode !== "出口受付" && mode !== "停止") return;
+      const updatedAt = status.desiredModeUpdatedAt ?? null;
+      if (mode === lastMode && updatedAt === lastUpdatedAt) return;
+      lastMode = mode;
+      lastUpdatedAt = updatedAt;
+      onMode(mode, updatedAt);
+    } catch (error) {
+      if (!cancelled) onError(error);
+    }
+  };
+  void refresh();
+  const interval = window.setInterval(() => void refresh(), 5000);
+  return () => {
+    cancelled = true;
+    window.clearInterval(interval);
+  };
 }
