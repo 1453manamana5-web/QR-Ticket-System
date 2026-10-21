@@ -622,17 +622,29 @@ function TicketDesigner({
     line-height: 0;
     text-align: left;
   }
+  .ticket-print-row {
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: flex-start;
+    gap: var(--ticket-print-gap, 4mm);
+    width: max-content;
+    max-width: 100%;
+    margin: 0 0 var(--ticket-print-gap, 4mm);
+    break-inside: avoid;
+    page-break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+  }
   .ticket-print-card {
     position: relative;
-    display: inline-block;
-    vertical-align: top;
+    display: block;
+    flex: 0 0 var(--ticket-print-width, 90mm);
     width: var(--ticket-print-width, 90mm);
     height: var(--ticket-print-height, 50.625mm);
     min-width: var(--ticket-print-width, 90mm);
     min-height: var(--ticket-print-height, 50.625mm);
     max-width: var(--ticket-print-width, 90mm);
     max-height: var(--ticket-print-height, 50.625mm);
-    margin: 0 var(--ticket-print-gap, 4mm) var(--ticket-print-gap, 4mm) 0;
+    margin: 0;
     padding: 0;
     box-sizing: border-box;
     overflow: hidden;
@@ -676,6 +688,7 @@ function TicketDesigner({
     html, body { margin: 0; padding: 0; width: auto; height: auto; overflow: visible; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .ticket-print-sheet { break-inside: auto; page-break-inside: auto; }
+    .ticket-print-row { break-inside: avoid; page-break-inside: avoid; }
     .ticket-print-card { break-inside: avoid; page-break-inside: avoid; }
   }
 </style>
@@ -1571,46 +1584,59 @@ function TicketDesigner({
         className="ticket-print-sheet"
         style={printSheetStyle}
       >
-        {selectedTickets.map(
-          (ticket) => (
-            <div
-              key={ticket.id}
-              className="ticket-print-card"
-              style={{
-                backgroundImage:
-                  settings.backgroundImage ===
-                  ""
-                    ? undefined
-                    : `url("${settings.backgroundImage}")`,
-              }}
-            >
-              <div
-                className="ticket-design-qr"
-                style={{
-                  left: `${settings.qrX}%`,
-                  top: `${settings.qrY}%`,
-                  width: `${settings.qrSize}%`,
-                }}
-              >
-                <LazyQrCode
-                  value={qrValue(ticket)}
-                  size={500}
-                  level="M"
-                  marginSize={1}
-                />
-              </div>
+        {Array.from(
+          {
+            length: Math.ceil(
+              selectedTickets.length /
+              Math.max(1, Math.min(4, settings.cardsPerRow))
+            ),
+          },
+          (_, rowIndex) => (
+            <div className="ticket-print-row" key={`print-row-${rowIndex}`}>
+              {selectedTickets
+                .slice(
+                  rowIndex * Math.max(1, Math.min(4, settings.cardsPerRow)),
+                  (rowIndex + 1) * Math.max(1, Math.min(4, settings.cardsPerRow))
+                )
+                .map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    className="ticket-print-card"
+                    style={{
+                      backgroundImage:
+                        settings.backgroundImage === ""
+                          ? undefined
+                          : `url("${settings.backgroundImage}")`,
+                    }}
+                  >
+                    <div
+                      className="ticket-design-qr"
+                      style={{
+                        left: `${settings.qrX}%`,
+                        top: `${settings.qrY}%`,
+                        width: `${settings.qrSize}%`,
+                      }}
+                    >
+                      <LazyQrCode
+                        value={qrValue(ticket)}
+                        size={500}
+                        level="M"
+                        marginSize={1}
+                      />
+                    </div>
 
-              <div
-                className="ticket-design-number"
-                style={{
-                  left: `${settings.numberX}%`,
-                  top: `${settings.numberY}%`,
-                  fontSize:
-                    `${settings.numberSize}px`,
-                }}
-              >
-                {ticket.qrNumber}
-              </div>
+                    <div
+                      className="ticket-design-number"
+                      style={{
+                        left: `${settings.numberX}%`,
+                        top: `${settings.numberY}%`,
+                        fontSize: `${settings.numberSize}px`,
+                      }}
+                    >
+                      {ticket.qrNumber}
+                    </div>
+                  </div>
+                ))}
             </div>
           )
         )}
