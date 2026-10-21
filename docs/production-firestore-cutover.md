@@ -22,6 +22,19 @@
 
 本番の既存データが旧形式なら、`functions/scripts/migrate-terminal-owners.ts` の create-only 移行を使い、確認済みの管理者端末IDとUIDの組を登録する。まず必ずドライランで出力を確認し、プロジェクトID・端末ID・UID・既存の承認状態がすべて一致する場合だけ本実行する。
 
+例（値は実際に確認したものへ置き換える）。ドライランでは書き込みは発生しない。
+
+\`\`\`sh
+gcloud auth application-default login
+npm --prefix functions install
+npm --prefix functions run build:migration
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" \\\
+TERMINAL_OWNER_MIGRATION_JSON='[{"terminalId":"T-REPLACE","ownerUid":"UID-REPLACE"}]' \\\
+node functions/lib-migration/scripts/migrate-terminal-owners.js
+\`\`\`
+
+本実行する場合は、別途確認後に同じコマンドへ \`MIGRATION_APPLY=true\` を追加する。\`MIGRATION_DRY_RUN=true\` が設定されている場合は \`MIGRATION_APPLY=true\` でもドライランのままになる。
+
 この段階で管理者端末が未承認・不明・競合状態なら、先に進まない。端末リセットを先に実行すると管理者の復旧経路まで失う可能性がある。
 
 ### 3. Functionsを先にデプロイ
