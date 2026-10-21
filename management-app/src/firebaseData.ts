@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { getFirebaseDb } from "./firebaseClient";
+import { getFirebaseDb, getFirebaseUid } from "./firebaseClient";
+import { callBackend } from "./firebaseFunctions";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
 export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
@@ -180,25 +181,14 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
-  const ownTerminalId =
-    typeof window !== "undefined"
-      ? localStorage.getItem("qr-ticket-terminal-id") ??
-        localStorage.getItem("qr-ticket-device-id")
-      : null;
-
-  if (ownTerminalId !== null && terminalId === ownTerminalId) {
-    throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  const db = getFirebaseDb();
-  const { deleteDoc, getDoc } = await import("firebase/firestore");
-  const targetRef = doc(db, "terminals", terminalId);
-  const targetSnapshot = await getDoc(targetRef);
-  if (targetSnapshot.exists() && targetSnapshot.data().admin === true) {
-    throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  await deleteDoc(targetRef);
+  const ownTerminalId = typeof window !== "undefined"
+    ? localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id")
+    : null;
+  if (ownTerminalId && terminalId === ownTerminalId) throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { deleted: boolean }>(
+    "deleteManagedTerminal",
+    { managerTerminalId: ownTerminalId ?? "", targetTerminalId: terminalId },
+  );
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
@@ -349,13 +339,30 @@ export async function loadReceptionErrors(eventId: string): Promise<ReceptionErr
 }
 
 export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => void, onError: (error: unknown) => void): () => void {
-  const db = getFirebaseDb();
-  return onSnapshot(collection(db, "terminals"), snapshot => onChange(snapshot.docs.map(item => item.data() as TerminalRecord)), onError);
+  let active = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const refresh = async () => {
+    try {
+      const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+      const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
+        "listManagedTerminals", { managerTerminalId },
+      );
+      if (active) onChange(result.terminals);
+    } catch (error) {
+      if (active) onError(error);
+    } finally {
+      if (active) timer = setTimeout(() => { void refresh(); }, 5000);
+    }
+  };
+  void refresh();
+  return () => { active = false; if (timer) clearTimeout(timer); };
 }
 export async function loadTerminals(): Promise<TerminalRecord[]> {
-  const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "terminals"));
-  return snapshot.docs.map(item => item.data() as TerminalRecord);
+  const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+  const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
+    "listManagedTerminals", { managerTerminalId },
+  );
+  return result.terminals;
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();
