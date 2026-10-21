@@ -612,25 +612,71 @@ function TicketDesigner({
   html, body { margin: 0; padding: 0; background: #fff; color: #000; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
   .ticket-print-sheet {
-    display: flex; flex-flow: row wrap; align-content: flex-start; align-items: flex-start;
-    justify-content: flex-start; gap: var(--ticket-print-gap, 4mm); width: 100%;
-    margin: 0; padding: 0; border: 0; background: #fff;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, var(--ticket-print-width, 90mm));
+    grid-auto-rows: var(--ticket-print-height, 50.625mm);
+    align-content: start;
+    justify-content: start;
+    gap: var(--ticket-print-gap, 4mm);
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: #fff;
   }
   .ticket-print-card {
-    position: relative; flex: 0 0 var(--ticket-print-width, 90mm);
-    width: var(--ticket-print-width, 90mm); height: var(--ticket-print-height, 50.625mm);
-    min-width: var(--ticket-print-width, 90mm); min-height: var(--ticket-print-height, 50.625mm);
-    max-width: var(--ticket-print-width, 90mm); max-height: var(--ticket-print-height, 50.625mm);
-    overflow: hidden; background-color: #fff; background-position: center;
-    background-size: contain; background-repeat: no-repeat;
-    break-inside: avoid; page-break-inside: avoid;
-    print-color-adjust: exact; -webkit-print-color-adjust: exact;
+    position: relative;
+    display: block;
+    width: var(--ticket-print-width, 90mm);
+    height: var(--ticket-print-height, 50.625mm);
+    min-width: 0;
+    min-height: 0;
+    max-width: var(--ticket-print-width, 90mm);
+    max-height: var(--ticket-print-height, 50.625mm);
+    box-sizing: border-box;
+    overflow: hidden;
+    background-color: #fff;
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   .ticket-design-qr, .ticket-design-number { position: absolute; }
-  .ticket-design-qr { z-index: 3; aspect-ratio: 1 / 1; padding: .8%; background: #fff; transform: translate(-50%, -50%); }
-  .ticket-design-qr svg { display: block; width: 100%; height: 100%; }
-  .ticket-design-number { z-index: 2; max-width: 65%; color: #000; font-weight: bold; line-height: 1.1; white-space: nowrap; transform: translate(-50%, -50%); }
-  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  .ticket-design-qr {
+    z-index: 3;
+    aspect-ratio: 1 / 1;
+    box-sizing: border-box;
+    padding: .8%;
+    background: #fff;
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+  }
+  .ticket-design-qr svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+  }
+  .ticket-design-number {
+    z-index: 2;
+    max-width: 65%;
+    color: #000;
+    font-weight: bold;
+    line-height: 1.1;
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+  }
+  @media print {
+    html, body { margin: 0; padding: 0; width: auto; height: auto; overflow: visible; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .ticket-print-sheet { break-inside: auto; page-break-inside: auto; }
+    .ticket-print-card { break-inside: avoid-page; page-break-inside: avoid; }
+  }
 </style>
 </head>
 <body></body>
