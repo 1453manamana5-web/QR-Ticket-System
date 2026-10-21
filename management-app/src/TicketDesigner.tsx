@@ -596,7 +596,7 @@ function TicketDesigner({
       }
 
       const sheet = sourceSheet.cloneNode(true) as HTMLElement;
-      sheet.style.display = "flex";
+      sheet.style.display = "grid";
       sheet.style.visibility = "visible";
 
       printWindow.document.open();
