@@ -194,6 +194,15 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
 function getManagerTerminalId(): string {
   return localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
 }
+export async function getOwnTerminalStatus(): Promise<{
+  approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
+  role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
+}> {
+  return callBackend<Record<string, never>, {
+    approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
+    role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
+  }>("getTerminalInstallationStatus", {});
+}
 export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
   await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
     "registerTerminalApplication", input,
