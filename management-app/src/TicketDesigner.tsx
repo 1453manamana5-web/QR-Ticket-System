@@ -596,7 +596,7 @@ function TicketDesigner({
       }
 
       const sheet = sourceSheet.cloneNode(true) as HTMLElement;
-      sheet.style.display = "grid";
+      sheet.style.display = "block";
       sheet.style.visibility = "visible";
 
       printWindow.document.open();
@@ -612,34 +612,35 @@ function TicketDesigner({
   html, body { margin: 0; padding: 0; background: #fff; color: #000; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
   .ticket-print-sheet {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, var(--ticket-print-width, 90mm));
-    grid-auto-rows: var(--ticket-print-height, 50.625mm);
-    align-content: start;
-    justify-content: start;
-    gap: var(--ticket-print-gap, 4mm);
+    display: block;
     width: 100%;
     margin: 0;
     padding: 0;
     border: 0;
     background: #fff;
+    font-size: 0;
+    line-height: 0;
+    text-align: left;
   }
   .ticket-print-card {
     position: relative;
-    display: block;
+    display: inline-block;
+    vertical-align: top;
     width: var(--ticket-print-width, 90mm);
     height: var(--ticket-print-height, 50.625mm);
-    min-width: 0;
-    min-height: 0;
+    min-width: var(--ticket-print-width, 90mm);
+    min-height: var(--ticket-print-height, 50.625mm);
     max-width: var(--ticket-print-width, 90mm);
     max-height: var(--ticket-print-height, 50.625mm);
+    margin: 0 var(--ticket-print-gap, 4mm) var(--ticket-print-gap, 4mm) 0;
+    padding: 0;
     box-sizing: border-box;
     overflow: hidden;
     background-color: #fff;
     background-position: center;
     background-size: contain;
     background-repeat: no-repeat;
-    break-inside: avoid-page;
+    break-inside: avoid;
     page-break-inside: avoid;
     -webkit-column-break-inside: avoid;
     print-color-adjust: exact;
@@ -675,7 +676,7 @@ function TicketDesigner({
     html, body { margin: 0; padding: 0; width: auto; height: auto; overflow: visible; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .ticket-print-sheet { break-inside: auto; page-break-inside: auto; }
-    .ticket-print-card { break-inside: avoid-page; page-break-inside: avoid; }
+    .ticket-print-card { break-inside: avoid; page-break-inside: avoid; }
   }
 </style>
 </head>
