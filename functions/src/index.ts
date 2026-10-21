@@ -1314,7 +1314,7 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
       lastSeen: now,
       updatedAt: now,
     };
-    if (ownerMatches && existing.managementApproved === true) {
+    if (ownerMatches && existing.managementApproved === true && call.data?.preserveMode !== true) {
       patch.mode = mode;
     }
     if (typeof syncPendingCount === "number") patch.syncPendingCount = syncPendingCount;
