@@ -115,18 +115,18 @@ async function main() {
     }
     totalEligible += eligible;
     process.stdout.write(
-      `${apply ? "RESET" : "DRY RUN"}: ${target.collection}: scanned=${scanned}, ${apply ? "deleted" : "wouldDelete"}=${eligible}${target.keepId ? `, preservedId=${target.keepId}` : ""}\\n`,
+      `${apply ? "RESET" : "DRY RUN"}: ${target.collection}: scanned=${scanned}, ${apply ? "deleted" : "wouldDelete"}=${eligible}${target.keepId ? `, preservedId=${target.keepId}` : ""}\n`,
     );
   }
 
   process.stdout.write(
     apply
-      ? `Terminal reset completed for project ${projectId}. Preserved primary admin ${keepTerminalId}; removed ${totalEligible} other terminal-related documents. Event/ticket data were not targeted. Verify registration and handoff flows before returning the system to use.\\n`
-      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate deletions: ${totalEligible}. Set RESET_APPLY=true only after backup, rule/Functions verification, and independent confirmation of the preserved primary admin.\\n`,
+      ? `Terminal reset completed for project ${projectId}. Preserved primary admin ${keepTerminalId}; removed ${totalEligible} other terminal-related documents. Event/ticket data were not targeted. Verify registration and handoff flows before returning the system to use.\n`
+      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate deletions: ${totalEligible}. Set RESET_APPLY=true only after backup, rule/Functions verification, and independent confirmation of the preserved primary admin.\n`,
   );
 }
 
 main().catch(error => {
-  process.stderr.write(String(error instanceof Error ? error.message : error) + "\\n");
+  process.stderr.write(String(error instanceof Error ? error.message : error) + "\n");
   process.exitCode = 1;
 });
