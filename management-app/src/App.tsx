@@ -405,12 +405,14 @@ export default function App() {
     const key = "qr-ticket-terminal-id";
     const legacyKey = "qr-ticket-device-id";
     const existing = localStorage.getItem(key) || localStorage.getItem(legacyKey);
-    if (existing) {
+    if (existing && /^T-[A-Za-z0-9-]{8,40}$/.test(existing)) {
       localStorage.setItem(key, existing);
+      localStorage.setItem(legacyKey, existing);
       return existing;
     }
     const created = `T-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     localStorage.setItem(key, created);
+    localStorage.setItem(legacyKey, created);
     return created;
   });
   const firebaseEventHydratedRef = useRef(false);
