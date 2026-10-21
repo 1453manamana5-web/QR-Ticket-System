@@ -682,7 +682,14 @@ export default function App() {
       });
 
       try {
-        await Promise.all(released.map(terminal => saveTerminal(terminal)));
+        await Promise.all(terminals
+          .filter(terminal =>
+            terminal.terminalId !== firebaseDeviceId &&
+            (terminal.role === "reception" || terminal.role === "both") &&
+            terminal.approved &&
+            (terminal.receptionApproved === true || terminal.receptionApproved === undefined)
+          )
+          .map(terminal => revokeManagedReception(terminal.terminalId)));
         setTerminals(released);
         setSelectedTerminalId(null);
         setTerminalNotice("受付データの回収が完了しました。受付機能の認証を解除しました。");
