@@ -4,7 +4,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import * as functions from "./lib/index.js";
 
 const db = getFirestore();
-const collections = ["terminals", "terminalOwners", "terminalInstallations", "terminalHandoffRequests", "terminalHandoffRateLimits"];
+const collections = ["terminals", "terminalOwners", "terminalInstallations", "terminalHandoffRequests", "terminalHandoffRateLimits", "events", "eventBundles"];
 async function clearCollections() {
   for (const name of collections) {
     const snapshot = await db.collection(name).get();
@@ -92,4 +92,24 @@ test("reception revocation invalidates an already approved handoff", async () =>
   assert.equal((await db.doc("terminalInstallations/new-installation-uid").get()).exists, false);
   assert.equal((await db.doc("terminals/T-RECEPTION-0001").get()).get("receptionApproved"), false);
   assert.equal((await db.doc("terminalHandoffRequests/" + request.requestId).get()).get("status"), "cancelled");
+});
+
+test("event deletion also removes the separately stored published bundle", async () => {
+  await seedManager();
+  await db.doc("events/event-to-delete").set({
+    eventId: "event-to-delete",
+    authToken: "published-bundle-token",
+    eventStatus: "ready",
+  });
+  await db.doc("eventBundles/published-bundle-token").set({
+    authToken: "published-bundle-token",
+    event: { eventId: "event-to-delete" },
+    tickets: [{ ticketId: "ticket-private" }],
+  });
+
+  assert.deepEqual(await call("deleteManagedEvent", "manager-owner-uid", {
+    eventId: "event-to-delete",
+  }), { eventId: "event-to-delete", deleted: true });
+  assert.equal((await db.doc("events/event-to-delete").get()).exists, false);
+  assert.equal((await db.doc("eventBundles/published-bundle-token").get()).exists, false);
 });
