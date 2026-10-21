@@ -1,0 +1,35 @@
+name: Firestore security backend checks
+
+on:
+  push:
+    branches: [firestore-security-backend-on-current-main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install app and test dependencies
+        run: npm install
+      - name: Install Functions dependencies
+        run: npm install --prefix functions
+      - name: Firestore rules emulator tests
+        run: npm run test:rules
+      - name: Terminal callable tests
+        run: npm run test:callables
+      - name: Typecheck current apps
+        run: npm run typecheck
+      - name: Build current apps
+        run: npm run build
+      - name: Typecheck Functions and migration scripts
+        run: npm run typecheck --prefix functions
+      - name: Build Functions
+        run: npm run build --prefix functions
