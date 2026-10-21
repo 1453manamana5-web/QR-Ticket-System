@@ -25,9 +25,13 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
 }
 
 export async function resetReceptionTerminalRegistration(): Promise<void> {
-  await callBackend<{ terminalId: string }, { released: boolean }>("releaseOwnReceptionRegistration", {
-    terminalId: getTerminalIdForRegistration(),
-  });
+  const terminalId = getTerminalIdForRegistration();
+  const current = await getTerminalRegistration();
+  if (current?.approved) {
+    await callBackend<{ terminalId: string }, { released: boolean }>("releaseOwnReceptionRegistration", { terminalId });
+    return;
+  }
+  await callBackend<{ terminalId: string }, { cancelled: boolean }>("cancelOwnTerminalApplication", { terminalId });
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
