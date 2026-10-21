@@ -12,6 +12,7 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
     log: { ...log, terminalId: getTerminalIdForRegistration() },
   });
 }
+
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
   const result = await callBackend<Record<string, never>, {
     approved: boolean; terminalId: string | null; name?: string; status?: "online"|"offline"|"pending";
@@ -24,11 +25,13 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
     name: result.name ?? "受付端末",
   };
 }
+
 export async function resetReceptionTerminalRegistration(): Promise<void> {
   await callBackend<{ terminalId: string }, { released: boolean }>("releaseOwnReceptionRegistration", {
     terminalId: getTerminalIdForRegistration(),
   });
 }
+
 export async function registerReceptionTerminal(name: string): Promise<void> {
   const terminalId = getTerminalIdForRegistration();
   const type = typeof navigator !== "undefined" && /Macintosh|Windows|Linux/i.test(navigator.userAgent)
@@ -38,6 +41,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     { terminalId, name: name.trim() || "受付端末", type, role: "reception" },
   );
 }
+
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,45 +58,116 @@ export function subscribeTerminalRegistration(onChange: (value: {approved:boolea
   void refresh();
   return () => { active = false; if (timer) clearTimeout(timer); };
 }
-export async function syncReceptionRecord(record: ReceptionRecord, _ticket: Ticket): Promise<void> {
-  await callBackend<{ record: Record<string, unknown> }, { saved: boolean; recordId: string }>(
+
+function getTerminalIdForRegistration(): string {
+  const key = "qr-ticket-terminal-id";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const id = "T-" + crypto.randomUUID().slice(0,8).toUpperCase();
+  localStorage.setItem(key,id);
+  return id;
+}
+
+export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticket): Promise<void> {
+  await callBackend<{ record: Record<string, unknown>; ticket: Record<string, unknown> }, { saved: boolean; recordId: string }>(
     "recordReception",
-    { record: { ...record, terminalId: getTerminalIdForRegistration() } },
+    { record: { ...record, terminalId: getTerminalIdForRegistration() }, ticket },
   );
 }
-export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
-  const db = getFirebaseDb();
-  const pendingCount = typeof syncPendingCount === "number"
-    ? syncPendingCount
-    : (await getPendingSyncItems()).length;
-  const reference = doc(db, "terminals", terminalId);
-  const existing = await getDoc(reference);
-  const data = existing.exists() ? existing.data() : {};
-  const networkMbps = await measureNetworkSpeed(db, reference);
 
-  await setDoc(reference, {
-    terminalId,
-    name: typeof data.name === "string" ? data.name : `受付端末 ${terminalId.slice(-4)}`,
-    type: "Web / iPad",
-    role: data.role === "management" || data.role === "both" ? data.role : "reception",
-    mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
-    status: "online",
-    approved: data.managementApproved === true || data.receptionApproved === true || data.approved === true,
-    managementApproved: data.managementApproved === true,
-    receptionApproved: data.receptionApproved === true,
-    syncPendingCount: pendingCount,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof data.networkMbps === "number" ? data.networkMbps : null),
-    battery: typeof data.battery === "number" ? data.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+let networkSpeedCache: number | null = null;
+let networkSpeedMeasuredAt = 0;
+const NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
+const NETWORK_PROBE_SIZE_BYTES = 32768;
+
+function getBrowserDownlink(): number | null {
+  if (typeof navigator === "undefined") return null;
+
+  const connection = (navigator as Navigator & {
+    connection?: { downlink?: number };
+    mozConnection?: { downlink?: number };
+    webkitConnection?: { downlink?: number };
+  }).connection
+    ?? (navigator as Navigator & { mozConnection?: { downlink?: number } }).mozConnection
+    ?? (navigator as Navigator & { webkitConnection?: { downlink?: number } }).webkitConnection;
+
+  const downlink = connection?.downlink;
+  return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
+}
+
+function createNetworkProbe(): string {
+  return "0123456789abcdef".repeat(NETWORK_PROBE_SIZE_BYTES / 16);
+}
+
+async function measureNetworkSpeed(
+  db: ReturnType<typeof getFirebaseDb>,
+  reference: ReturnType<typeof doc>,
+): Promise<number | null> {
+  const now = Date.now();
+  if (now - networkSpeedMeasuredAt < NETWORK_SPEED_MEASURE_INTERVAL_MS) {
+    return networkSpeedCache;
+  }
+
+  const browserDownlink = getBrowserDownlink();
+  if (browserDownlink !== null) {
+    networkSpeedCache = browserDownlink;
+    networkSpeedMeasuredAt = now;
+    return browserDownlink;
+  }
+
+  try {
+    const probe = createNetworkProbe();
+    const startedAt = performance.now();
+    await setDoc(reference, {
+      networkProbe: probe,
+      networkProbeAt: new Date().toISOString(),
+    }, { merge: true });
+    await getDocFromServer(reference);
+
+    const elapsedMs = Math.max(1, performance.now() - startedAt);
+    const roundTripBytes = probe.length * 2;
+    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
+    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
+
+    networkSpeedCache = normalized;
+    networkSpeedMeasuredAt = Date.now();
+    return normalized;
+  } catch (reason) {
+    console.warn("通信速度の測定に失敗しました", reason);
+    return networkSpeedCache;
+  }
+}
+
+export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
+  const pendingCount = typeof syncPendingCount === "number" ? syncPendingCount : (await getPendingSyncItems()).length;
+  const networkMbps = getBrowserDownlink();
+  await callBackend<{ terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number }, { saved: boolean }>(
+    "updateTerminalHeartbeat",
+    { terminalId, mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
+      syncPendingCount: pendingCount, ...(networkMbps !== null ? { networkMbps } : {}) },
+  );
   return networkMbps;
 }
 
 export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入口受付" | "出口受付" | "停止", updatedAt: string | null) => void, onError: (error: unknown) => void): () => void {
-  const db = getFirebaseDb();
-  return onSnapshot(doc(db, "terminals", terminalId), snapshot => {
-    const value = snapshot.data()?.desiredMode;
-    if (value === "入口受付" || value === "出口受付" || value === "停止") { const updatedAt = snapshot.data()?.desiredModeUpdatedAt; onMode(value, typeof updatedAt === "string" ? updatedAt : null); }
-  }, onError);
+  let active = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const refresh = async () => {
+    try {
+      const value = await callBackend<Record<string, never>, {
+        terminalId: string | null; desiredMode?: "入口受付" | "出口受付" | "停止" | null;
+        desiredModeUpdatedAt?: string | null;
+      }>("getTerminalInstallationStatus", {});
+      if (active && value.terminalId === terminalId &&
+          (value.desiredMode === "入口受付" || value.desiredMode === "出口受付" || value.desiredMode === "停止")) {
+        onMode(value.desiredMode, value.desiredModeUpdatedAt ?? null);
+      }
+    } catch (error) {
+      if (active) onError(error);
+    } finally {
+      if (active) timer = setTimeout(() => { void refresh(); }, 5000);
+    }
+  };
+  void refresh();
+  return () => { active = false; if (timer) clearTimeout(timer); };
 }
