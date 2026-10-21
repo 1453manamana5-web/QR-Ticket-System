@@ -66,12 +66,12 @@ export function subscribeTerminalRegistration(onChange: (value: {approved:boolea
 function getTerminalIdForRegistration(): string {
   const key = "qr-ticket-terminal-id";
   const existing = localStorage.getItem(key);
-  if (existing) return existing;
-  const id = "T-" + crypto.randomUUID().slice(0,8).toUpperCase();
-  localStorage.setItem(key,id);
+  if (existing && /^T-[A-Za-z0-9-]{8,40}$/.test(existing)) return existing;
+  const id = "T-" + crypto.randomUUID().slice(0, 8).toUpperCase();
+  localStorage.setItem(key, id);
+  localStorage.setItem("qr-ticket-device-id", id);
   return id;
 }
-
 export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticket): Promise<void> {
   await callBackend<{ record: Record<string, unknown>; ticket: Record<string, unknown> }, { saved: boolean; recordId: string }>(
     "recordReception",
