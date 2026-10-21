@@ -140,3 +140,28 @@ Remaining deployment blockers:
 6. **End-to-end verification:** CI does not exercise a real Firebase project. After a reviewed migration in a non-production test project, verify management approval, reception approval, heartbeat updates, ticket entry/exit/re-entry, and revocation against deployed callable Functions and Firestore Rules.
 
 Do not deploy the rules or Functions until the existing terminal mappings and live Firebase configuration have been reviewed.
+
+## Controlled terminal reset before production rule cutover
+
+Do not delete all terminal records before securing a recovery administrator. The safe order for an existing project is:
+
+1. Back up the Firestore database and review the backup.
+2. Verify/deploy the callable Functions required for registration, approval, status, handoff, and recovery.
+3. Verify one primary administrator's terminal document, `terminalOwners/{terminalId}`, and `terminalInstallations/{ownerUid}` all agree and are approved. Do not infer the owner UID from an untrusted Firestore field.
+4. Test the strict rules and callable flows in a non-production project, then replace the broad production catch-all rules with the reviewed rules. Do not add restrictive matches alongside the broad allow.
+5. Run the new `functions/scripts/reset-terminal-data.ts` utility in dry-run mode and review the exact project and per-collection counts.
+6. Only after the backup, rules/Functions, and recovery admin are verified, run apply mode. It preserves the verified primary administrator and removes other documents in `terminals`, `terminalOwners`, `terminalInstallations`, `devices`, `terminalApplications`, `terminalHandoffRequests`, and `terminalHandoffRateLimits`.
+7. Confirm management can sign in and approve a fresh reception terminal, then test handoff/revocation. Event, ticket, event-bundle, reception-record, analysis, member, and event-setting collections are not targeted by the reset utility.
+
+Build and preview only (no writes):
+
+```sh
+npm --prefix functions install
+npm --prefix functions run build:migration
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" \
+RESET_KEEP_TERMINAL_ID="T-REPLACE" \
+RESET_KEEP_OWNER_UID="UID-REPLACE" \
+npm --prefix functions run reset:terminals
+```
+
+Apply mode requires `RESET_APPLY=true` plus the exact primary admin terminal ID and UID. The script checks the primary admin's approval, role, owner mapping, and installation mapping before deleting anything. Do not run it against production until the backup and dry-run output have been reviewed independently.
