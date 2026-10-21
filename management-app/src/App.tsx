@@ -4,7 +4,7 @@ import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-tick
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 type AnalysisRecord = {
   eventId: string;
@@ -1303,7 +1303,7 @@ export default function App() {
         receptionApproved: isReceptionRequest ? true : target.receptionApproved === true,
         status: "offline" as TerminalStatus,
       };
-      await saveTerminal(updatedTerminal);
+      await approveTerminal(terminalId);
       setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
       setTerminalNotice("端末を承認しました。受付端末側にも自動反映されます。");
       setSelectedTerminalId(terminalId);
@@ -1323,7 +1323,7 @@ export default function App() {
     }
     const updatedTerminal = { ...target, mode, desiredMode: mode, desiredModeUpdatedAt: new Date().toISOString() };
     setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
-    void saveTerminal(updatedTerminal).catch(reason => console.error("Firebase terminal save failed", reason));
+    void setManagedTerminalMode(terminalId, mode).catch(reason => { console.error("Firebase terminal mode update failed", reason); setTerminalNotice("端末の操作に失敗しました。"); });
     setTerminalNotice(`${target.name}を「${mode}」に変更しました。`);
   };
 
@@ -1368,7 +1368,7 @@ export default function App() {
     if (!target || target.admin || target.terminalId === firebaseDeviceId) return;
     const updatedTerminal: ManagedTerminal = { ...target, subAdmin: enabled };
     try {
-      await saveTerminal(updatedTerminal);
+      await setManagedSubAdmin(terminalId, enabled);
       setTerminals(current => current.map(terminal => terminal.terminalId === terminalId ? updatedTerminal : terminal));
       setTerminalNotice(enabled ? `「${target.name}」を副管理者に設定しました。` : `「${target.name}」の副管理者設定を解除しました。`);
     } catch (reason) {
@@ -1378,106 +1378,48 @@ export default function App() {
   };
   const registerOwnTerminal = async () => {
     try {
-      const remoteTerminals = await loadTerminals();
-      const legacyTerminalId = localStorage.getItem("qr-ticket-device-id");
-      const existing = remoteTerminals.find(terminal => terminal.terminalId === firebaseDeviceId);
-      const legacyExisting = legacyTerminalId && legacyTerminalId !== firebaseDeviceId
-        ? remoteTerminals.find(terminal => terminal.terminalId === legacyTerminalId)
-        : undefined;
-
-      // 旧管理アプリと受付アプリで別IDになっていた端末を、現在の共通IDへ統合する。
-      if (legacyTerminalId && legacyExisting) {
-        const base = existing ?? legacyExisting;
-        const legacyHasReceptionRole = legacyExisting.role === "reception" || legacyExisting.role === "both";
-        const existingHasReceptionRole = existing?.role === "reception" || existing?.role === "both";
-        const mergedRole: ManagedTerminal["role"] =
-          legacyHasReceptionRole || existingHasReceptionRole ? "both" : "management";
-        const merged: ManagedTerminal = {
-          ...base,
-          terminalId: firebaseDeviceId,
-          name: appSettings.deviceName || existing?.name || legacyExisting.name || "管理端末",
-          role: mergedRole,
-          admin: Boolean(existing?.admin || legacyExisting.admin || (!remoteTerminals.some(terminal => terminal.admin === true))),
-          approved: Boolean(existing?.managementApproved ?? existing?.approved ?? legacyExisting.managementApproved ?? legacyExisting.approved),
-          managementApproved: Boolean(existing?.managementApproved ?? existing?.approved ?? legacyExisting.managementApproved ?? legacyExisting.approved),
-          receptionApproved: Boolean(existing?.receptionApproved ?? legacyExisting.receptionApproved ?? (legacyHasReceptionRole || existingHasReceptionRole ? (existing?.approved ?? legacyExisting.approved) : false)),
-          status: existing?.status ?? legacyExisting.status ?? "pending",
-          lastSeen: new Date().toISOString(),
-          networkMbps: existing?.networkMbps ?? legacyExisting.networkMbps ?? null,
-          battery: existing?.battery ?? legacyExisting.battery ?? null,
-        };
-
-        await saveTerminal(merged);
-        await deleteTerminal(legacyTerminalId);
-        localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
-        localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
-
-        const mergedTerminals = remoteTerminals
-          .filter(terminal => terminal.terminalId !== legacyTerminalId && terminal.terminalId !== firebaseDeviceId)
-          .concat(merged);
-        setTerminals(mergedTerminals);
+      const current = await getOwnTerminalStatus();
+      if (current.approved && current.terminalId === firebaseDeviceId) {
+        const remoteTerminals = await loadTerminals();
+        setTerminals(remoteTerminals);
         setForceTerminalRegistration(false);
         setSelectedTerminalId(firebaseDeviceId);
-        setTerminalNotice("旧管理・受付の重複登録を統合し、この端末を1つの共通アカウントにしました。");
-        return;
-      }
-
-      if (existing) {
-        const isSharedTerminal = existing.role === "reception" || existing.role === "both";
-        const hasAdmin = remoteTerminals.some(terminal => terminal.admin === true);
-        const updatedExisting: ManagedTerminal = {
-          ...existing,
-          name: appSettings.deviceName || existing.name || "管理端末",
-          role: isSharedTerminal ? "both" : (existing.role ?? "management"),
-          admin: Boolean(existing.admin || (!hasAdmin && (existing.role === "management" || existing.role === "both"))),
-          managementApproved: Boolean(existing.managementApproved ?? existing.approved),
-          receptionApproved: Boolean(existing.receptionApproved ?? ((existing.role === "reception" || existing.role === "both") ? existing.approved : false)),
-          lastSeen: new Date().toISOString(),
-        };
-        await saveTerminal(updatedExisting);
+        setTerminalNotice("この端末はサーバーで承認済みです。");
+        localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
         localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
-        setTerminals(current => current.map(terminal => terminal.terminalId === firebaseDeviceId ? updatedExisting : terminal));
-        setForceTerminalRegistration(false);
-        setSelectedTerminalId(existing.terminalId);
-        setTerminalNotice(
-          isSharedTerminal
-            ? (existing.approved ? "この端末は管理・受付で共通登録されています。" : "この端末の管理・受付共通登録を申請しました。")
-            : (existing.approved ? "この端末はすでに承認されています。" : "この端末はすでに登録申請されています。")
-        );
         return;
       }
-
-      const managementTerminals = remoteTerminals.filter(terminal => terminal.role === "management" || terminal.role === "both");
-      const isFirstManagementTerminal = managementTerminals.length === 0;
-      const terminal: ManagedTerminal = {
+      await requestTerminalRegistration({
         terminalId: firebaseDeviceId,
         name: appSettings.deviceName || "管理端末",
         type: "Web / iPad",
-        mode: "停止",
-        status: isFirstManagementTerminal ? "online" : "pending",
-        approved: isFirstManagementTerminal,
-        managementApproved: isFirstManagementTerminal,
-        receptionApproved: false,
-        lastSeen: new Date().toISOString(),
-        networkMbps: null,
-        battery: null,
         role: "management",
-        admin: isFirstManagementTerminal,
-      };
-
-      await saveTerminal(terminal);
+      });
+      localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
       localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
-      setTerminals(current => [...current.filter(item => item.terminalId !== firebaseDeviceId), terminal]);
       setForceTerminalRegistration(false);
-      setSelectedTerminalId(terminal.terminalId);
-      setTerminalNotice(
-        isFirstManagementTerminal
-          ? "最初の管理端末として自動承認されました。"
-          : "この端末の登録申請を送信しました。管理者の承認を待ってください。"
-      );
+      setTerminals(currentTerminals => [
+        ...currentTerminals.filter(item => item.terminalId !== firebaseDeviceId),
+        {
+          terminalId: firebaseDeviceId,
+          name: appSettings.deviceName || "管理端末",
+          type: "Web / iPad",
+          mode: "停止",
+          status: "pending",
+          approved: false,
+          managementApproved: false,
+          receptionApproved: false,
+          lastSeen: null,
+          networkMbps: null,
+          battery: null,
+          role: "management",
+        },
+      ]);
+      setSelectedTerminalId(firebaseDeviceId);
+      setTerminalNotice("管理端末の登録申請を送信しました。既存の管理者端末から承認されるまでお待ちください。初回管理者の設定は安全な管理者引き継ぎ手続きが必要です。");
     } catch (reason) {
       console.error("Firebase terminal registration failed", reason);
-      setTerminalNotice("Firebaseへの接続を確認してください。");
+      setTerminalNotice("端末登録に失敗しました。通信状態とサーバー認証を確認してください。");
     }
   };
 
