@@ -269,11 +269,12 @@ function getManagementBrowserDownlink(): number | null {
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
   const networkMbps = getManagementBrowserDownlink();
   await callBackend<{
-    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number;
+    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number; preserveMode: boolean;
   }, { saved: boolean }>("updateTerminalHeartbeat", {
     terminalId,
     mode: "停止",
     syncPendingCount: 0,
+    preserveMode: true,
     ...(networkMbps !== null ? { networkMbps } : {}),
   });
   return networkMbps;
