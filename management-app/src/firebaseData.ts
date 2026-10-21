@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { getFirebaseDb, getFirebaseUid } from "./firebaseClient";
+import { getFirebaseDb } from "./firebaseClient";
 import { callBackend } from "./firebaseFunctions";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
@@ -192,8 +192,26 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
+  const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+  if (!ownTerminalId || terminal.terminalId !== ownTerminalId) {
+    throw new Error("TERMINAL_SERVER_WRITE_REQUIRED");
+  }
+  const previous = await callBackend<Record<string, never>, {
+    terminalId: string | null; name?: string; desiredMode?: string | null;
+  }>("getTerminalInstallationStatus", {});
+  if (typeof terminal.name === "string" && terminal.name.trim() && terminal.name !== previous.name) {
+    await callBackend<{ terminalId: string; name: string }, { terminalId: string; name: string }>(
+      "updateManagedTerminalName", { terminalId: ownTerminalId, name: terminal.name.trim() },
+    );
+  }
+  await callBackend<{
+    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number;
+  }, { saved: boolean }>("updateTerminalHeartbeat", {
+    terminalId: ownTerminalId,
+    mode: terminal.mode,
+    syncPendingCount: terminal.syncPendingCount ?? 0,
+    ...(typeof terminal.networkMbps === "number" ? { networkMbps: terminal.networkMbps } : {}),
+  });
 }
 
 
