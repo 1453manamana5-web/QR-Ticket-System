@@ -4,7 +4,7 @@ import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-tick
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 type AnalysisRecord = {
   eventId: string;
@@ -697,7 +697,7 @@ export default function App() {
           (terminal.role === "reception" || terminal.role === "both") &&
           terminal.receptionApproved !== false
         )) {
-          await releaseOwnReception();
+          await releaseOwnReceptionOnServer();
         }
         setTerminals(released);
         setSelectedTerminalId(null);
