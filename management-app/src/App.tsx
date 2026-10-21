@@ -1263,7 +1263,7 @@ export default function App() {
     );
 
     try {
-      await releaseOwnReception();
+      await releaseOwnReceptionOnServer();
       setSelectedTerminalId(null);
       setTerminalNotice("この端末の受付を解除しました。");
     } catch (reason) {
