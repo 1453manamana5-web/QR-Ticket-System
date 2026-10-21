@@ -401,6 +401,54 @@ export const getTerminalInstallationStatus = onCall(async (call) => {
 });
 
 /** Approve requested terminal roles only when called by a trusted registered manager. */
+/**
+ * List terminal metadata for an approved administrator terminal. Trusted owner
+ * and installation documents are intentionally not exposed to the client.
+ */
+export const listManagedTerminals = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const [manager, owner, installation] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminalInstallations/" + uid).get(),
+  ]);
+  if (!manager.exists || !owner.exists || !installation.exists ||
+      owner.get("enabled") !== true || owner.get("ownerUid") !== uid ||
+      installation.get("authUid") !== uid || installation.get("terminalId") !== managerTerminalId ||
+      installation.get("approved") !== true || manager.get("approved") !== true ||
+      manager.get("managementApproved") !== true ||
+      (manager.get("role") !== "management" && manager.get("role") !== "both") ||
+      (manager.get("admin") !== true && manager.get("subAdmin") !== true)) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  const snapshot = await db.collection("terminals").get();
+  return {
+    terminals: snapshot.docs.map((item) => {
+      const value = item.data();
+      return {
+        terminalId: item.id,
+        name: typeof value.name === "string" ? value.name : item.id,
+        type: value.type === "Web / PC" ? "Web / PC" : "Web / iPad",
+        mode: value.mode === "入口受付" || value.mode === "出口受付" ? value.mode : "停止",
+        desiredMode: value.desiredMode === "入口受付" || value.desiredMode === "出口受付" || value.desiredMode === "停止" ? value.desiredMode : undefined,
+        desiredModeUpdatedAt: typeof value.desiredModeUpdatedAt === "string" ? value.desiredModeUpdatedAt : undefined,
+        status: value.status === "online" || value.status === "offline" ? value.status : "pending",
+        approved: value.approved === true,
+        lastSeen: typeof value.lastSeen === "string" ? value.lastSeen : null,
+        networkMbps: typeof value.networkMbps === "number" ? value.networkMbps : null,
+        battery: typeof value.battery === "number" ? value.battery : null,
+        role: value.role === "management" || value.role === "reception" || value.role === "both" ? value.role : undefined,
+        managementApproved: value.managementApproved === true,
+        receptionApproved: value.receptionApproved === true,
+        syncPendingCount: typeof value.syncPendingCount === "number" ? value.syncPendingCount : 0,
+        admin: value.admin === true,
+        subAdmin: value.subAdmin === true,
+      };
+    }),
+  };
+});
+
 export const approveTerminalRegistration = onCall(async (call) => {
   const uid = requireUid(call);
   const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
