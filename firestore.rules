@@ -74,8 +74,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Event and ticket reads are available to authenticated clients. Direct
-    // management writes require a trusted management-terminal installation.
+    // Event and ticket documents are restricted to approved management
+    // installations. Reception reads published event bundles through the
+    // dedicated eventBundles rule; reception ticket-state changes use callables.
     match /events/{eventId} {
       // Reception clients obtain only the single active event's metadata from a callable.
       allow get, list: if approvedManagementTerminal();
