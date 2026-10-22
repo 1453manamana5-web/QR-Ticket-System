@@ -1,0 +1,70 @@
+name: Deploy Firebase rules and Functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: "Type DEPLOY to confirm deployment to the configured production Firebase project"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirm_production == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require Firebase service account secret
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::Missing repository Actions secret FIREBASE_SERVICE_ACCOUNT."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Run rules and callable tests
+        run: |
+          npm run test:rules
+          npm run test:callables
+
+      - name: Build apps and Functions
+        run: |
+          npm run typecheck
+          npm run build
+          npm run typecheck --prefix functions
+          npm run build --prefix functions
+
+      - name: Authenticate to Firebase project
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+          echo "GCLOUD_PROJECT=qr-management-system-4127d" >> "$GITHUB_ENV"
+
+      - name: Verify selected Firebase project
+        run: |
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id) throw new Error('Service account JSON has no project_id'); if (p.project_id !== 'qr-management-system-4127d') throw new Error('Service account project_id does not match the intended production project'); console.log('Service account project ID matches intended target.');"
+
+      - name: Deploy Firestore rules and Functions
+        run: npx firebase-tools deploy --only firestore:rules,functions --project qr-management-system-4127d --non-interactive
