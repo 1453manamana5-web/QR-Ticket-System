@@ -2,7 +2,7 @@ import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 /**
- * One-time terminal-registration reset.
+ * One-time full application data reset (terminal registrations + event/business data).
  *
  * Default mode is read-only. Apply only after strict rules/Functions are deployed,
  * verified, and a backup has been taken and reviewed.
@@ -10,8 +10,8 @@ import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firesto
  * RESET_ALLOW_NO_ADMIN=true. Immediately bootstrap a new administrator with
  * the trusted bootstrap-admin.ts CLI before allowing normal operation.
  *
- * This script never deletes events, tickets, event bundles, reception records,
- * analysis, members, settings, or published event data.
+ * This script deletes events and nested tickets/reception records/analysis/members/settings,
+ * event bundles, reception errors, and terminal-registration collections.
  *
  * Required:
  *   GCLOUD_PROJECT=<exact Firebase project ID>
@@ -89,11 +89,13 @@ async function main() {
     { collection: "terminalOwners", keepId: keepTerminalId },
     { collection: "terminalInstallations", keepId: keepOwnerUid },
     { collection: "devices", keepId: keepTerminalId },
-    // Requests and rate limits are intentionally cleared, including those for
-    // the preserved admin UID, so no old approval can survive the reset.
     { collection: "terminalApplications" },
     { collection: "terminalHandoffRequests" },
     { collection: "terminalHandoffRateLimits" },
+    // Full reset includes all event documents and nested subcollections.
+    { collection: "events" },
+    { collection: "eventBundles" },
+    { collection: "receptionErrors" },
   ];
 
   let totalEligible = 0;
@@ -113,9 +115,10 @@ async function main() {
 
       if (apply) {
         for (let offset = 0; offset < removals.length; offset += PAGE_SIZE) {
-          const batch = db.batch();
-          removals.slice(offset, offset + PAGE_SIZE).forEach(document => batch.delete(document.ref));
-          await batch.commit();
+          // Recursive deletion also removes nested event subcollections.
+          await Promise.all(
+            removals.slice(offset, offset + PAGE_SIZE).map(document => db.recursiveDelete(document.ref)),
+          );
         }
       }
       cursor = page.docs[page.docs.length - 1];
@@ -129,8 +132,8 @@ async function main() {
 
   process.stdout.write(
     apply
-      ? `Terminal reset completed for project ${projectId}. Preserved primary admin ${keepTerminalId}; removed ${totalEligible} other terminal-related documents. Event/ticket data were not targeted. Verify registration and handoff flows before returning the system to use.\n`
-      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate deletions: ${totalEligible}. For full reset, verify backup and deployed rules/Functions, then explicitly set RESET_APPLY=true and RESET_ALLOW_NO_ADMIN=true. Bootstrap a new admin immediately afterward.\n`,
+      ? `Full application reset completed for project ${projectId}. Preserved primary admin ${keepTerminalId}; deleted ${totalEligible} targeted parent documents and their nested data. Verify bootstrap and all flows before returning the system to use.\n`
+      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate parent documents: ${totalEligible}; recursive deletion will also remove nested subcollections. For full reset, verify backup and deployed rules/Functions, then explicitly set RESET_APPLY=true and RESET_ALLOW_NO_ADMIN=true. Bootstrap a new admin immediately afterward.\n`,
   );
 }
 

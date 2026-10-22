@@ -1,27 +1,24 @@
 # 本番Firestore切り替え・管理者を含む端末リセット
 
-この手順は、厳格なFirestoreルールとCallable Functionsを本番へ反映し、端末登録情報を管理者分も含めて初期化した後、信頼できるCLIから最初の管理者を作り直すためのものです。**コードの変更やCI成功だけではFirebase本番は変更されません。**
+この手順は、厳格なFirestoreルールとCallable Functionsを本番へ反映し、端末登録情報・イベント・チケットを含むアプリデータを初期化した後、信頼できるCLIから最初の管理者を作り直すためのものです。**全イベント・チケット・関連履歴も削除されます。コードの変更やCI成功だけではFirebase本番は変更されません。**
 
 ## 対象データ
 
-リセット対象は次の端末登録関連コレクションのみです。
+リセット対象は以下です。イベント配下のサブコレクションも再帰的に削除します。
 
-- `terminals`
-- `terminalOwners`
-- `terminalInstallations`
-- `devices`（端末別アプリ設定を含む）
-- `terminalApplications`
-- `terminalHandoffRequests`
-- `terminalHandoffRateLimits`
+- 端末・管理者登録：`terminals`、`terminalOwners`、`terminalInstallations`、`devices`、`terminalApplications`、`terminalHandoffRequests`、`terminalHandoffRateLimits`
+- イベントと関連データ：`events` 配下の全ドキュメントおよびサブコレクション（チケット、受付履歴、分析、部員、イベント設定など）
+- 公開済みイベントバンドル：`eventBundles`
+- 受付エラー記録：`receptionErrors`
 
-イベント、チケット、受付履歴、分析、部員、イベント設定、公開済みイベントバンドルは削除対象外です。
+**イベント・チケット・関連履歴は復元用バックアップがなければ失われます。** Firebase Authのユーザーアカウントそのものや、上記に列挙されていない別コレクションはこのスクリプトでは削除しません。
 
 ## 実施順序
 
 ### 1. 本番プロジェクトとバックアップを確認
 
 1. Firebase Consoleで対象プロジェクトIDを確認する。
-2. Firestore本番データをエクスポートし、少なくとも上記7コレクションと業務データがバックアップに含まれていることを確認する。
+2. Firestore本番データをエクスポートし、少なくとも上記10コレクションと業務データがバックアップに含まれていることを確認する。
 3. バックアップの保存先と復元方法を確認する。
 4. リセット後に管理者として使用するFirebase Auth UIDを確認する。UIDは、実際に管理画面へログインするアカウントの認証情報から独立して確認し、端末IDやUIDを推測しない。
 
@@ -56,7 +53,7 @@ firebase deploy --only firestore:rules --project YOUR_FIREBASE_PROJECT_ID
 ```sh
 gcloud auth application-default login
 npm --prefix functions install
-GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" npm --prefix functions run reset:terminals
+GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" npm --prefix functions run reset:all-data
 ```
 
 ドライラン結果のプロジェクトID・件数・対象コレクションを確認する。全消去モードでは管理者端末、所有者マッピング、インストールマッピングも消えるため、リセット後は管理者がゼロになる。
@@ -69,10 +66,10 @@ GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" npm --prefix functions run reset:termi
 GCLOUD_PROJECT="YOUR_FIREBASE_PROJECT_ID" \
 RESET_APPLY=true \
 RESET_ALLOW_NO_ADMIN=true \
-npm --prefix functions run reset:terminals
+npm --prefix functions run reset:all-data
 ```
 
-実行ログで7コレクションの削除件数を記録する。イベントやチケットなどの業務データはこのスクリプトの対象外。
+実行ログで7コレクションの削除件数を記録する。イベント・チケット・イベント配下の関連データも削除対象です。
 
 ### 6. 最初の管理者を作成
 
