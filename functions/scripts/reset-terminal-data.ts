@@ -4,25 +4,24 @@ import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firesto
 /**
  * One-time terminal-registration reset.
  *
- * Default mode is read-only. Apply only after:
- *  - the strict Firestore rules and callable Functions are deployed and verified;
- *  - the intended primary admin terminal has a valid server-owned owner mapping
- *    and installation mapping;
- *  - a backup has been taken and reviewed.
+ * Default mode is read-only. Apply only after strict rules/Functions are deployed,
+ * verified, and a backup has been taken and reviewed.
+ * For full reset including every administrator, additionally set
+ * RESET_ALLOW_NO_ADMIN=true. Immediately bootstrap a new administrator with
+ * the trusted bootstrap-admin.ts CLI before allowing normal operation.
  *
  * This script never deletes events, tickets, event bundles, reception records,
  * analysis, members, settings, or published event data.
  *
  * Required:
  *   GCLOUD_PROJECT=<exact Firebase project ID>
- * Optional dry run:
- *   RESET_KEEP_TERMINAL_ID=T-... RESET_KEEP_OWNER_UID=... (for preview)
- * Apply:
- *   RESET_APPLY=true RESET_KEEP_TERMINAL_ID=T-... RESET_KEEP_OWNER_UID=...
+ * Dry run: set GCLOUD_PROJECT and optionally RESET_KEEP_TERMINAL_ID/RESET_KEEP_OWNER_UID.
+ * Preserve one admin: RESET_APPLY=true plus both RESET_KEEP_* variables.
+ * Remove every admin too: RESET_APPLY=true RESET_ALLOW_NO_ADMIN=true, with no RESET_KEEP_* variables.
  *
- * The primary administrator terminal and its owner/installation mappings are
- * preserved. All other old/new terminal registration records and device-setting
- * documents are removed. A dry run is the default; no writes occur otherwise.
+ * Full-reset mode intentionally leaves zero authorized terminals. Only use the
+ * trusted CLI bootstrap to create the first administrator after the reset.
+ * A dry run is the default; no writes occur otherwise.
  */
 const PAGE_SIZE = 300;
 const TERMINAL_ID_PATTERN = /^T-[A-Za-z0-9-]{8,40}$/;
@@ -48,8 +47,12 @@ async function main() {
   if (Boolean(keepTerminalId) !== Boolean(keepOwnerUid)) {
     throw new Error("Set both RESET_KEEP_TERMINAL_ID and RESET_KEEP_OWNER_UID together, or omit both for a non-destructive preview.");
   }
-  if (apply && (!keepTerminalId || !keepOwnerUid)) {
-    throw new Error("Apply requires both RESET_KEEP_TERMINAL_ID and RESET_KEEP_OWNER_UID to preserve the recovery admin.");
+  const allowNoAdmin = process.env.RESET_ALLOW_NO_ADMIN === "true";
+  if (apply && !keepTerminalId && !keepOwnerUid && !allowNoAdmin) {
+    throw new Error("Full reset requires explicit RESET_ALLOW_NO_ADMIN=true; otherwise provide both RESET_KEEP_* variables.");
+  }
+  if (apply && allowNoAdmin && (keepTerminalId || keepOwnerUid)) {
+    throw new Error("Do not combine RESET_ALLOW_NO_ADMIN=true with RESET_KEEP_* variables.");
   }
 
   initializeApp({ credential: applicationDefault(), projectId });
@@ -127,7 +130,7 @@ async function main() {
   process.stdout.write(
     apply
       ? `Terminal reset completed for project ${projectId}. Preserved primary admin ${keepTerminalId}; removed ${totalEligible} other terminal-related documents. Event/ticket data were not targeted. Verify registration and handoff flows before returning the system to use.\n`
-      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate deletions: ${totalEligible}. Set RESET_APPLY=true only after backup, rule/Functions verification, and independent confirmation of the preserved primary admin.\n`,
+      : `Dry run completed for project ${projectId}; no Firestore documents were changed. Candidate deletions: ${totalEligible}. For full reset, verify backup and deployed rules/Functions, then explicitly set RESET_APPLY=true and RESET_ALLOW_NO_ADMIN=true. Bootstrap a new admin immediately afterward.\n`,
   );
 }
 
