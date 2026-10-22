@@ -72,23 +72,28 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
     }
   }
 
-  await setDoc(eventRef, {
+  // イベント一覧と公開バンドルの版数を同じバッチで更新する。
+  // 別々に書くと、その間に受付端末が新旧の版数を読み取り「イベント未認証」になる可能性がある。
+  const batch = writeBatch(db);
+  batch.set(eventRef, {
     ticketCount: tickets.length,
     ...(savedBundle ? { dataVersion: nextDataVersion } : {}),
     updatedAt: now,
   }, { merge: true });
 
-  if (!bundleRef || !savedBundle) return;
-  // バンドルに全チケットを再格納しない。件数・版数だけ更新し、実データはサブコレクションを参照する。
-  await setDoc(bundleRef, {
-    event: {
-      ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
-      eventId,
-      dataVersion: nextDataVersion,
-    },
-    ticketCount: tickets.length,
-    publishedAt: now,
-  }, { merge: true });
+  if (bundleRef && savedBundle) {
+    // バンドルに全チケットを再格納しない。件数・版数だけ更新し、実データはサブコレクションを参照する。
+    batch.set(bundleRef, {
+      event: {
+        ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
+        eventId,
+        dataVersion: nextDataVersion,
+      },
+      ticketCount: tickets.length,
+      publishedAt: now,
+    }, { merge: true });
+  }
+  await batch.commit();
 }
 
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
