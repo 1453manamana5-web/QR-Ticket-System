@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { callBackend } from "./firebaseFunctions";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
@@ -1151,27 +1152,38 @@ export default function App() {
     input.click();
   };
 
-  const resetAllData = () => {
-    if (!window.confirm("すべてのローカルデータを初期化します。イベント履歴・分析履歴・チケット・部員情報・設定が削除されます。実行しますか？")) return;
-    [
-      "qr-ticket-event-history",
-      "qr-ticket-analysis-history",
-      "qr-ticket-app-settings",
-    ].forEach(key => localStorage.removeItem(key));
-    setEvent(baseEvent);
-    setEventHistory([]);
-    setAnalysisHistory([]);
-    setSelectedHistoryEventId("");
-    setSelectedAnalysisEventId("");
-    setTickets([]);
-    setMembers([]);
-    setAppSettings(defaultAppSettings);
-    setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
-    if (event.eventId) {
-      void saveReceptionSettings(event.eventId, { entryEnabled: true, exitEnabled: true, reentryEnabled: true }).catch(reason => console.error(reason));
+  const resetAllData = async () => {
+    const confirmation = window.prompt(
+      "【本番データ全消去】Firebase上のイベント・チケット・部員・受付履歴・全端末登録・管理者登録を削除します。Firebase Authenticationのログインアカウント自体は削除されません。実行するには RESET と入力してください。"
+    );
+    if (confirmation !== "RESET") return;
+    if (!window.confirm("最終確認：本番Firebaseの全アプリデータと管理者・端末登録を削除します。初期化後は管理者を再登録するまで通常運用できません。実行しますか？")) return;
+    setSettingsNotice("本番Firebaseデータを初期化しています…");
+    try {
+      await callBackend<{ confirm: string }, { success: boolean }>(
+        "resetAllProductionData",
+        { confirm: "RESET_ALL_PRODUCTION_DATA" }
+      );
+      [
+        "qr-ticket-event-history",
+        "qr-ticket-analysis-history",
+        "qr-ticket-app-settings",
+      ].forEach(key => localStorage.removeItem(key));
+      setEvent(baseEvent);
+      setEventHistory([]);
+      setAnalysisHistory([]);
+      setSelectedHistoryEventId("");
+      setSelectedAnalysisEventId("");
+      setTickets([]);
+      setMembers([]);
+      setAppSettings(defaultAppSettings);
+      setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+      setBundle(null);
+      setSettingsNotice("Firebaseの初期化が完了しました。管理者を再登録するまで通常運用できません。");
+    } catch (reason) {
+      console.error(reason);
+      setSettingsNotice("初期化に失敗しました。Firebase Functionsの公開状況と管理者権限を確認してください。");
     }
-    setBundle(null);
-    setSettingsNotice("ローカルデータを初期化しました。");
   };
 
   const addMember = () => {
@@ -2587,9 +2599,9 @@ export default function App() {
       </section>
 
       <section className="settings-section settings-danger">
-        <div className="settings-section-heading"><small>SYSTEM</small><h3>システム</h3><p>初期化はこの端末に保存されたデータにのみ適用されます。</p></div>
+        <div className="settings-section-heading"><small>SYSTEM</small><h3>システム</h3><p>本番Firebaseのアプリデータを削除します。実行後は管理者・端末登録をやり直す必要があります。</p></div>
         <div className="settings-card">
-          <div className="settings-danger-row"><div><b>すべてのデータを初期化</b><small>イベント履歴・分析履歴・チケット・部員情報・設定を削除します。</small></div><button className="danger-action" onClick={resetAllData}>データを初期化</button></div>
+          <div className="settings-danger-row"><div><b>すべてのデータを初期化</b><small>イベント・チケット・部員・受付履歴・全端末登録・管理者登録を削除します。ログインアカウント自体は残ります。</small></div><button className="danger-action" onClick={resetAllData}>データを初期化</button></div>
           <div className="settings-actions"><button className="secondary" onClick={resetAppSettings}>設定を初期状態に戻す</button></div>
         </div>
       </section>
