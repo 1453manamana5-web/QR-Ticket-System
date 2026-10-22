@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
+import { callBackend } from "./firebaseFunctions";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
 export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
@@ -180,114 +181,102 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
-  const ownTerminalId =
-    typeof window !== "undefined"
-      ? localStorage.getItem("qr-ticket-terminal-id") ??
-        localStorage.getItem("qr-ticket-device-id")
-      : null;
+  const ownTerminalId = typeof window !== "undefined"
+    ? localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id")
+    : null;
+  if (ownTerminalId && terminalId === ownTerminalId) throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { deleted: boolean }>(
+    "deleteManagedTerminal",
+    { managerTerminalId: ownTerminalId ?? "", targetTerminalId: terminalId },
+  );
+}
 
-  if (ownTerminalId !== null && terminalId === ownTerminalId) {
-    throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  const db = getFirebaseDb();
-  const { deleteDoc, getDoc } = await import("firebase/firestore");
-  const targetRef = doc(db, "terminals", terminalId);
-  const targetSnapshot = await getDoc(targetRef);
-  if (targetSnapshot.exists() && targetSnapshot.data().admin === true) {
-    throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
-  }
-
-  await deleteDoc(targetRef);
+function getManagerTerminalId(): string {
+  return localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+}
+export async function getOwnTerminalStatus(): Promise<{
+  approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
+  role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
+}> {
+  return callBackend<Record<string, never>, {
+    approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
+    role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
+  }>("getTerminalInstallationStatus", {});
+}
+export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
+  await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
+    "registerTerminalApplication", input,
+  );
+}
+export async function approveTerminal(targetTerminalId: string): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { approved: boolean }>(
+    "approveTerminalRegistration", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
+  );
+}
+export async function setManagedTerminalMode(targetTerminalId: string, mode: "入口受付" | "出口受付" | "停止"): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string; mode: string }, { updated: boolean }>(
+    "setManagedTerminalMode", { managerTerminalId: getManagerTerminalId(), targetTerminalId, mode },
+  );
+}
+export async function setManagedSubAdmin(targetTerminalId: string, enabled: boolean): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string; enabled: boolean }, { updated: boolean }>(
+    "setTerminalSubAdmin", { managerTerminalId: getManagerTerminalId(), targetTerminalId, enabled },
+  );
+}
+export async function releaseOwnReception(): Promise<void> {
+  const terminalId = getManagerTerminalId();
+  await callBackend<{ terminalId: string }, { released: boolean }>(
+    "releaseOwnReceptionRegistration", { terminalId },
+  );
+}
+export async function revokeManagedReception(targetTerminalId: string): Promise<void> {
+  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { released: boolean }>(
+    "revokeTerminalReception", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
+  );
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
-  const db = getFirebaseDb();
-  await setDoc(doc(db, "terminals", terminal.terminalId), { ...terminal, updatedAt: new Date().toISOString() }, { merge: true });
+  const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+  if (!ownTerminalId || terminal.terminalId !== ownTerminalId) {
+    throw new Error("TERMINAL_SERVER_WRITE_REQUIRED");
+  }
+  const previous = await callBackend<Record<string, never>, {
+    terminalId: string | null; name?: string; desiredMode?: string | null;
+  }>("getTerminalInstallationStatus", {});
+  if (typeof terminal.name === "string" && terminal.name.trim() && terminal.name !== previous.name) {
+    await callBackend<{ terminalId: string; name: string }, { terminalId: string; name: string }>(
+      "updateManagedTerminalName", { terminalId: ownTerminalId, name: terminal.name.trim() },
+    );
+  }
+  await callBackend<{
+    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number;
+  }, { saved: boolean }>("updateTerminalHeartbeat", {
+    terminalId: ownTerminalId,
+    mode: terminal.mode,
+    syncPendingCount: terminal.syncPendingCount ?? 0,
+    ...(typeof terminal.networkMbps === "number" ? { networkMbps: terminal.networkMbps } : {}),
+  });
 }
 
 
-let managementNetworkSpeedCache: number | null = null;
-let managementNetworkSpeedMeasuredAt = 0;
-const MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS = 30000;
-const MANAGEMENT_NETWORK_PROBE_SIZE_BYTES = 32768;
-
 function getManagementBrowserDownlink(): number | null {
   if (typeof navigator === "undefined") return null;
-  const connection = (navigator as Navigator & {
-    connection?: { downlink?: number };
-    mozConnection?: { downlink?: number };
-    webkitConnection?: { downlink?: number };
-  }).connection
-    ?? (navigator as Navigator & { mozConnection?: { downlink?: number } }).mozConnection
-    ?? (navigator as Navigator & { webkitConnection?: { downlink?: number } }).webkitConnection;
+  const connection = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
   const downlink = connection?.downlink;
   return typeof downlink === "number" && Number.isFinite(downlink) && downlink > 0 ? downlink : null;
 }
 
-function createManagementNetworkProbe(): string {
-  return "0123456789abcdef".repeat(MANAGEMENT_NETWORK_PROBE_SIZE_BYTES / 16);
-}
-
-async function measureManagementNetworkSpeed(
-  reference: ReturnType<typeof doc>,
-): Promise<number | null> {
-  const now = Date.now();
-  if (now - managementNetworkSpeedMeasuredAt < MANAGEMENT_NETWORK_SPEED_MEASURE_INTERVAL_MS) {
-    return managementNetworkSpeedCache;
-  }
-
-  const browserDownlink = getManagementBrowserDownlink();
-  if (browserDownlink !== null) {
-    managementNetworkSpeedCache = browserDownlink;
-    managementNetworkSpeedMeasuredAt = now;
-    return browserDownlink;
-  }
-
-  try {
-    const probe = createManagementNetworkProbe();
-    const startedAt = performance.now();
-    await setDoc(reference, {
-      networkProbe: probe,
-      networkProbeAt: new Date().toISOString(),
-    }, { merge: true });
-    await getDocFromServer(reference);
-    const elapsedMs = Math.max(1, performance.now() - startedAt);
-    const roundTripBytes = probe.length * 2;
-    const measuredMbps = (roundTripBytes * 8) / (elapsedMs * 1000);
-    const normalized = Math.max(0.1, Math.min(10000, measuredMbps));
-    managementNetworkSpeedCache = normalized;
-    managementNetworkSpeedMeasuredAt = Date.now();
-    return normalized;
-  } catch (reason) {
-    console.warn("管理端末の通信速度測定に失敗しました", reason);
-    return managementNetworkSpeedCache;
-  }
-}
-
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
-  const db = getFirebaseDb();
-  const reference = doc(db, "terminals", terminalId);
-  const existingSnapshot = await getDoc(reference);
-  const existing = existingSnapshot.exists() ? existingSnapshot.data() : {};
-  const networkMbps = await measureManagementNetworkSpeed(reference);
-
-  await setDoc(reference, {
+  const networkMbps = getManagementBrowserDownlink();
+  await callBackend<{
+    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number; preserveMode: boolean;
+  }, { saved: boolean }>("updateTerminalHeartbeat", {
     terminalId,
-    name: typeof existing.name === "string" ? existing.name : "管理端末",
-    type: existing.type === "Web / PC" ? "Web / PC" : "Web / iPad",
-    role: existing.role === "both" || existing.role === "reception" ? existing.role : "management",
-    mode: existing.mode === "入口受付" || existing.mode === "出口受付" ? existing.mode : "停止",
-    status: "online",
-    approved: existing.managementApproved === true || existing.approved === true,
-    managementApproved: existing.managementApproved === true || existing.approved === true,
-    receptionApproved: existing.receptionApproved === true,
-    lastSeen: new Date().toISOString(),
-    networkMbps: networkMbps ?? (typeof existing.networkMbps === "number" ? existing.networkMbps : null),
-    battery: typeof existing.battery === "number" ? existing.battery : null,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-
+    mode: "停止",
+    syncPendingCount: 0,
+    preserveMode: true,
+    ...(networkMbps !== null ? { networkMbps } : {}),
+  });
   return networkMbps;
 }
 
@@ -349,13 +338,30 @@ export async function loadReceptionErrors(eventId: string): Promise<ReceptionErr
 }
 
 export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => void, onError: (error: unknown) => void): () => void {
-  const db = getFirebaseDb();
-  return onSnapshot(collection(db, "terminals"), snapshot => onChange(snapshot.docs.map(item => item.data() as TerminalRecord)), onError);
+  let active = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const refresh = async () => {
+    try {
+      const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+      const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
+        "listManagedTerminals", { managerTerminalId },
+      );
+      if (active) onChange(result.terminals);
+    } catch (error) {
+      if (active) onError(error);
+    } finally {
+      if (active) timer = setTimeout(() => { void refresh(); }, 5000);
+    }
+  };
+  void refresh();
+  return () => { active = false; if (timer) clearTimeout(timer); };
 }
 export async function loadTerminals(): Promise<TerminalRecord[]> {
-  const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "terminals"));
-  return snapshot.docs.map(item => item.data() as TerminalRecord);
+  const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
+  const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
+    "listManagedTerminals", { managerTerminalId },
+  );
+  return result.terminals;
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();

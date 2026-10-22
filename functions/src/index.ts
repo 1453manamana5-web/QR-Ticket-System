@@ -1,0 +1,1442 @@
+import { initializeApp } from "firebase-admin/app";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
+
+initializeApp();
+const db = getFirestore();
+
+const REQUEST_TTL_MS = 5 * 60 * 1000;
+const REQUEST_COOLDOWN_MS = 15 * 1000;
+
+function requireUid(request: { auth?: { uid: string } | null }): string {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "ログイン状態を確認してください。");
+  }
+  return uid;
+}
+
+function readId(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length < 8 ||
+      value.length > 160 || value.includes("/")) {
+    // IDs are used as single Firestore document-path segments. Reject slashes
+    // rather than allowing caller input to alter the path structure.
+    throw new HttpsError("invalid-argument", field + "が正しくありません。");
+  }
+  return value.trim();
+}
+
+// Legacy terminals without a generation start at zero. Invalid values fail closed.
+function readReceptionApprovalVersion(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new HttpsError("failed-precondition", "受付権限の世代情報が不正です。");
+  }
+  return value;
+}
+
+function readTerminalReceptionApprovalVersion(value: unknown): number {
+  // Revocation must remain possible even if the stored counter is malformed.
+  // Use an epoch-sized generation rather than resetting to zero: a stale request
+  // may already carry generation 1, so a reset could accidentally make it current.
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return Date.now();
+  }
+  return value;
+}
+
+function isCurrentReceptionApprovalVersion(value: unknown, expected: number): boolean {
+  try {
+    return readReceptionApprovalVersion(value) === expected;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ownership is stored separately in terminalOwners/{terminalId}. That collection
+ * must be writable only by trusted Admin SDK code; clients must never be able to
+ * create or update ownership mappings. Existing terminals need a trusted
+ * migration before this flow can be enabled.
+ */
+export const requestTerminalHandoff = onCall(async (call) => {
+  const requesterUid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+
+  const terminalRef = db.doc(`terminals/${terminalId}`);
+  const requestRef = db.collection("terminalHandoffRequests").doc();
+  const rateLimitRef = db.doc(`terminalHandoffRateLimits/${requesterUid}`);
+  const now = Date.now();
+
+  await db.runTransaction(async (tx) => {
+    const ownerRef = db.doc(`terminalOwners/${terminalId}`);
+    const [terminalSnap, ownerSnap, rateLimitSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+      tx.get(rateLimitRef),
+    ]);
+
+    const role = terminalSnap.get("role");
+    const receptionRole = role === "reception" || role === "both";
+    const receptionApproved = terminalSnap.get("receptionApproved") === true ||
+      (terminalSnap.get("receptionApproved") === undefined &&
+        terminalSnap.get("approved") === true);
+
+    if (
+      !terminalSnap.exists ||
+      terminalSnap.get("approved") !== true ||
+      !receptionRole ||
+      !receptionApproved ||
+      !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true ||
+      ownerSnap.get("ownerUid") === requesterUid
+    ) {
+      // Validate the required reception authorization before creating a request.
+      // Keep the response generic so arbitrary IDs cannot be enumerated.
+      throw new HttpsError("not-found", "引き継ぎ対象を確認できません。");
+    }
+
+    const receptionApprovalVersion = readReceptionApprovalVersion(
+      terminalSnap.get("receptionApprovalVersion"),
+    );
+    const lastRequestedAt = rateLimitSnap.get("lastRequestedAt");
+    if (lastRequestedAt instanceof Timestamp &&
+        now - lastRequestedAt.toMillis() < REQUEST_COOLDOWN_MS) {
+      throw new HttpsError("resource-exhausted", "少し待ってから再度申請してください。");
+    }
+
+    tx.set(requestRef, {
+      terminalId,
+      requesterUid,
+      status: "pending",
+      receptionApprovalVersion,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(now + REQUEST_TTL_MS),
+    });
+    tx.set(rateLimitRef, {
+      lastRequestedAt: Timestamp.fromMillis(now),
+    }, { merge: true });
+  });
+
+  return { requestId: requestRef.id, expiresInSeconds: REQUEST_TTL_MS / 1000 };
+});
+
+/** Only the authenticated owner of the registered terminal can list its requests. */
+export const listTerminalHandoffRequests = onCall(async (call) => {
+  const ownerUid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const [terminalSnap, ownerSnap] = await Promise.all([
+    db.doc(`terminals/${terminalId}`).get(),
+    db.doc(`terminalOwners/${terminalId}`).get(),
+  ]);
+
+  const terminalRole = terminalSnap.get("role");
+  const receptionActive = (terminalRole === "reception" || terminalRole === "both") &&
+    (terminalSnap.get("receptionApproved") === true ||
+      (terminalSnap.get("receptionApproved") === undefined &&
+        terminalSnap.get("approved") === true));
+  if (
+    !terminalSnap.exists ||
+    terminalSnap.get("approved") !== true ||
+    !receptionActive ||
+    !ownerSnap.exists ||
+    ownerSnap.get("enabled") !== true ||
+    ownerSnap.get("ownerUid") !== ownerUid
+  ) {
+    throw new HttpsError("permission-denied", "この端末の申請を確認する権限がありません。");
+  }
+
+  const now = Timestamp.now();
+  const snapshot = await db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", terminalId)
+    .where("status", "==", "pending")
+    .where("expiresAt", ">", now)
+    .get();
+
+  return {
+    requests: snapshot.docs.flatMap((doc) => {
+      const expiresAt = doc.get("expiresAt");
+      const createdAt = doc.get("createdAt");
+      // Defensive validation keeps malformed legacy documents from crashing
+      // the entire owner-facing request list.
+      if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) {
+        return [];
+      }
+      return [{
+        requestId: doc.id,
+        createdAt: createdAt instanceof Timestamp ? createdAt.toMillis() : null,
+        expiresAt: expiresAt.toMillis(),
+      }];
+    }),
+  };
+});
+
+/** Approval/rejection is bound to a pending request and checked on the server. */
+export const decideTerminalHandoff = onCall(async (call) => {
+  const ownerUid = requireUid(call);
+  const requestId = readId(call.data?.requestId, "申請ID");
+  const decision = call.data?.decision;
+  if (decision !== "approve" && decision !== "reject") {
+    throw new HttpsError("invalid-argument", "承認または拒否を指定してください。");
+  }
+
+  const requestRef = db.doc(`terminalHandoffRequests/${requestId}`);
+  await db.runTransaction(async (tx) => {
+    const requestSnap = await tx.get(requestRef);
+    if (!requestSnap.exists) {
+      throw new HttpsError("not-found", "申請が見つからないか、有効期限が切れています。");
+    }
+
+    const terminalId = readId(requestSnap.get("terminalId"), "申請内の端末ID");
+    const terminalRef = db.doc(`terminals/${terminalId}`);
+    const ownerRef = db.doc(`terminalOwners/${terminalId}`);
+    const [terminalSnap, ownerSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+    ]);
+
+    const terminalRole = terminalSnap.get("role");
+    const receptionActive = (terminalRole === "reception" || terminalRole === "both") &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined &&
+          terminalSnap.get("approved") === true));
+    if (
+      !terminalSnap.exists ||
+      terminalSnap.get("approved") !== true ||
+      !receptionActive ||
+      !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true ||
+      ownerSnap.get("ownerUid") !== ownerUid
+    ) {
+      throw new HttpsError("permission-denied", "この申請を処理する権限がありません。");
+    }
+
+    const requestVersion = readReceptionApprovalVersion(requestSnap.get("receptionApprovalVersion"));
+    const currentVersion = readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion"));
+    const expiresAt = requestSnap.get("expiresAt");
+    const createdAt = requestSnap.get("createdAt");
+    if (
+      requestVersion !== currentVersion ||
+      requestSnap.get("status") !== "pending" ||
+      !(createdAt instanceof Timestamp) ||
+      !(expiresAt instanceof Timestamp) ||
+      expiresAt.toMillis() <= Date.now() ||
+      createdAt.toMillis() > Date.now()
+    ) {
+      throw new HttpsError("failed-precondition", "申請は処理済みか、有効期限が切れているか、申請情報が不正です。");
+    }
+
+    tx.update(requestRef, {
+      status: decision === "approve" ? "approved" : "rejected",
+      decidedAt: FieldValue.serverTimestamp(),
+      decidedByUid: ownerUid,
+    });
+  });
+
+  return { status: decision === "approve" ? "approved" : "rejected" };
+});
+
+/**
+ * The requesting Firebase UID can consume an approval once. The resulting
+ * installation record is written by Admin SDK, never by the browser.
+ * Reception clients must still be updated to require this record before use.
+ */
+export const completeTerminalHandoff = onCall(async (call) => {
+  const requesterUid = requireUid(call);
+  const requestId = readId(call.data?.requestId, "申請ID");
+  const requestRef = db.doc(`terminalHandoffRequests/${requestId}`);
+  const installationRef = db.doc(`terminalInstallations/${requesterUid}`);
+
+  const terminalId = await db.runTransaction(async (tx) => {
+    const requestSnap = await tx.get(requestRef);
+    if (!requestSnap.exists) {
+      throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
+    }
+    const expiresAt = requestSnap.get("expiresAt");
+    const createdAt = requestSnap.get("createdAt");
+    if (
+      requestSnap.get("requesterUid") !== requesterUid ||
+      requestSnap.get("status") !== "approved" ||
+      !(createdAt instanceof Timestamp) ||
+      createdAt.toMillis() > Date.now() ||
+      !(expiresAt instanceof Timestamp) ||
+      expiresAt.toMillis() <= Date.now()
+    ) {
+      throw new HttpsError("permission-denied", "有効な承認済み申請がありません。");
+    }
+
+    const id = readId(requestSnap.get("terminalId"), "申請内の端末ID");
+    const terminalRef = db.doc("terminals/" + id);
+    const ownerRef = db.doc("terminalOwners/" + id);
+    const [installationSnap, terminalSnap, ownerSnap] = await Promise.all([
+      tx.get(installationRef),
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+    ]);
+    const terminalRole = terminalSnap.get("role");
+    const terminalAllowsReception = terminalSnap.exists &&
+      (terminalRole === "reception" || terminalRole === "both") &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true));
+    if (!terminalSnap.exists || terminalSnap.get("approved") !== true ||
+        !terminalAllowsReception || !ownerSnap.exists || ownerSnap.get("enabled") !== true) {
+      throw new HttpsError("failed-precondition", "端末の受付承認が無効になったため、引き継ぎを完了できません。");
+    }
+    // An approval from before a revocation must never become usable again
+    // after reception is re-approved. Compare the captured generation first.
+    if (readReceptionApprovalVersion(requestSnap.get("receptionApprovalVersion")) !==
+        readReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion"))) {
+      throw new HttpsError("failed-precondition", "受付権限の解除後に新しく申請してください。");
+    }
+    // Approval is valid only while the same owner who approved the request
+    // still owns the terminal. This closes the gap if ownership changes between
+    // the approval and completion steps.
+    if (requestSnap.get("decidedByUid") !== ownerSnap.get("ownerUid")) {
+      throw new HttpsError("failed-precondition", "承認後に端末の所有者情報が変更されています。もう一度申請してください。");
+    }
+    if (installationSnap.exists &&
+        (installationSnap.get("terminalId") !== id ||
+         installationSnap.get("authUid") !== requesterUid)) {
+      throw new HttpsError("failed-precondition", "この環境の登録情報が一致しません。管理者による確認が必要です。");
+    }
+    // Do not let a second, separately approved request overwrite an already
+    // active grant for the same installation. Multiple pending requests can
+    // exist across the cooldown window; consuming the first one must make the
+    // others unusable for this installation.
+    if (installationSnap.exists && installationSnap.get("approved") === true) {
+      throw new HttpsError("failed-precondition", "この端末環境はすでに登録済みです。再登録する場合は、先に受付登録を解除してください。");
+    }
+    // A release invalidates handoff approvals created before the release time.
+    // A new owner-approved request created after release remains valid.
+    const releasedAt = installationSnap.get("releasedAt");
+    const requestCreatedAt = requestSnap.get("createdAt");
+    if (installationSnap.exists && installationSnap.get("approved") === false &&
+        releasedAt instanceof Timestamp &&
+        (!(requestCreatedAt instanceof Timestamp) ||
+         releasedAt.toMillis() >= requestCreatedAt.toMillis())) {
+      throw new HttpsError("failed-precondition", "受付登録の解除後に新しく申請してください。");
+    }
+
+    tx.set(installationRef, {
+      terminalId: id,
+      authUid: requesterUid,
+      approved: true,
+      handoffRequestId: requestId,
+      createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    tx.update(requestRef, {
+      status: "consumed",
+      consumedAt: FieldValue.serverTimestamp(),
+    });
+    return id;
+  });
+
+  return { terminalId, approved: true };
+});
+
+
+/** Verify that this Firebase Auth installation has a server-issued handoff. */
+export const getTerminalInstallationStatus = onCall(async (call) => {
+  const uid = requireUid(call);
+  const installation = await db.doc("terminalInstallations/" + uid).get();
+  if (!installation.exists || installation.get("authUid") !== uid || installation.get("approved") !== true) {
+    const applications = await db.collection("terminalApplications")
+      .where("requestedByUid", "==", uid)
+      .limit(5)
+      .get();
+    const pending = applications.docs.find((item) => item.get("status") === "pending");
+    if (pending) {
+      return {
+        approved: false,
+        terminalId: null,
+        name: typeof pending.get("name") === "string" ? pending.get("name") : "端末",
+        status: "pending",
+        role: pending.get("requestedRole") ?? null,
+      };
+    }
+    return { approved: false, terminalId: null };
+  }
+
+  const terminalId = installation.get("terminalId");
+  if (typeof terminalId !== "string" || terminalId.length < 8 || terminalId.length > 160) {
+    return { approved: false, terminalId: null };
+  }
+
+  const [owner, terminal, applications] = await Promise.all([
+    db.doc("terminalOwners/" + terminalId).get(),
+    db.doc("terminals/" + terminalId).get(),
+    db.collection("terminalApplications").where("requestedByUid", "==", uid).limit(5).get(),
+  ]);
+  if (!owner.exists || owner.get("enabled") !== true ||
+      !terminal.exists || terminal.get("approved") !== true) {
+    return { approved: false, terminalId: null };
+  }
+
+  const pendingReceptionApplication = applications.docs.some((item) =>
+    item.get("terminalId") === terminalId &&
+    item.get("requestedRole") === "reception" &&
+    item.get("status") === "pending"
+  );
+  const role = terminal.get("role");
+  const managementApproved = terminal.get("managementApproved") === true ||
+    (terminal.get("managementApproved") === undefined && terminal.get("approved") === true &&
+      (role === "management" || role === "both"));
+  const receptionApproved = terminal.get("receptionApproved") === true ||
+    (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true &&
+      (role === "reception" || role === "both"));
+  const status = terminal.get("status");
+  const desiredMode = terminal.get("desiredMode");
+  const desiredModeUpdatedAt = terminal.get("desiredModeUpdatedAt");
+  return {
+    approved: true,
+    terminalId,
+    name: typeof terminal.get("name") === "string" ? terminal.get("name") : "端末",
+    status: pendingReceptionApplication ? "pending" : (status === "online" || status === "offline" ? status : "pending"),
+    role: role === "management" || role === "reception" || role === "both" ? role : null,
+    managementApproved,
+    receptionApproved,
+    desiredMode: desiredMode === "入口受付" || desiredMode === "出口受付" || desiredMode === "停止" ? desiredMode : null,
+    desiredModeUpdatedAt: typeof desiredModeUpdatedAt === "string" ? desiredModeUpdatedAt : null,
+  };
+});
+
+/** Approve requested terminal roles only when called by a trusted registered manager. */
+/**
+ * List terminal metadata for an approved administrator terminal. Trusted owner
+ * and installation documents are intentionally not exposed to the client.
+ */
+export const listManagedTerminals = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const [manager, owner, installation] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminalInstallations/" + uid).get(),
+  ]);
+  if (!manager.exists || !owner.exists || !installation.exists ||
+      owner.get("enabled") !== true || owner.get("ownerUid") !== uid ||
+      installation.get("authUid") !== uid || installation.get("terminalId") !== managerTerminalId ||
+      installation.get("approved") !== true || manager.get("approved") !== true ||
+      manager.get("managementApproved") !== true ||
+      (manager.get("role") !== "management" && manager.get("role") !== "both")) {
+    throw new HttpsError("permission-denied", "登録済みの管理端末から実行してください。");
+  }
+  const snapshot = await db.collection("terminals").get();
+  return {
+    terminals: snapshot.docs.map((item) => {
+      const value = item.data();
+      return {
+        terminalId: item.id,
+        name: typeof value.name === "string" ? value.name : item.id,
+        type: value.type === "Web / PC" ? "Web / PC" : "Web / iPad",
+        mode: value.mode === "入口受付" || value.mode === "出口受付" ? value.mode : "停止",
+        desiredMode: value.desiredMode === "入口受付" || value.desiredMode === "出口受付" || value.desiredMode === "停止" ? value.desiredMode : undefined,
+        desiredModeUpdatedAt: typeof value.desiredModeUpdatedAt === "string" ? value.desiredModeUpdatedAt : undefined,
+        status: value.status === "online" || value.status === "offline" ? value.status : "pending",
+        approved: value.approved === true,
+        lastSeen: typeof value.lastSeen === "string" ? value.lastSeen : null,
+        networkMbps: typeof value.networkMbps === "number" ? value.networkMbps : null,
+        battery: typeof value.battery === "number" ? value.battery : null,
+        role: value.role === "management" || value.role === "reception" || value.role === "both" ? value.role : undefined,
+        managementApproved: value.managementApproved === true,
+        receptionApproved: value.receptionApproved === true,
+        syncPendingCount: typeof value.syncPendingCount === "number" ? value.syncPendingCount : 0,
+        admin: value.admin === true,
+        subAdmin: value.subAdmin === true,
+      };
+    }),
+  };
+});
+
+export const approveTerminalRegistration = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("invalid-argument", "自分自身は承認できません。");
+  }
+
+  const [managerSnap, managerOwnerSnap, managerInstallationSnap, targetSnap, applicationSnap] = await Promise.all([
+    db.doc("terminals/" + managerTerminalId).get(),
+    db.doc("terminalOwners/" + managerTerminalId).get(),
+    db.doc("terminalInstallations/" + uid).get(),
+    db.doc("terminals/" + targetTerminalId).get(),
+    db.doc("terminalApplications/" + targetTerminalId).get(),
+  ]);
+
+  if (!managerSnap.exists || !managerOwnerSnap.exists || !managerInstallationSnap.exists ||
+      managerOwnerSnap.get("enabled") !== true ||
+      managerOwnerSnap.get("ownerUid") !== uid ||
+      managerInstallationSnap.get("authUid") !== uid ||
+      managerInstallationSnap.get("terminalId") !== managerTerminalId ||
+      managerInstallationSnap.get("approved") !== true ||
+      managerSnap.get("approved") !== true ||
+      managerSnap.get("managementApproved") !== true ||
+      (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+      (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+    throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+  }
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "承認対象の端末が見つかりません。");
+  }
+
+  // The bootstrap administrator and any designated sub-administrator are protected
+  // identities; they cannot be re-approved through the ordinary registration queue.
+  if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+    throw new HttpsError("failed-precondition", "管理権限を持つ端末は通常の申請から変更できません。");
+  }
+
+  const role = targetSnap.get("role");
+  if (role !== "management" && role !== "reception" && role !== "both") {
+    throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
+  }
+
+  const isAdmin = managerSnap.get("admin") === true;
+  if (!isAdmin && (role === "management" || role === "both")) {
+    throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
+  }
+
+  // requestedByUid on the terminal document is not trusted by itself because
+  // the legacy live rules allowed direct client writes. Verify the server-owned
+  // application record before granting any role.
+  if (!applicationSnap.exists ||
+      applicationSnap.get("terminalId") !== targetTerminalId ||
+      applicationSnap.get("status") !== "pending" ||
+      applicationSnap.get("requestedByUid") !== targetSnap.get("requestedByUid") ||
+      applicationSnap.get("requestedRole") !== targetSnap.get("requestedRole")) {
+    throw new HttpsError("failed-precondition", "信頼できる申請情報がありません。端末から申請をやり直してください。");
+  }
+  const targetUid = applicationSnap.get("requestedByUid");
+  if (typeof targetUid !== "string" || targetUid.length < 1) {
+    throw new HttpsError("failed-precondition", "申請者を確認できません。端末から申請をやり直してください。");
+  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  const applicationRef = db.doc("terminalApplications/" + targetTerminalId);
+  const installationRef = db.doc("terminalInstallations/" + targetUid);
+  await db.runTransaction(async (tx) => {
+    const [freshManager, freshManagerOwner, freshManagerInstallation, freshTarget, ownerSnap, installationSnap, freshApplication] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(managerInstallationRef),
+      tx.get(targetRef),
+      tx.get(targetOwnerRef),
+      tx.get(installationRef),
+      tx.get(applicationRef),
+    ]);
+    // Revalidate the acting manager inside the same transaction as the approval.
+    // A permission revocation or ownership change after the initial reads must
+    // not allow a stale administrator session to approve another terminal.
+    if (!freshManager.exists || !freshManagerOwner.exists || !freshManagerInstallation.exists ||
+        freshManagerOwner.get("enabled") !== true ||
+        freshManagerOwner.get("ownerUid") !== uid ||
+        freshManagerInstallation.get("authUid") !== uid ||
+        freshManagerInstallation.get("terminalId") !== managerTerminalId ||
+        freshManagerInstallation.get("approved") !== true ||
+        freshManager.get("approved") !== true ||
+        freshManager.get("managementApproved") !== true ||
+        (freshManager.get("role") !== "management" && freshManager.get("role") !== "both") ||
+        (freshManager.get("admin") !== true && freshManager.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "管理端末の権限が変更されたため、承認できません。");
+    }
+    if (!freshTarget.exists ||
+        freshTarget.get("requestedByUid") !== targetUid ||
+        freshTarget.get("admin") === true || freshTarget.get("subAdmin") === true ||
+        !freshApplication.exists ||
+        freshApplication.get("terminalId") !== targetTerminalId ||
+        freshApplication.get("requestedByUid") !== targetUid ||
+        freshApplication.get("requestedRole") !== freshTarget.get("requestedRole") ||
+        freshApplication.get("status") !== "pending") {
+      throw new HttpsError("failed-precondition", "申請内容が変更されています。端末から再申請してください。");
+    }
+    const freshRole = freshTarget.get("role");
+    if (freshRole !== "management" && freshRole !== "reception" && freshRole !== "both") {
+      throw new HttpsError("failed-precondition", "端末の申請内容を確認できません。");
+    }
+    if (freshManager.get("admin") !== true &&
+        (freshRole === "management" || freshRole === "both")) {
+      throw new HttpsError("permission-denied", "副管理者は管理端末を承認できません。");
+    }
+    // Any existing owner mapping is authoritative, including a disabled one.
+    // Ordinary approval must never revive a revoked mapping or transfer ownership;
+    // use the explicit handoff/recovery process for previously owned terminal IDs.
+    if (ownerSnap.exists &&
+        (ownerSnap.get("ownerUid") !== targetUid || ownerSnap.get("enabled") !== true)) {
+      throw new HttpsError("already-exists", "この端末IDは既存の所有者情報があるため、通常の承認では再登録できません。所有権の引き継ぎ手続きが必要です。");
+    }
+    if (installationSnap.exists &&
+        (installationSnap.get("terminalId") !== targetTerminalId ||
+         installationSnap.get("authUid") !== targetUid ||
+         installationSnap.get("approved") !== true)) {
+      throw new HttpsError("already-exists", "この端末環境の登録情報が一致しないか、無効化されています。安全な再登録手続きが必要です。");
+    }
+    // An installation record without its trusted owner mapping is not sufficient
+    // proof of ownership. This is especially important for legacy data created
+    // while the live Firestore rules were permissive.
+    if (installationSnap.exists && !ownerSnap.exists) {
+      throw new HttpsError("failed-precondition", "端末の所有者情報を確認できません。信頼できる移行手続きが必要です。");
+    }
+
+    const patch: Record<string, any> = {
+      approved: true,
+      status: "offline",
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (freshRole === "management" || freshRole === "both") patch.managementApproved = true;
+    if (freshRole === "reception" || freshRole === "both") patch.receptionApproved = true;
+    tx.update(targetRef, patch);
+    tx.set(targetOwnerRef, {
+      terminalId: targetTerminalId,
+      ownerUid: targetUid,
+      enabled: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    // Record a trusted installation for every approved role. Firestore rules
+    // use this server-issued mapping to distinguish management clients from
+    // reception-only clients.
+    tx.set(installationRef, {
+      terminalId: targetTerminalId,
+      authUid: targetUid,
+      approved: true,
+      registrationApprovedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    tx.update(applicationRef, {
+      status: "approved",
+      decidedAt: FieldValue.serverTimestamp(),
+      decidedByUid: uid,
+    });
+  });
+  return { terminalId: targetTerminalId, approved: true, role };
+});
+
+
+/** Revoke reception access without letting the browser edit approval flags directly. */
+export const revokeTerminalReception = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身の受付権限はこの操作では解除できません。");
+  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const handoffRequestsQuery = db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", targetTerminalId);
+  const nextReceptionApprovalVersion = await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(targetRef),
+    ]);
+    // Permission and ownership must still be valid at the exact time of revocation.
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+    if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("permission-denied", "管理権限を持つ端末の受付権限は解除できません。");
+    }
+
+    const role = targetSnap.get("role");
+    if (role !== "both" && role !== "reception" && role !== "management") {
+      throw new HttpsError("failed-precondition", "対象端末の種別を確認できません。");
+    }
+    const now = new Date().toISOString();
+    const nextVersion = readTerminalReceptionApprovalVersion(targetSnap.get("receptionApprovalVersion")) + 1;
+    const patch: Record<string, unknown> = {
+      receptionApproved: false,
+      receptionApprovalVersion: nextVersion,
+      approved: targetSnap.get("managementApproved") === true,
+      mode: "停止",
+      desiredMode: "停止",
+      desiredModeUpdatedAt: now,
+      updatedAt: now,
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (role === "both") patch.role = "management";
+    tx.update(targetRef, patch);
+    // The generation increment invalidates old requests atomically. Cleanup
+    // happens afterward in bounded batches; it is not relied on for security.
+    return nextVersion;
+  });
+  const requests = await handoffRequestsQuery.get();
+  const staleRequests = requests.docs.filter((request) => {
+    const status = request.get("status");
+    return (status === "pending" || status === "approved") &&
+      !isCurrentReceptionApprovalVersion(request.get("receptionApprovalVersion"), nextReceptionApprovalVersion);
+  });
+  for (let i = 0; i < staleRequests.length; i += 400) {
+    const batch = db.batch();
+    staleRequests.slice(i, i + 400).forEach((request) => batch.update(request.ref, {
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledByUid: uid,
+    }));
+    await batch.commit();
+  }
+  return { terminalId: targetTerminalId, receptionApproved: false };
+});
+/** Delete another terminal only through a trusted admin/sub-admin server check. */
+export const deleteManagedTerminal = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "現在使用中の管理端末は削除できません。");
+  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  const deleted = await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+      tx.get(managerRef),
+      tx.get(managerOwnerRef),
+      tx.get(targetRef),
+      tx.get(targetOwnerRef),
+    ]);
+    // Recheck the acting manager and target atomically to prevent stale
+    // permissions from authorizing a delete after a concurrent revocation.
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) return false;
+    // Administrator and designated sub-administrator terminals are protected.
+    // The primary admin can first remove sub-admin status explicitly if that
+    // terminal genuinely needs to be decommissioned.
+    if (targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("permission-denied", "管理者・副管理者端末は削除できません。");
+    }
+
+    const isAdmin = managerSnap.get("admin") === true;
+    const targetRole = targetSnap.get("role");
+    if (!isAdmin && (targetRole === "management" || targetRole === "both")) {
+      throw new HttpsError("permission-denied", "副管理者は管理端末を削除できません。");
+    }
+
+    tx.delete(targetRef);
+    // Keep a disabled owner tombstone after deletion. Removing the mapping
+    // entirely would let a stale client reuse the same terminal ID and could
+    // make an installation left behind by interrupted cleanup valid again.
+    const previousOwnerUid = targetOwnerSnap.exists
+      ? targetOwnerSnap.get("ownerUid")
+      : targetSnap.get("requestedByUid");
+    tx.set(targetOwnerRef, {
+      terminalId: targetTerminalId,
+      ...(typeof previousOwnerUid === "string" && previousOwnerUid.length > 0
+        ? { ownerUid: previousOwnerUid }
+        : {}),
+      enabled: false,
+      deletedAt: FieldValue.serverTimestamp(),
+      deletedByUid: uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return true;
+  });
+  if (!deleted) return { terminalId: targetTerminalId, deleted: false };
+
+  // Cleanup is deliberately after the atomic revocation of the terminal and
+  // owner mapping. Any stale installation is denied by server checks even if
+  // a cleanup query is interrupted and needs to be retried.
+  const pending = await db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", targetTerminalId).get();
+  for (let i = 0; i < pending.docs.length; i += 400) {
+    const cleanup = db.batch();
+    pending.docs.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
+    await cleanup.commit();
+  }
+
+  const installations = await db.collection("terminalInstallations")
+    .where("terminalId", "==", targetTerminalId).get();
+  for (let i = 0; i < installations.docs.length; i += 400) {
+    const cleanup = db.batch();
+    installations.docs.slice(i, i + 400).forEach((doc) => cleanup.delete(doc.ref));
+    await cleanup.commit();
+  }
+  // Remove the server-owned application record only after the terminal has
+  // been revoked and deleted. Keep the disabled owner tombstone to block reuse.
+  await db.doc("terminalApplications/" + targetTerminalId).delete();
+  return { terminalId: targetTerminalId, deleted: true };
+});
+
+/** Let an installation release only its own reception permission. */
+export const cancelOwnTerminalApplication = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const applicationRef = db.doc("terminalApplications/" + terminalId);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const [application, terminal] = await Promise.all([applicationRef.get(), terminalRef.get()]);
+  if (!application.exists || application.get("requestedByUid") !== uid ||
+      application.get("status") !== "pending") {
+    throw new HttpsError("permission-denied", "取り消せる自分の未承認申請がありません。");
+  }
+  if (terminal.exists && terminal.get("approved") === true) {
+    throw new HttpsError("failed-precondition", "承認済み端末は受付権限の解除手続きを使用してください。");
+  }
+  await applicationRef.delete();
+  return { terminalId, cancelled: true };
+});
+
+export const releaseOwnReceptionRegistration = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const handoffRequestsQuery = db.collection("terminalHandoffRequests")
+    .where("terminalId", "==", terminalId);
+
+  const result = await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+      tx.get(installationRef),
+    ]);
+
+    const ownsTerminal = ownerSnap.exists &&
+      ownerSnap.get("enabled") === true &&
+      ownerSnap.get("ownerUid") === uid;
+    const hasInstallationGrant = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId;
+    if (!ownsTerminal && !hasInstallationGrant) {
+      throw new HttpsError("permission-denied", "この端末の受付権限を解除する権限がありません。");
+    }
+    if (!terminalSnap.exists) {
+      return { terminalId, receptionApproved: false, released: false };
+    }
+
+    // A handed-off installation may release only its own installation grant.
+    // Do not change shared terminal approval or role fields from a recipient device.
+    if (!ownsTerminal && hasInstallationGrant) {
+      tx.update(installationRef, {
+        approved: false,
+        releasedAt: FieldValue.serverTimestamp(),
+      });
+      // A recipient can cancel only its own pending/approved handoffs; it must
+      // not revoke the shared terminal's reception approval for other devices.
+      return { terminalId, receptionApproved: false, released: true, ownerRelease: false };
+    }
+
+    const role = terminalSnap.get("role");
+    const managementApproved = terminalSnap.get("managementApproved") === true;
+    const now = new Date().toISOString();
+    const nextVersion = readTerminalReceptionApprovalVersion(terminalSnap.get("receptionApprovalVersion")) + 1;
+    const patch: Record<string, unknown> = {
+      receptionApproved: false,
+      receptionApprovalVersion: nextVersion,
+      approved: managementApproved,
+      mode: "停止",
+      desiredMode: "停止",
+      desiredModeUpdatedAt: now,
+      updatedAt: now,
+      approvalUpdatedAt: FieldValue.serverTimestamp(),
+      approvalUpdatedByUid: uid,
+    };
+    if (role === "both" && managementApproved) patch.role = "management";
+    tx.update(terminalRef, patch);
+    // Incrementing the generation immediately invalidates all prior requests.
+    return { terminalId, receptionApproved: false, released: true,
+      ownerRelease: true, nextReceptionApprovalVersion: nextVersion };
+  });
+
+  const requests = await handoffRequestsQuery.get();
+  const staleRequests = requests.docs.filter((request) => {
+    const status = request.get("status");
+    return (status === "pending" || status === "approved") &&
+      (request.get("requesterUid") === uid ||
+       (typeof result.nextReceptionApprovalVersion === "number" &&
+        !isCurrentReceptionApprovalVersion(request.get("receptionApprovalVersion"), result.nextReceptionApprovalVersion)));
+  });
+  for (let i = 0; i < staleRequests.length; i += 400) {
+    const batch = db.batch();
+    staleRequests.slice(i, i + 400).forEach((request) => batch.update(request.ref, {
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledByUid: uid,
+    }));
+    await batch.commit();
+  }
+  return result;
+});
+
+
+/** Create a pending terminal application without allowing the browser to grant privileges. */
+export const registerTerminalApplication = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const name = typeof call.data?.name === "string" ? call.data.name.trim().slice(0, 80) : "";
+  const type = call.data?.type === "Web / PC" ? "Web / PC" : "Web / iPad";
+  const requestedRole = call.data?.role;
+  if (!/^T-[A-Za-z0-9-]{8,40}$/.test(terminalId)) {
+    throw new HttpsError("invalid-argument", "端末IDが正しくありません。");
+  }
+  if (requestedRole !== "management" && requestedRole !== "reception" && requestedRole !== "both") {
+    throw new HttpsError("invalid-argument", "申請する端末種別が正しくありません。");
+  }
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const applicationRef = db.doc("terminalApplications/" + terminalId);
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap, applicationSnap] = await Promise.all([
+      tx.get(terminalRef), tx.get(ownerRef), tx.get(applicationRef),
+    ]);
+    if (applicationSnap.exists && applicationSnap.get("requestedByUid") !== uid) {
+      throw new HttpsError("already-exists", "この端末IDには別の申請情報が登録されています。管理者による確認が必要です。");
+    }
+    if (ownerSnap.exists && ownerSnap.get("enabled") !== true) {
+      throw new HttpsError("already-exists", "この端末IDには無効化された所有者情報が残っています。安全な所有権の引き継ぎ手続きが必要です。");
+    }
+    if (ownerSnap.exists && ownerSnap.get("ownerUid") !== uid) {
+      throw new HttpsError("already-exists", "この端末IDは別の登録に使用されています。");
+    }
+    if (terminalSnap.exists) {
+      const current = terminalSnap.data() ?? {};
+      const sameTrustedOwner = ownerSnap.exists &&
+        ownerSnap.get("enabled") === true && ownerSnap.get("ownerUid") === uid;
+      if (requestedRole === "reception" && sameTrustedOwner) {
+        // Reapplying for reception always requires approval. Preserve an existing
+        // management grant, but never carry forward reception approval.
+        const managementApproved = current.managementApproved === true;
+        tx.set(terminalRef, {
+          name: name || (typeof current.name === "string" ? current.name : "受付端末"),
+          type,
+          role: managementApproved ? "both" : "reception",
+          receptionApproved: false,
+          approved: managementApproved,
+          managementApproved,
+          requestedRole: "reception",
+          requestedByUid: uid,
+          requestedAt: FieldValue.serverTimestamp(),
+          status: managementApproved
+            ? (current.status === "online" ? "online" : "offline")
+            : "pending",
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        tx.set(applicationRef, {
+          terminalId,
+          requestedByUid: uid,
+          requestedRole: "reception",
+          status: "pending",
+          requestedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return;
+      }
+      if (current.admin === true || current.subAdmin === true ||
+          current.managementApproved === true || current.receptionApproved === true ||
+          current.approved === true) {
+        throw new HttpsError("already-exists", "登録済み端末は新規申請できません。管理端末から承認操作を行ってください。");
+      }
+      // Existing pending IDs must be bound to the same authenticated applicant.
+      // Missing/malformed requestedByUid is not evidence of ownership: fail closed
+      // rather than letting another installation take over a legacy or damaged request.
+      if (current.requestedByUid !== uid) {
+        throw new HttpsError("already-exists", "この端末IDは別の申請で使用されているか、申請者を確認できません。");
+      }
+    }
+
+    tx.set(terminalRef, {
+      terminalId,
+      name: name || "端末申請",
+      type,
+      role: requestedRole,
+      mode: "停止",
+      status: "pending",
+      approved: false,
+      managementApproved: false,
+      receptionApproved: false,
+      admin: false,
+      subAdmin: false,
+      requestedRole,
+      requestedByUid: uid,
+      requestedAt: FieldValue.serverTimestamp(),
+      lastSeen: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    tx.set(applicationRef, {
+      terminalId,
+      requestedByUid: uid,
+      requestedRole,
+      status: "pending",
+      requestedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+
+  return { terminalId, approved: false, status: "pending" };
+});
+
+
+/** Change sub-administrator status only from the trusted primary admin terminal. */
+export const setTerminalSubAdmin = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  const enabled = call.data?.enabled;
+  if (typeof enabled !== "boolean") {
+    throw new HttpsError("invalid-argument", "副管理者の設定値が正しくありません。");
+  }
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身を副管理者に設定できません。");
+  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const ownerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
+  await db.runTransaction(async (tx) => {
+    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(ownerRef), tx.get(targetRef), tx.get(targetOwnerRef),
+    ]);
+    if (!managerSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("admin") !== true || managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both")) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    if (!targetSnap.exists) throw new HttpsError("not-found", "対象端末が見つかりません。");
+    if (targetSnap.get("admin") === true) {
+      throw new HttpsError("failed-precondition", "管理者端末の権限は変更できません。");
+    }
+    if (targetSnap.get("approved") !== true ||
+        targetSnap.get("managementApproved") !== true ||
+        (targetSnap.get("role") !== "management" && targetSnap.get("role") !== "both")) {
+      throw new HttpsError("failed-precondition", "承認済みの管理端末のみ副管理者に設定できます。");
+    }
+    // Do not grant elevated privileges to an orphaned terminal document. Its
+    // owner mapping and server-issued installation must still agree on identity.
+    const targetOwnerUid = targetOwnerSnap.get("ownerUid");
+    if (!targetOwnerSnap.exists || targetOwnerSnap.get("enabled") !== true ||
+        typeof targetOwnerUid !== "string" || !targetOwnerUid) {
+      throw new HttpsError("failed-precondition", "対象端末の所有者情報を確認できません。");
+    }
+    const targetInstallationRef = db.doc("terminalInstallations/" + targetOwnerUid);
+    const targetInstallationSnap = await tx.get(targetInstallationRef);
+    if (!targetInstallationSnap.exists ||
+        targetInstallationSnap.get("authUid") !== targetOwnerUid ||
+        targetInstallationSnap.get("approved") !== true ||
+        targetInstallationSnap.get("terminalId") !== targetTerminalId) {
+      throw new HttpsError("failed-precondition", "対象端末の登録情報を確認できません。");
+    }
+    tx.update(targetRef, {
+      subAdmin: enabled,
+      subAdminUpdatedAt: FieldValue.serverTimestamp(),
+      subAdminUpdatedByUid: uid,
+    });
+  });
+  return { terminalId: targetTerminalId, subAdmin: enabled };
+});
+
+/** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
+/** Atomically record a reception after verifying the server-issued installation and current terminal approval. */
+/** Return only the single explicitly published event for an approved reception installation. */
+export const getCurrentReceptionEvent = onCall(async (call) => {
+  const uid = requireUid(call);
+  const installation = await db.doc("terminalInstallations/" + uid).get();
+  if (!installation.exists || installation.get("authUid") !== uid || installation.get("approved") !== true) {
+    throw new HttpsError("permission-denied", "承認済みの受付端末ではありません。");
+  }
+  const terminalId = installation.get("terminalId");
+  if (typeof terminalId !== "string") {
+    throw new HttpsError("permission-denied", "受付端末の登録情報を確認できません。");
+  }
+  const [terminal, owner] = await Promise.all([
+    db.doc("terminals/" + terminalId).get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+  ]);
+  const role = terminal.get("role");
+  const receptionApproved = terminal.get("receptionApproved") === true ||
+    (terminal.get("receptionApproved") === undefined && terminal.get("approved") === true);
+  if (!terminal.exists || terminal.get("approved") !== true ||
+      !receptionApproved || (role !== "reception" && role !== "both") ||
+      !owner.exists || owner.get("enabled") !== true) {
+    throw new HttpsError("permission-denied", "受付権限がありません。");
+  }
+
+  const snapshot = await db.collection("events").where("receptionTarget", "==", true).get();
+  const candidates = snapshot.docs
+    .map((item) => item.data())
+    .filter((item) =>
+      item.eventStatus !== "finished" &&
+      typeof item.eventId === "string" && item.eventId.length > 0 &&
+      typeof item.eventName === "string" && item.eventName.length > 0 &&
+      typeof item.dataVersion === "number" &&
+      typeof item.authToken === "string" && item.authToken.length > 0
+    );
+  if (candidates.length === 0) {
+    throw new HttpsError("failed-precondition", "NO_PUBLISHED_EVENT");
+  }
+  if (candidates.length > 1) {
+    throw new HttpsError("failed-precondition", "MULTIPLE_PUBLISHED_EVENTS");
+  }
+  const event = candidates[0];
+  return {
+    eventId: event.eventId as string,
+    eventName: event.eventName as string,
+    dataVersion: event.dataVersion as number,
+    authToken: event.authToken as string,
+  };
+});
+
+export const recordReception = onCall(async (call) => {
+  const uid = requireUid(call);
+  const input = call.data?.record;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new HttpsError("invalid-argument", "受付記録が正しくありません。");
+  }
+
+  const recordId = readId(input.recordId, "受付記録ID");
+  const eventId = readId(input.eventId, "イベントID");
+  const ticketId = typeof input.ticketId === "string" && input.ticketId.trim().length > 0 &&
+    input.ticketId.length <= 160 && !input.ticketId.includes("/") ? input.ticketId.trim() : "";
+  const terminalId = readId(input.terminalId, "端末ID");
+  const type = input.type;
+  const timestamp = input.timestamp;
+  if (!ticketId || (type !== "entry" && type !== "exit" && type !== "reentry") ||
+      typeof timestamp !== "string" || !Number.isFinite(Date.parse(timestamp))) {
+    throw new HttpsError("invalid-argument", "受付記録の内容が正しくありません。");
+  }
+
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const eventRef = db.doc("events/" + eventId);
+  const ticketRef = db.doc("events/" + eventId + "/tickets/" + ticketId);
+  const recordRef = db.doc("events/" + eventId + "/receptionRecords/" + recordId);
+
+  await db.runTransaction(async (tx) => {
+    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap, publishedEventsSnap] = await Promise.all([
+      tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(eventRef),
+      tx.get(ticketRef), tx.get(recordRef),
+      tx.get(db.collection("events").where("receptionTarget", "==", true)),
+    ]);
+
+    const activePublishedEvents = publishedEventsSnap.docs.filter((item) => {
+      const data = item.data();
+      return data.eventStatus !== "finished" &&
+        typeof data.eventId === "string" && data.eventId.length > 0 &&
+        typeof data.eventName === "string" && data.eventName.length > 0 &&
+        typeof data.dataVersion === "number" &&
+        typeof data.authToken === "string" && data.authToken.length > 0;
+    });
+    // The callable that supplies event metadata rejects zero or multiple active
+    // reception targets. Enforce the same invariant here as well: otherwise a
+    // stale or modified client could submit a ticket from an older event directly.
+    if (activePublishedEvents.length !== 1 ||
+        activePublishedEvents[0].id !== eventId ||
+        activePublishedEvents[0].get("eventId") !== eventId) {
+      throw new HttpsError("failed-precondition", "受付対象イベントが変更されたか、1件に限定されていません。最新のイベント情報を取得してください。");
+    }
+
+    const installationMatches = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId;
+    // A handoff installation has its own Auth UID, so it need not equal the
+    // original ownerUid. The server-issued installation must bind this UID to
+    // this terminal, while the trusted owner mapping must remain enabled.
+    const ownerEnabled = ownerSnap.exists && ownerSnap.get("enabled") === true;
+    const terminalAllowsReception = terminalSnap.exists &&
+      terminalSnap.get("approved") === true &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
+      (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both");
+    if (!installationMatches || !ownerEnabled || !terminalAllowsReception) {
+      throw new HttpsError("permission-denied", "この端末は受付記録を保存する権限がありません。");
+    }
+    if (!eventSnap.exists || !ticketSnap.exists ||
+        ticketSnap.get("eventId") !== eventId || ticketSnap.get("ticketId") !== ticketId) {
+      throw new HttpsError("not-found", "イベントまたはチケットが見つかりません。");
+    }
+
+    // Retries of the same offline queue item are idempotent.
+    if (recordSnap.exists) {
+      const sameRecord = recordSnap.get("eventId") === eventId &&
+        recordSnap.get("ticketId") === ticketId &&
+        recordSnap.get("terminalId") === terminalId &&
+        recordSnap.get("type") === type &&
+        recordSnap.get("timestamp") === timestamp;
+      if (!sameRecord) throw new HttpsError("already-exists", "受付記録IDが重複しています。");
+      return;
+    }
+
+    const ticket = ticketSnap.data() ?? {};
+    if (ticket.valid !== true) {
+      throw new HttpsError("failed-precondition", "このチケットは無効です。");
+    }
+    const currentStatus = ticket.currentStatus;
+    const allowed =
+      (type === "entry" && currentStatus === "unused") ||
+      (type === "reentry" && currentStatus === "exited") ||
+      (type === "exit" && currentStatus === "inside");
+    if (!allowed) {
+      throw new HttpsError("failed-precondition", "チケットの現在状態と受付内容が一致しません。最新データを確認してください。");
+    }
+
+    const nextStatus = type === "exit" ? "exited" : "inside";
+    tx.update(ticketRef, { currentStatus: nextStatus, updatedAt: timestamp });
+    tx.create(recordRef, { recordId, eventId, ticketId, terminalId, type, timestamp });
+  });
+
+  return { saved: true, recordId };
+});
+
+/** Update operational heartbeat fields without exposing terminal authorization fields. */
+
+/** Store minimal reception error metadata through an approved installation. */
+export const recordReceptionError = onCall(async (call) => {
+  const uid = requireUid(call);
+  const input = call.data?.log;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new HttpsError("invalid-argument", "受付エラーログが正しくありません。");
+  }
+  const errorId = readId(input.errorId, "エラーID");
+  const eventId = readId(input.eventId, "イベントID");
+  const terminalId = readId(input.terminalId, "端末ID");
+  const categories = new Set([
+    "unknown_ticket", "invalid_ticket", "invalid_state", "save_failed",
+    "camera_failed", "event_load_failed", "sync_failed",
+  ]);
+  if (!categories.has(input.category) ||
+      (input.mode !== "entry" && input.mode !== "exit") ||
+      typeof input.timestamp !== "string" || !Number.isFinite(Date.parse(input.timestamp))) {
+    throw new HttpsError("invalid-argument", "受付エラーログの内容が正しくありません。");
+  }
+
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const errorRef = db.doc("receptionErrors/" + errorId);
+  await db.runTransaction(async (tx) => {
+    const [installationSnap, terminalSnap, ownerSnap, existingSnap] = await Promise.all([
+      tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(errorRef),
+    ]);
+    const authorized = installationSnap.exists &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true &&
+      installationSnap.get("terminalId") === terminalId &&
+      terminalSnap.exists &&
+      terminalSnap.get("approved") === true &&
+      (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both") &&
+      (terminalSnap.get("receptionApproved") === true ||
+        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
+      ownerSnap.exists && ownerSnap.get("enabled") === true;
+    if (!authorized) {
+      throw new HttpsError("permission-denied", "この端末は受付エラーログを保存する権限がありません。");
+    }
+    if (existingSnap.exists) return;
+    tx.create(errorRef, {
+      errorId, eventId, terminalId, category: input.category, mode: input.mode,
+      timestamp: input.timestamp, receivedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return { saved: true, errorId };
+});
+
+
+export const updateTerminalHeartbeat = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const mode = call.data?.mode;
+  const syncPendingCount = call.data?.syncPendingCount;
+  const networkMbps = call.data?.networkMbps;
+  if (mode !== "入口受付" && mode !== "出口受付" && mode !== "停止") {
+    throw new HttpsError("invalid-argument", "受付モードが正しくありません。");
+  }
+  if (syncPendingCount !== undefined &&
+      (!Number.isInteger(syncPendingCount) || syncPendingCount < 0 || syncPendingCount > 100000)) {
+    throw new HttpsError("invalid-argument", "未同期件数が正しくありません。");
+  }
+  if (networkMbps !== undefined &&
+      (typeof networkMbps !== "number" || !Number.isFinite(networkMbps) || networkMbps < 0 || networkMbps > 10000)) {
+    throw new HttpsError("invalid-argument", "通信速度の値が正しくありません。");
+  }
+
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(terminalRef),
+      tx.get(ownerRef),
+      tx.get(installationRef),
+    ]);
+    const ownerMatches = ownerSnap.exists && ownerSnap.get("enabled") === true &&
+      ownerSnap.get("ownerUid") === uid;
+    const installationMatches = installationSnap.exists &&
+      installationSnap.get("terminalId") === terminalId &&
+      installationSnap.get("authUid") === uid &&
+      installationSnap.get("approved") === true;
+    const existing = terminalSnap.data() ?? {};
+    const role = existing.role;
+    const managementActive = existing.approved === true &&
+      existing.managementApproved === true &&
+      (role === "management" || role === "both");
+    // Match the legacy-compatible reception rule and recordReception check:
+    // older approved terminals may not have the receptionApproved field yet.
+    const receptionApproved = existing.receptionApproved === true ||
+      (existing.receptionApproved === undefined && existing.approved === true);
+    const receptionActive = existing.approved === true && receptionApproved &&
+      (role === "reception" || role === "both");
+    if (!terminalSnap.exists ||
+        !((ownerMatches && (managementActive || receptionActive)) ||
+          (installationMatches && receptionActive))) {
+      throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
+    }
+
+    // Keep authorization reads and the heartbeat write in one transaction so
+    // a concurrent revocation or ownership transfer invalidates this attempt.
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      status: "online",
+      lastSeen: now,
+      updatedAt: now,
+    };
+    if (ownerMatches && existing.managementApproved === true && call.data?.preserveMode !== true) {
+      patch.mode = mode;
+    }
+    if (typeof syncPendingCount === "number") patch.syncPendingCount = syncPendingCount;
+    if (typeof networkMbps === "number") patch.networkMbps = networkMbps;
+    tx.update(terminalRef, patch);
+  });
+  return { terminalId, status: "online" };
+});
+
+
+/** Change only the authenticated owner's own management-terminal display name. */
+export const updateManagedTerminalName = onCall(async (call) => {
+  const uid = requireUid(call);
+  const terminalId = readId(call.data?.terminalId, "端末ID");
+  const name = typeof call.data?.name === "string" ? call.data.name.trim() : "";
+  if (!name || name.length > 80) {
+    throw new HttpsError("invalid-argument", "端末名は1〜80文字で入力してください。");
+  }
+  const terminalRef = db.doc("terminals/" + terminalId);
+  const ownerRef = db.doc("terminalOwners/" + terminalId);
+  await db.runTransaction(async (tx) => {
+    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
+    if (!terminalSnap.exists || !ownerSnap.exists ||
+        ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+        terminalSnap.get("approved") !== true ||
+        terminalSnap.get("managementApproved") !== true ||
+        (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
+      throw new HttpsError("permission-denied", "この管理端末の名前を変更する権限がありません。");
+    }
+    tx.update(terminalRef, { name, updatedAt: new Date().toISOString() });
+  });
+  return { terminalId, name };
+});
+
+/** Send a remote reception-mode command without rewriting terminal approval fields. */
+/** Send a remote reception-mode command without rewriting terminal approval fields. */
+export const setManagedTerminalMode = onCall(async (call) => {
+  const uid = requireUid(call);
+  const managerTerminalId = readId(call.data?.managerTerminalId, "管理端末ID");
+  const targetTerminalId = readId(call.data?.targetTerminalId, "対象端末ID");
+  const mode = call.data?.mode;
+  if (mode !== "入口受付" && mode !== "出口受付" && mode !== "停止") {
+    throw new HttpsError("invalid-argument", "受付モードが正しくありません。");
+  }
+  if (managerTerminalId === targetTerminalId) {
+    throw new HttpsError("failed-precondition", "自分自身へのリモート操作はできません。");
+  }
+
+  const managerRef = db.doc("terminals/" + managerTerminalId);
+  const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const targetRef = db.doc("terminals/" + targetTerminalId);
+  const updatedAt = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(targetRef),
+    ]);
+    if (!managerSnap.exists || !managerOwnerSnap.exists ||
+        managerOwnerSnap.get("enabled") !== true || managerOwnerSnap.get("ownerUid") !== uid ||
+        managerSnap.get("approved") !== true ||
+        managerSnap.get("managementApproved") !== true ||
+        (managerSnap.get("role") !== "management" && managerSnap.get("role") !== "both") ||
+        (managerSnap.get("admin") !== true && managerSnap.get("subAdmin") !== true)) {
+      throw new HttpsError("permission-denied", "登録済みの管理者端末から実行してください。");
+    }
+    const targetReceptionApproved = targetSnap.get("receptionApproved") === true ||
+      (targetSnap.get("receptionApproved") === undefined && targetSnap.get("approved") === true);
+    if (!targetSnap.exists || !targetReceptionApproved ||
+        targetSnap.get("approved") !== true ||
+        targetSnap.get("role") !== "reception" ||
+        targetSnap.get("managementApproved") === true ||
+        targetSnap.get("admin") === true || targetSnap.get("subAdmin") === true) {
+      throw new HttpsError("failed-precondition", "対象は承認済みの受付専用端末ではありません。");
+    }
+    tx.update(targetRef, { desiredMode: mode, desiredModeUpdatedAt: updatedAt, updatedAt });
+  });
+  return { terminalId: targetTerminalId, mode, updatedAt };
+});
+
+/** Delete an event and all nested operational records using trusted server credentials. */
+/** Delete an event and all nested operational records using trusted server credentials. */
+export const deleteManagedEvent = onCall(async (call) => {
+  const uid = requireUid(call);
+  const rawEventId = call.data?.eventId;
+  if (typeof rawEventId !== "string" || !rawEventId.trim() ||
+      rawEventId.length > 160 || rawEventId.includes("/")) {
+    throw new HttpsError("invalid-argument", "イベントIDが正しくありません。");
+  }
+  const eventId = rawEventId.trim();
+  const installationSnap = await db.doc("terminalInstallations/" + uid).get();
+  if (!installationSnap.exists || installationSnap.get("authUid") !== uid ||
+      installationSnap.get("approved") !== true) {
+    throw new HttpsError("permission-denied", "承認済みの管理端末から実行してください。");
+  }
+  const terminalId = installationSnap.get("terminalId");
+  if (typeof terminalId !== "string" || !terminalId || terminalId.includes("/")) {
+    throw new HttpsError("permission-denied", "管理端末の登録情報が正しくありません。");
+  }
+  const [terminalSnap, ownerSnap] = await Promise.all([
+    db.doc("terminals/" + terminalId).get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+  ]);
+  if (!terminalSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      terminalSnap.get("approved") !== true ||
+      terminalSnap.get("managementApproved") !== true ||
+      (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
+    throw new HttpsError("permission-denied", "イベント削除の権限がありません。");
+  }
+  const eventRef = db.doc("events/" + eventId);
+  const eventSnap = await eventRef.get();
+  if (!eventSnap.exists) {
+    return { eventId, deleted: false };
+  }
+
+  // Published bundles live in a separate top-level collection, outside the
+  // event's recursive-delete tree. Remove the exact bundle token as well so
+  // deleted events do not leave stale ticket payloads in Firestore.
+  const authToken = eventSnap.get("authToken");
+  await db.recursiveDelete(eventRef);
+  if (typeof authToken === "string" && authToken.length > 0 && !authToken.includes("/")) {
+    await db.doc("eventBundles/" + authToken).delete();
+  }
+  return { eventId, deleted: true };
+});
+
