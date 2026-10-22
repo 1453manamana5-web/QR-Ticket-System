@@ -1440,3 +1440,50 @@ export const deleteManagedEvent = onCall(async (call) => {
   return { eventId, deleted: true };
 });
 
+
+
+// Explicitly destructive, admin-only reset. This removes all app records including
+// every terminal owner/installation; Firebase Authentication accounts are untouched.
+// After this succeeds, no terminal is authorized until the trusted bootstrap process
+// registers a new administrator.
+export const resetAllProductionData = onCall(async (call) => {
+  const uid = requireUid(call);
+  if (call.data?.confirm !== "RESET_ALL_PRODUCTION_DATA") {
+    throw new HttpsError("invalid-argument", "初期化の確認値が一致しません。");
+  }
+
+  const installationSnap = await db.doc("terminalInstallations/" + uid).get();
+  if (!installationSnap.exists || installationSnap.get("authUid") !== uid ||
+      installationSnap.get("approved") !== true) {
+    throw new HttpsError("permission-denied", "承認済みの管理端末から実行してください。");
+  }
+  const terminalId = installationSnap.get("terminalId");
+  if (typeof terminalId !== "string" || !terminalId || terminalId.includes("/")) {
+    throw new HttpsError("permission-denied", "管理端末の登録情報が正しくありません。");
+  }
+  const [terminalSnap, ownerSnap] = await Promise.all([
+    db.doc("terminals/" + terminalId).get(),
+    db.doc("terminalOwners/" + terminalId).get(),
+  ]);
+  if (!terminalSnap.exists || !ownerSnap.exists ||
+      ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
+      terminalSnap.get("approved") !== true ||
+      terminalSnap.get("managementApproved") !== true ||
+      terminalSnap.get("admin") !== true ||
+      (terminalSnap.get("role") !== "management" && terminalSnap.get("role") !== "both")) {
+    throw new HttpsError("permission-denied", "初期化には承認済み管理者権限が必要です。");
+  }
+
+  const collections = [
+    "events", "eventBundles", "receptionErrors", "terminals", "terminalOwners",
+    "terminalInstallations", "devices", "terminalApplications",
+    "terminalHandoffRequests", "terminalHandoffRateLimits",
+  ];
+  for (const name of collections) {
+    const snapshot = await db.collection(name).get();
+    for (const document of snapshot.docs) {
+      await db.recursiveDelete(document.ref);
+    }
+  }
+  return { success: true, deletedCollections: collections, authAccountsPreserved: true };
+});
