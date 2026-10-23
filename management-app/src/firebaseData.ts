@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 import { callBackend } from "./firebaseFunctions";
@@ -301,26 +301,41 @@ export async function revokeManagedReception(targetTerminalId: string): Promise<
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
+  await ensureFirebaseAuth();
   const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
   if (!ownTerminalId || terminal.terminalId !== ownTerminalId) {
-    throw new Error("TERMINAL_SERVER_WRITE_REQUIRED");
+    throw new Error("OWN_TERMINAL_ONLY");
   }
-  const previous = await callBackend<Record<string, never>, {
-    terminalId: string | null; name?: string; desiredMode?: string | null;
-  }>("getTerminalInstallationStatus", {});
-  if (typeof terminal.name === "string" && terminal.name.trim() && terminal.name !== previous.name) {
-    await callBackend<{ terminalId: string; name: string }, { terminalId: string; name: string }>(
-      "updateManagedTerminalName", { terminalId: ownTerminalId, name: terminal.name.trim() },
-    );
+  const pendingCount = terminal.syncPendingCount ?? 0;
+  if (!Number.isSafeInteger(pendingCount) || pendingCount < 0 || pendingCount > 100000) {
+    throw new Error("INVALID_PENDING_SYNC_COUNT");
   }
-  await callBackend<{
-    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number;
-  }, { saved: boolean }>("updateTerminalHeartbeat", {
-    terminalId: ownTerminalId,
-    mode: terminal.mode,
-    syncPendingCount: terminal.syncPendingCount ?? 0,
-    ...(typeof terminal.networkMbps === "number" ? { networkMbps: terminal.networkMbps } : {}),
+  const db = getFirebaseDb();
+  const terminalRef = doc(db, "terminals", ownTerminalId);
+  const timestamp = new Date().toISOString();
+  await updateDoc(terminalRef, {
+    status: "online",
+    lastSeen: timestamp,
+    updatedAt: timestamp,
+    syncPendingCount: pendingCount,
+    ...(typeof terminal.networkMbps === "number" && Number.isFinite(terminal.networkMbps)
+      ? { networkMbps: terminal.networkMbps } : {}),
   });
+
+  const state = await readOwnTerminalState();
+  if (state.terminalId !== ownTerminalId || !state.terminal) {
+    throw new Error("OWN_TERMINAL_NOT_APPROVED");
+  }
+  if (state.terminal.managementApproved === true &&
+      (state.terminal.role === "management" || state.terminal.role === "both")) {
+    const patch: Record<string, unknown> = { updatedAt: timestamp, mode: terminal.mode };
+    if (typeof terminal.name === "string" && terminal.name.trim() &&
+        terminal.name.trim() !== state.terminal.name) {
+      if (terminal.name.trim().length > 80) throw new Error("TERMINAL_NAME_TOO_LONG");
+      patch.name = terminal.name.trim();
+    }
+    await updateDoc(terminalRef, patch);
+  }
 }
 
 
@@ -332,14 +347,14 @@ function getManagementBrowserDownlink(): number | null {
 }
 
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
+  await ensureFirebaseAuth();
   const networkMbps = getManagementBrowserDownlink();
-  await callBackend<{
-    terminalId: string; mode: string; syncPendingCount: number; networkMbps?: number; preserveMode: boolean;
-  }, { saved: boolean }>("updateTerminalHeartbeat", {
-    terminalId,
-    mode: "停止",
+  const timestamp = new Date().toISOString();
+  await updateDoc(doc(getFirebaseDb(), "terminals", terminalId), {
+    status: "online",
+    lastSeen: timestamp,
+    updatedAt: timestamp,
     syncPendingCount: 0,
-    preserveMode: true,
     ...(networkMbps !== null ? { networkMbps } : {}),
   });
   return networkMbps;
