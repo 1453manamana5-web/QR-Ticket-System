@@ -242,7 +242,11 @@ service cloud.firestore {
     // Reception terminals may append validated error metadata only; they cannot
     // read, revise, or delete the log. Management retains read access.
     match /receptionErrors/{errorId} {
-      allow read: if approvedManagementTerminal();
+      allow list: if approvedManagementTerminal();
+      allow get: if approvedManagementTerminal()
+        || (approvedReceptionTerminal()
+          && (!exists(/databases/$(database)/documents/receptionErrors/$(errorId))
+            || resource.data.terminalId == receptionTerminalId()));
       allow create: if approvedReceptionTerminal()
         && request.resource.data.errorId == errorId
         && request.resource.data.eventId is string
