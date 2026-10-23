@@ -244,6 +244,7 @@ service cloud.firestore {
         ]
         && request.resource.data.mode in ["entry", "exit"]
         && request.resource.data.timestamp is string
+        && request.resource.data.receivedAt == request.time
         && request.resource.data.keys().hasOnly([
           "errorId", "eventId", "terminalId", "category", "mode", "timestamp", "receivedAt"
         ]);
