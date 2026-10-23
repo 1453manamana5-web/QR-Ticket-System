@@ -60,11 +60,11 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
-          echo "GCLOUD_PROJECT=qr-management-system-4127d" >> "$GITHUB_ENV"
+          echo "GCLOUD_PROJECT=qr-ticket-system-5ba69" >> "$GITHUB_ENV"
 
       - name: Verify selected Firebase project
         run: |
-          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id) throw new Error('Service account JSON has no project_id'); if (p.project_id !== 'qr-management-system-4127d') throw new Error('Service account project_id does not match the intended production project'); console.log('Service account project ID matches intended target.');"
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id) throw new Error('Service account JSON has no project_id'); if (p.project_id !== 'qr-ticket-system-5ba69') throw new Error('Service account project_id does not match the intended production project'); console.log('Service account project ID matches intended target.');"
 
       - name: Deploy Firestore rules and Functions
-        run: npx firebase-tools deploy --only firestore:rules,functions --project qr-management-system-4127d --non-interactive
+        run: npx firebase-tools deploy --only firestore:rules,functions --project qr-ticket-system-5ba69 --non-interactive
