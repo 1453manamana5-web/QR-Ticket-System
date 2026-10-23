@@ -349,7 +349,7 @@ test("clients cannot create, update, or delete terminal documents directly", asy
 });
 
 
-async function seedApprovedReception(db) {
+async function seedApprovedReception() {
   await env.withSecurityRulesDisabled(async context => {
     const trusted = context.firestore();
     await setDoc(doc(trusted, "terminalInstallations", "reception-writer"), {
