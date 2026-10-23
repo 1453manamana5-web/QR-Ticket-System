@@ -39,7 +39,7 @@ test("unapproved authenticated clients cannot enumerate event or ticket data", a
   }));
 });
 
-test("approved reception installations cannot read event or ticket documents directly", async () => {
+test("approved reception installations cannot read event or ticket documents but can inspect their own terminal", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "reception-reader"), {
@@ -61,7 +61,7 @@ test("approved reception installations cannot read event or ticket documents dir
   await assertFails(getDoc(doc(db, "events", "event-1")));
   await assertFails(getDocs(collection(db, "events")));
   await assertFails(getDoc(doc(db, "events", "event-1", "tickets", "ticket-1")));
-  await assertFails(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
+  await assertSucceeds(getDoc(doc(db, "terminals", "T-RECEPTION-READ")));
   await assertFails(getDoc(doc(db, "terminals", "T-OTHER")));
   await env.withSecurityRulesDisabled(async context => {
     const trustedDb = context.firestore();
