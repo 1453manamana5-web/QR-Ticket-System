@@ -2,7 +2,7 @@ import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb } from "./firebaseClient";
-import { doc, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, runTransaction, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 
 
 
@@ -107,55 +107,37 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   }
 
   const db = getFirebaseDb();
-  const eventRef = doc(db, "events", record.eventId);
   const ticketRef = doc(db, "events", record.eventId, "tickets", record.ticketId);
   const recordRef = doc(db, "events", record.eventId, "receptionRecords", record.recordId);
-  await runTransaction(db, async transaction => {
-    const [eventSnapshot, ticketSnapshot, recordSnapshot] = await Promise.all([
-      transaction.get(eventRef),
-      transaction.get(ticketRef),
-      transaction.get(recordRef),
-    ]);
+  const existingRecord = await getDoc(recordRef);
+  if (existingRecord.exists()) {
+    const saved = existingRecord.data();
+    const sameRecord = saved.eventId === record.eventId &&
+      saved.ticketId === record.ticketId &&
+      saved.terminalId === terminalId &&
+      saved.type === record.type &&
+      saved.timestamp === record.timestamp;
+    if (!sameRecord) throw new Error("RECEPTION_RECORD_ID_COLLISION");
+    return;
+  }
 
-    if (recordSnapshot.exists()) {
-      const saved = recordSnapshot.data();
-      const sameRecord = saved.eventId === record.eventId &&
-        saved.ticketId === record.ticketId &&
-        saved.terminalId === terminalId &&
-        saved.type === record.type &&
-        saved.timestamp === record.timestamp;
-      if (!sameRecord) throw new Error("RECEPTION_RECORD_ID_COLLISION");
-      return;
-    }
-    if (!eventSnapshot.exists() || eventSnapshot.data()?.receptionTarget !== true ||
-        eventSnapshot.data()?.eventStatus === "finished") {
-      throw new Error("RECEPTION_EVENT_NOT_ACTIVE");
-    }
-    if (!ticketSnapshot.exists()) throw new Error("RECEPTION_TICKET_NOT_FOUND");
-
-    const currentTicket = ticketSnapshot.data() ?? {};
-    const allowed =
-      (record.type === "entry" && currentTicket.currentStatus === "unused") ||
-      (record.type === "reentry" && currentTicket.currentStatus === "exited") ||
-      (record.type === "exit" && currentTicket.currentStatus === "inside");
-    if (currentTicket.valid !== true || !allowed) {
-      throw new Error("RECEPTION_TICKET_STATE_CONFLICT");
-    }
-
-    transaction.update(ticketRef, {
-      currentStatus: record.type === "exit" ? "exited" : "inside",
-      updatedAt: record.timestamp,
-      lastReceptionRecordId: record.recordId,
-    });
-    transaction.set(recordRef, {
-      recordId: record.recordId,
-      eventId: record.eventId,
-      ticketId: record.ticketId,
-      terminalId,
-      type: record.type,
-      timestamp: record.timestamp,
-    });
+  // Rules validate the current server-side ticket state and require these two
+  // writes to succeed atomically. Reception never reads the raw ticket document.
+  const batch = writeBatch(db);
+  batch.update(ticketRef, {
+    currentStatus: record.type === "exit" ? "exited" : "inside",
+    updatedAt: record.timestamp,
+    lastReceptionRecordId: record.recordId,
   });
+  batch.set(recordRef, {
+    recordId: record.recordId,
+    eventId: record.eventId,
+    ticketId: record.ticketId,
+    terminalId,
+    type: record.type,
+    timestamp: record.timestamp,
+  });
+  await batch.commit();
 }
 
 function getBrowserDownlink(): number | null {
