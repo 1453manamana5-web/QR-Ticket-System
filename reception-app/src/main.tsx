@@ -4,6 +4,14 @@ import App from "./App";
 import "./styles.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
 
+function describeFirebaseStartupError(error: unknown): string {
+  if (error instanceof Error) {
+    const code = "code" in error && typeof error.code === "string" ? error.code : "";
+    return [code, error.message].filter(Boolean).join(": ");
+  }
+  return String(error);
+}
+
 async function startApp() {
   const root = document.getElementById("root");
   if (!root) throw new Error("Reactの表示領域が見つかりません。");
@@ -18,7 +26,8 @@ async function startApp() {
     createRoot(root).render(<StrictMode><App /></StrictMode>);
   } catch (error) {
     console.error("Firebase認証を開始できませんでした。", error);
-    root.textContent = "サーバーへの接続を開始できませんでした。通信環境を確認して再読み込みしてください。";
+    root.textContent = "Firebase接続エラー: " + describeFirebaseStartupError(error) +
+      "。GitHub ActionsのFirebase設定値とFirebase Authenticationの匿名認証設定を確認してください。";
   }
 }
 void startApp();
