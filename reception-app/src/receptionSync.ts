@@ -127,13 +127,13 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
       if (!sameRecord) throw new Error("RECEPTION_RECORD_ID_COLLISION");
       return;
     }
-    if (!eventSnapshot.exists() || eventSnapshot.data().receptionTarget !== true ||
-        eventSnapshot.data().eventStatus === "finished") {
+    if (!eventSnapshot.exists() || eventSnapshot.data()?.receptionTarget !== true ||
+        eventSnapshot.data()?.eventStatus === "finished") {
       throw new Error("RECEPTION_EVENT_NOT_ACTIVE");
     }
     if (!ticketSnapshot.exists()) throw new Error("RECEPTION_TICKET_NOT_FOUND");
 
-    const currentTicket = ticketSnapshot.data();
+    const currentTicket = ticketSnapshot.data() ?? {};
     const allowed =
       (record.type === "entry" && currentTicket.currentStatus === "unused") ||
       (record.type === "reentry" && currentTicket.currentStatus === "exited") ||
