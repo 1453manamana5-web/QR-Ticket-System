@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 
 let env;
 before(async () => {
@@ -423,5 +423,6 @@ test("reception clients cannot write a record for an unpublished event or anothe
   await assertFails(setDoc(doc(db, "receptionErrors", "error-12345678"), {
     errorId: "error-12345678", eventId: "event-live", terminalId: "T-OTHER-TERMINAL",
     category: "camera_failed", mode: "entry", timestamp: "2026-10-23T14:00:00.000Z",
+    receivedAt: serverTimestamp(),
   }));
 });
