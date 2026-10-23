@@ -1,10 +1,10 @@
-name: Deploy Firebase rules and Functions
+name: Deploy Firestore rules (Spark-compatible)
 
 on:
   workflow_dispatch:
     inputs:
       confirm_production:
-        description: "Type DEPLOY to confirm deployment to the configured production Firebase project"
+        description: "Type DEPLOY to confirm Firestore rules deployment to qr-ticket-system-5ba69"
         required: true
         type: string
 
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: firebase-production-deploy
+  group: firestore-rules-production-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  deploy-rules:
     if: ${{ inputs.confirm_production == 'DEPLOY' }}
     runs-on: ubuntu-latest
     steps:
@@ -37,22 +37,16 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: |
-          npm install
-          npm install --prefix functions
+      - name: Install app dependencies
+        run: npm install
 
-      - name: Run rules and callable tests
-        run: |
-          npm run test:rules
-          npm run test:callables
+      - name: Run Firestore rules tests
+        run: npm run test:rules
 
-      - name: Build apps and Functions
+      - name: Check and build apps
         run: |
           npm run typecheck
           npm run build
-          npm run typecheck --prefix functions
-          npm run build --prefix functions
 
       - name: Authenticate to Firebase project
         env:
@@ -66,5 +60,5 @@ jobs:
         run: |
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id) throw new Error('Service account JSON has no project_id'); if (p.project_id !== 'qr-ticket-system-5ba69') throw new Error('Service account project_id does not match the intended production project'); console.log('Service account project ID matches intended target.');"
 
-      - name: Deploy Firestore rules and Functions
-        run: npx firebase-tools deploy --only firestore:rules,functions --project qr-ticket-system-5ba69 --non-interactive
+      - name: Deploy Firestore rules only
+        run: npx firebase-tools deploy --only firestore:rules --project qr-ticket-system-5ba69 --non-interactive
