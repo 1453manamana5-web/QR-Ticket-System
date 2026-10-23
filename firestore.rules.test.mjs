@@ -81,7 +81,7 @@ test("approved reception installations cannot read event or ticket documents dir
   await assertFails(setDoc(doc(db, "receptionErrors", "forged-error"), { errorId: "forged-error" }));
 });
 
-test("legacy reception terminals without receptionApproved can fetch bundles but not event documents", async () => {
+test("legacy reception terminals can get active event metadata but cannot enumerate events", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "legacy-reception"), {
@@ -109,7 +109,8 @@ test("legacy reception terminals without receptionApproved can fetch bundles but
     });
   });
   const db = env.authenticatedContext("legacy-reception").firestore();
-  await assertFails(getDoc(doc(db, "events", "event-legacy")));
+  await assertSucceeds(getDoc(doc(db, "events", "event-legacy")));
+  await assertFails(getDocs(collection(db, "events")));
   await assertSucceeds(getDoc(doc(db, "eventBundles", "legacy-token")));
 });
 
