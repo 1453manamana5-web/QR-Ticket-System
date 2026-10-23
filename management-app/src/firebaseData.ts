@@ -1,6 +1,6 @@
-import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, setDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { getFirebaseDb } from "./firebaseClient";
+import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 import { callBackend } from "./firebaseFunctions";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
@@ -194,14 +194,79 @@ export async function deleteTerminal(terminalId: string): Promise<void> {
 function getManagerTerminalId(): string {
   return localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
 }
+type OwnTerminalState = {
+  terminalId: string | null;
+  terminal: Record<string, unknown> | null;
+  pendingApplication: Record<string, unknown> | null;
+};
+
+async function readOwnTerminalState(): Promise<OwnTerminalState> {
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const db = getFirebaseDb();
+  const installationSnapshot = await getDoc(doc(db, "terminalInstallations", uid));
+  if (installationSnapshot.exists()) {
+    const grant = installationSnapshot.data();
+    if (grant.authUid === uid && grant.approved === true &&
+        typeof grant.terminalId === "string") {
+      const terminalSnapshot = await getDoc(doc(db, "terminals", grant.terminalId));
+      if (terminalSnapshot.exists()) {
+        return {
+          terminalId: grant.terminalId,
+          terminal: terminalSnapshot.data(),
+          pendingApplication: null,
+        };
+      }
+    }
+  }
+
+  const applications = await getDocs(query(
+    collection(db, "terminalApplications"),
+    where("requestedByUid", "==", uid),
+    limit(5),
+  ));
+  const pending = applications.docs.find(item => item.data().status === "pending");
+  return {
+    terminalId: null,
+    terminal: null,
+    pendingApplication: pending ? pending.data() as Record<string, unknown> : null,
+  };
+}
+
 export async function getOwnTerminalStatus(): Promise<{
   approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
   role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
 }> {
-  return callBackend<Record<string, never>, {
-    approved: boolean; terminalId: string | null; name?: string; status?: "online" | "offline" | "pending";
-    role?: "management" | "reception" | "both" | null; managementApproved?: boolean; receptionApproved?: boolean;
-  }>("getTerminalInstallationStatus", {});
+  const state = await readOwnTerminalState();
+  if (state.terminal && state.terminalId) {
+    const terminal = state.terminal;
+    const role = terminal.role;
+    return {
+      approved: terminal.approved === true,
+      terminalId: state.terminalId,
+      name: typeof terminal.name === "string" ? terminal.name : "管理端末",
+      status: terminal.status === "online" || terminal.status === "offline" ? terminal.status : "pending",
+      role: role === "management" || role === "reception" || role === "both" ? role : null,
+      managementApproved: terminal.managementApproved === true ||
+        (terminal.managementApproved === undefined && terminal.approved === true && (role === "management" || role === "both")),
+      receptionApproved: terminal.receptionApproved === true ||
+        (terminal.receptionApproved === undefined && terminal.approved === true && (role === "reception" || role === "both")),
+    };
+  }
+  if (state.pendingApplication) {
+    const application = state.pendingApplication;
+    const role = application.requestedRole;
+    return {
+      approved: false,
+      terminalId: null,
+      name: typeof application.name === "string" ? application.name : "端末",
+      status: "pending",
+      role: role === "management" || role === "reception" || role === "both" ? role : null,
+      managementApproved: false,
+      receptionApproved: false,
+    };
+  }
+  return { approved: false, terminalId: null };
 }
 export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
   await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
@@ -337,16 +402,40 @@ export async function loadReceptionErrors(eventId: string): Promise<ReceptionErr
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 }
 
+function terminalFromDocument(terminalId: string, value: Record<string, unknown>): TerminalRecord {
+  const mode = value.mode === "入口受付" || value.mode === "出口受付" ? value.mode : "停止";
+  const desiredMode = value.desiredMode === "入口受付" || value.desiredMode === "出口受付" || value.desiredMode === "停止"
+    ? value.desiredMode : undefined;
+  const role = value.role === "management" || value.role === "reception" || value.role === "both"
+    ? value.role : undefined;
+  return {
+    terminalId,
+    name: typeof value.name === "string" ? value.name : terminalId,
+    type: value.type === "Web / PC" ? "Web / PC" : "Web / iPad",
+    mode,
+    ...(desiredMode ? { desiredMode } : {}),
+    ...(typeof value.desiredModeUpdatedAt === "string" ? { desiredModeUpdatedAt: value.desiredModeUpdatedAt } : {}),
+    status: value.status === "online" || value.status === "offline" ? value.status : "pending",
+    approved: value.approved === true,
+    lastSeen: typeof value.lastSeen === "string" ? value.lastSeen : null,
+    networkMbps: typeof value.networkMbps === "number" ? value.networkMbps : null,
+    battery: typeof value.battery === "number" ? value.battery : null,
+    ...(role ? { role } : {}),
+    managementApproved: value.managementApproved === true,
+    receptionApproved: value.receptionApproved === true,
+    syncPendingCount: typeof value.syncPendingCount === "number" ? value.syncPendingCount : 0,
+  };
+}
+
 export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => void, onError: (error: unknown) => void): () => void {
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = async () => {
     try {
-      const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
-      const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
-        "listManagedTerminals", { managerTerminalId },
-      );
-      if (active) onChange(result.terminals);
+      await ensureFirebaseAuth();
+      const snapshot = await getDocs(collection(getFirebaseDb(), "terminals"));
+      const terminals = snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
+      if (active) onChange(terminals);
     } catch (error) {
       if (active) onError(error);
     } finally {
@@ -356,12 +445,11 @@ export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => vo
   void refresh();
   return () => { active = false; if (timer) clearTimeout(timer); };
 }
+
 export async function loadTerminals(): Promise<TerminalRecord[]> {
-  const managerTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
-  const result = await callBackend<{ managerTerminalId: string }, { terminals: TerminalRecord[] }>(
-    "listManagedTerminals", { managerTerminalId },
-  );
-  return result.terminals;
+  await ensureFirebaseAuth();
+  const snapshot = await getDocs(collection(getFirebaseDb(), "terminals"));
+  return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();
