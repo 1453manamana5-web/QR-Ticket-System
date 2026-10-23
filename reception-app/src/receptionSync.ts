@@ -1,13 +1,24 @@
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
-import { callBackend } from "./firebaseFunctions";
+import { ensureFirebaseAuth, getFirebaseDb } from "./firebaseClient";
+import { doc, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
 
 
 
 export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
-  await callBackend<{ log: Record<string, unknown> }, { saved: boolean }>("recordReceptionError", {
-    log: { ...log, terminalId: getTerminalIdForRegistration() },
+  await ensureFirebaseAuth();
+  const terminalId = getTerminalIdForRegistration();
+  const db = getFirebaseDb();
+  const errorRef = doc(db, "receptionErrors", log.errorId);
+  await setDoc(errorRef, {
+    errorId: log.errorId,
+    eventId: log.eventId,
+    terminalId,
+    category: log.category,
+    mode: log.mode,
+    timestamp: log.timestamp,
+    receivedAt: serverTimestamp(),
   });
 }
 
@@ -73,10 +84,65 @@ function getTerminalIdForRegistration(): string {
   return id;
 }
 export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticket): Promise<void> {
-  await callBackend<{ record: Record<string, unknown>; ticket: Record<string, unknown> }, { saved: boolean; recordId: string }>(
-    "recordReception",
-    { record: { ...record, terminalId: getTerminalIdForRegistration() }, ticket },
-  );
+  await ensureFirebaseAuth();
+  const terminalId = getTerminalIdForRegistration();
+  if (!record.recordId || !record.eventId || !record.ticketId ||
+      record.ticketId !== ticket.ticketId || record.eventId !== ticket.eventId ||
+      !["entry", "exit", "reentry"].includes(record.type) ||
+      !Number.isFinite(Date.parse(record.timestamp))) {
+    throw new Error("INVALID_RECEPTION_RECORD");
+  }
+
+  const db = getFirebaseDb();
+  const eventRef = doc(db, "events", record.eventId);
+  const ticketRef = doc(db, "events", record.eventId, "tickets", record.ticketId);
+  const recordRef = doc(db, "events", record.eventId, "receptionRecords", record.recordId);
+  await runTransaction(db, async transaction => {
+    const [eventSnapshot, ticketSnapshot, recordSnapshot] = await Promise.all([
+      transaction.get(eventRef),
+      transaction.get(ticketRef),
+      transaction.get(recordRef),
+    ]);
+
+    if (recordSnapshot.exists()) {
+      const saved = recordSnapshot.data();
+      const sameRecord = saved.eventId === record.eventId &&
+        saved.ticketId === record.ticketId &&
+        saved.terminalId === terminalId &&
+        saved.type === record.type &&
+        saved.timestamp === record.timestamp;
+      if (!sameRecord) throw new Error("RECEPTION_RECORD_ID_COLLISION");
+      return;
+    }
+    if (!eventSnapshot.exists() || eventSnapshot.data().receptionTarget !== true ||
+        eventSnapshot.data().eventStatus === "finished") {
+      throw new Error("RECEPTION_EVENT_NOT_ACTIVE");
+    }
+    if (!ticketSnapshot.exists()) throw new Error("RECEPTION_TICKET_NOT_FOUND");
+
+    const currentTicket = ticketSnapshot.data();
+    const allowed =
+      (record.type === "entry" && currentTicket.currentStatus === "unused") ||
+      (record.type === "reentry" && currentTicket.currentStatus === "exited") ||
+      (record.type === "exit" && currentTicket.currentStatus === "inside");
+    if (currentTicket.valid !== true || !allowed) {
+      throw new Error("RECEPTION_TICKET_STATE_CONFLICT");
+    }
+
+    transaction.update(ticketRef, {
+      currentStatus: record.type === "exit" ? "exited" : "inside",
+      updatedAt: record.timestamp,
+      lastReceptionRecordId: record.recordId,
+    });
+    transaction.set(recordRef, {
+      recordId: record.recordId,
+      eventId: record.eventId,
+      ticketId: record.ticketId,
+      terminalId,
+      type: record.type,
+      timestamp: record.timestamp,
+    });
+  });
 }
 
 function getBrowserDownlink(): number | null {
