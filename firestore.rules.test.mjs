@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 
 let env;
 before(async () => {
@@ -81,7 +81,7 @@ test("approved reception installations cannot read event or ticket documents dir
   await assertFails(setDoc(doc(db, "receptionErrors", "forged-error"), { errorId: "forged-error" }));
 });
 
-test("legacy reception terminals can get active event metadata but cannot enumerate events", async () => {
+test("legacy reception terminals can fetch bundles but cannot read raw event documents", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "legacy-reception"), {
@@ -109,7 +109,7 @@ test("legacy reception terminals can get active event metadata but cannot enumer
     });
   });
   const db = env.authenticatedContext("legacy-reception").firestore();
-  await assertSucceeds(getDoc(doc(db, "events", "event-legacy")));
+  await assertFails(getDoc(doc(db, "events", "event-legacy")));
   await assertFails(getDocs(collection(db, "events")));
   await assertSucceeds(getDoc(doc(db, "eventBundles", "legacy-token")));
 });
@@ -381,19 +381,15 @@ test("approved reception client can atomically transition one ticket and append 
   const recordRef = doc(db, "events", "event-live", "receptionRecords", "record-12345678");
   const timestamp = "2026-10-23T14:00:00.000Z";
 
-  await assertSucceeds(runTransaction(db, async transaction => {
-    const [event, ticket, existingRecord] = await Promise.all([
-      transaction.get(eventRef), transaction.get(ticketRef), transaction.get(recordRef),
-    ]);
-    if (!event.exists() || !ticket.exists() || existingRecord.exists()) throw new Error("Unexpected fixture state");
-    transaction.update(ticketRef, {
-      currentStatus: "inside", updatedAt: timestamp, lastReceptionRecordId: "record-12345678",
-    });
-    transaction.set(recordRef, {
-      recordId: "record-12345678", eventId: "event-live", ticketId: "ticket-0001",
-      terminalId: "T-RECEPTION-WRITE", type: "entry", timestamp,
-    });
-  }));
+  const batch = writeBatch(db);
+  batch.update(ticketRef, {
+    currentStatus: "inside", updatedAt: timestamp, lastReceptionRecordId: "record-12345678",
+  });
+  batch.set(recordRef, {
+    recordId: "record-12345678", eventId: "event-live", ticketId: "ticket-0001",
+    terminalId: "T-RECEPTION-WRITE", type: "entry", timestamp,
+  });
+  await assertSucceeds(batch.commit());
 });
 
 test("approved reception client cannot change a ticket status without a matching record", async () => {
