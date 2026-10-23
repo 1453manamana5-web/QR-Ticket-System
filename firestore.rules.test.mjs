@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc } from "firebase/firestore";
 
 let env;
 before(async () => {
@@ -346,4 +346,82 @@ test("clients cannot create, update, or delete terminal documents directly", asy
 
   // Unrelated clients must not read another terminal's status.
   await assertFails(getDoc(doc(db, "terminals", "T-ABCDEFGH")));
+});
+
+
+async function seedApprovedReception(db) {
+  await env.withSecurityRulesDisabled(async context => {
+    const trusted = context.firestore();
+    await setDoc(doc(trusted, "terminalInstallations", "reception-writer"), {
+      terminalId: "T-RECEPTION-WRITE", authUid: "reception-writer", approved: true,
+    });
+    await setDoc(doc(trusted, "terminalOwners", "T-RECEPTION-WRITE"), {
+      terminalId: "T-RECEPTION-WRITE", ownerUid: "terminal-owner", enabled: true,
+    });
+    await setDoc(doc(trusted, "terminals", "T-RECEPTION-WRITE"), {
+      terminalId: "T-RECEPTION-WRITE", approved: true, receptionApproved: true,
+      managementApproved: false, role: "reception",
+    });
+    await setDoc(doc(trusted, "events", "event-live"), {
+      eventId: "event-live", eventName: "公開中", eventStatus: "ready",
+      dataVersion: 1, authToken: "event-live-token", receptionTarget: true,
+    });
+    await setDoc(doc(trusted, "events", "event-live", "tickets", "ticket-0001"), {
+      ticketId: "ticket-0001", eventId: "event-live", valid: true, currentStatus: "unused",
+    });
+  });
+}
+
+test("approved reception client can atomically transition one ticket and append its record", async () => {
+  await seedApprovedReception();
+  const db = env.authenticatedContext("reception-writer").firestore();
+  const eventRef = doc(db, "events", "event-live");
+  const ticketRef = doc(db, "events", "event-live", "tickets", "ticket-0001");
+  const recordRef = doc(db, "events", "event-live", "receptionRecords", "record-12345678");
+  const timestamp = "2026-10-23T14:00:00.000Z";
+
+  await assertSucceeds(runTransaction(db, async transaction => {
+    const [event, ticket, existingRecord] = await Promise.all([
+      transaction.get(eventRef), transaction.get(ticketRef), transaction.get(recordRef),
+    ]);
+    if (!event.exists() || !ticket.exists() || existingRecord.exists()) throw new Error("Unexpected fixture state");
+    transaction.update(ticketRef, {
+      currentStatus: "inside", updatedAt: timestamp, lastReceptionRecordId: "record-12345678",
+    });
+    transaction.set(recordRef, {
+      recordId: "record-12345678", eventId: "event-live", ticketId: "ticket-0001",
+      terminalId: "T-RECEPTION-WRITE", type: "entry", timestamp,
+    });
+  }));
+});
+
+test("approved reception client cannot change a ticket status without a matching record", async () => {
+  await seedApprovedReception();
+  const db = env.authenticatedContext("reception-writer").firestore();
+  await assertFails(updateDoc(doc(db, "events", "event-live", "tickets", "ticket-0001"), {
+    currentStatus: "inside",
+    updatedAt: "2026-10-23T14:00:00.000Z",
+    lastReceptionRecordId: "record-12345678",
+  }));
+});
+
+test("reception clients cannot write a record for an unpublished event or another terminal", async () => {
+  await seedApprovedReception();
+  const db = env.authenticatedContext("reception-writer").firestore();
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "events", "event-old"), {
+      eventId: "event-old", eventStatus: "finished", receptionTarget: false,
+    });
+    await setDoc(doc(context.firestore(), "events", "event-old", "tickets", "ticket-old"), {
+      ticketId: "ticket-old", eventId: "event-old", valid: true, currentStatus: "unused",
+    });
+  });
+  await assertFails(setDoc(doc(db, "events", "event-old", "receptionRecords", "record-87654321"), {
+    recordId: "record-87654321", eventId: "event-old", ticketId: "ticket-old",
+    terminalId: "T-RECEPTION-WRITE", type: "entry", timestamp: "2026-10-23T14:00:00.000Z",
+  }));
+  await assertFails(setDoc(doc(db, "receptionErrors", "error-12345678"), {
+    errorId: "error-12345678", eventId: "event-live", terminalId: "T-OTHER-TERMINAL",
+    category: "camera_failed", mode: "entry", timestamp: "2026-10-23T14:00:00.000Z",
+  }));
 });
