@@ -162,7 +162,7 @@ service cloud.firestore {
         && ((ownerMatches && (managementActive || receptionActive))
           || (installationMatches && receptionActive))
         && next.diff(current).affectedKeys().hasOnly([
-          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode"
+          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name"
         ])
         && next.status == "online"
         && next.lastSeen is string
@@ -174,7 +174,10 @@ service cloud.firestore {
           || (next.networkMbps is number && next.networkMbps >= 0 && next.networkMbps <= 10000))
         && (!next.diff(current).affectedKeys().hasAny(["mode"])
           || (ownerMatches && managementActive
-            && next.mode in ["入口受付", "出口受付", "停止"]));
+            && next.mode in ["入口受付", "出口受付", "停止"]))
+        && (!next.diff(current).affectedKeys().hasAny(["name"])
+          || (ownerMatches && managementActive
+            && next.name is string && next.name.size() > 0 && next.name.size() <= 80));
     }
 
     // Client apps must never manage trusted ownership or server-issued handoff state.
