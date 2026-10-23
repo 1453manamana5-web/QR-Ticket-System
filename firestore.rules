@@ -51,6 +51,82 @@ service cloud.firestore {
         );
     }
 
+    function receptionTerminalId() {
+      return get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId;
+    }
+
+    function activeReceptionEvent(eventId) {
+      return eventId is string
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.receptionTarget == true
+        && (
+          !get(/databases/$(database)/documents/events/$(eventId)).data.keys().hasAny(["eventStatus"])
+          || get(/databases/$(database)/documents/events/$(eventId)).data.eventStatus != "finished"
+        );
+    }
+
+    function validReceptionTicketUpdate(eventId, ticketId) {
+      let recordId = request.resource.data.lastReceptionRecordId;
+      let beforeStatus = resource.data.currentStatus;
+      let afterStatus = request.resource.data.currentStatus;
+      return approvedReceptionTerminal()
+        && activeReceptionEvent(eventId)
+        && request.resource.data.eventId == eventId
+        && request.resource.data.ticketId == ticketId
+        && resource.data.ticketId == ticketId
+        && resource.data.eventId == eventId
+        && resource.data.valid == true
+        && request.resource.data.valid == resource.data.valid
+        && recordId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "currentStatus", "updatedAt", "lastReceptionRecordId"
+        ])
+        && request.resource.data.updatedAt is string
+        && existsAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.recordId == recordId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.ticketId == ticketId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.terminalId == receptionTerminalId()
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.timestamp == request.resource.data.updatedAt
+        && (
+          (beforeStatus == "unused" && afterStatus == "inside"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "entry")
+          || (beforeStatus == "exited" && afterStatus == "inside"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "reentry")
+          || (beforeStatus == "inside" && afterStatus == "exited"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "exit")
+        );
+    }
+
+    function validReceptionRecordCreate(eventId, recordId) {
+      let data = request.resource.data;
+      let ticketPath = /databases/$(database)/documents/events/$(eventId)/tickets/$(data.ticketId);
+      return approvedReceptionTerminal()
+        && activeReceptionEvent(eventId)
+        && data.keys().hasOnly(["recordId", "eventId", "ticketId", "terminalId", "type", "timestamp"])
+        && data.recordId == recordId
+        && data.eventId == eventId
+        && data.ticketId is string
+        && data.ticketId.size() > 0
+        && data.ticketId.size() <= 160
+        && data.terminalId == receptionTerminalId()
+        && data.type in ["entry", "exit", "reentry"]
+        && data.timestamp is string
+        && exists(ticketPath)
+        && get(ticketPath).data.valid == true
+        && existsAfter(ticketPath)
+        && getAfter(ticketPath).data.lastReceptionRecordId == recordId
+        && getAfter(ticketPath).data.updatedAt == data.timestamp
+        && (
+          (data.type == "entry" && get(ticketPath).data.currentStatus == "unused"
+            && getAfter(ticketPath).data.currentStatus == "inside")
+          || (data.type == "reentry" && get(ticketPath).data.currentStatus == "exited"
+            && getAfter(ticketPath).data.currentStatus == "inside")
+          || (data.type == "exit" && get(ticketPath).data.currentStatus == "inside"
+            && getAfter(ticketPath).data.currentStatus == "exited")
+        );
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow read, write: if false;
@@ -84,14 +160,16 @@ service cloud.firestore {
 
       match /tickets/{ticketId} {
         allow read: if approvedManagementTerminal();
-        // Reception ticket status changes go through recordReception (Admin SDK).
-        allow create, update, delete: if approvedManagementTerminal();
+        allow create, delete: if approvedManagementTerminal();
+        // Reception changes are allowed only as an atomic ticket+record write.
+        allow update: if approvedManagementTerminal()
+          || validReceptionTicketUpdate(eventId, ticketId);
       }
 
       match /receptionRecords/{recordId} {
         allow read: if approvedManagementTerminal();
-        // Writes are only allowed through the server-validated recordReception callable.
-        allow create, update, delete: if false;
+        allow create: if validReceptionRecordCreate(eventId, recordId);
+        allow update, delete: if false;
       }
 
       match /analysis/{analysisId} {
@@ -150,10 +228,26 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // Error metadata is readable by management, but client writes use a callable.
+    // Reception terminals may append validated error metadata only; they cannot
+    // read, revise, or delete the log. Management retains read access.
     match /receptionErrors/{errorId} {
       allow read: if approvedManagementTerminal();
-      allow create, update, delete: if false;
+      allow create: if approvedReceptionTerminal()
+        && request.resource.data.errorId == errorId
+        && request.resource.data.eventId is string
+        && request.resource.data.eventId.size() > 0
+        && request.resource.data.eventId.size() <= 160
+        && request.resource.data.terminalId == receptionTerminalId()
+        && request.resource.data.category in [
+          "unknown_ticket", "invalid_ticket", "invalid_state", "save_failed",
+          "camera_failed", "event_load_failed", "sync_failed"
+        ]
+        && request.resource.data.mode in ["entry", "exit"]
+        && request.resource.data.timestamp is string
+        && request.resource.data.keys().hasOnly([
+          "errorId", "eventId", "terminalId", "category", "mode", "timestamp", "receivedAt"
+        ]);
+      allow update, delete: if false;
     }
 
     // Default-deny for every path not explicitly listed above.
