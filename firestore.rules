@@ -210,18 +210,14 @@ service cloud.firestore {
     // installations. Reception reads published event bundles through the
     // dedicated eventBundles rule; reception ticket-state changes use callables.
     match /events/{eventId} {
-      // Reception may read only the event currently published for reception.
-      allow get: if approvedManagementTerminal()
-        || (approvedReceptionTerminal() && activeReceptionEvent(eventId));
-      allow list: if approvedManagementTerminal();
+      // Reception uses a published bundle; raw event documents remain management-only.
+      allow get, list: if approvedManagementTerminal();
       allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
-        // No ticket enumeration from reception; individual reads are restricted
-        // to the active event and needed for atomic state transitions.
-        allow get: if approvedManagementTerminal()
-          || (approvedReceptionTerminal() && activeReceptionEvent(eventId));
-        allow list: if approvedManagementTerminal();
+        // Ticket documents remain management-only; reception mutations are
+        // checked against the existing ticket state inside the rules engine.
+        allow read: if approvedManagementTerminal();
         allow create, delete: if approvedManagementTerminal();
         // Reception changes are allowed only as an atomic ticket+record write.
         allow update: if approvedManagementTerminal()
