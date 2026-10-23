@@ -11,14 +11,27 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
   const terminalId = getTerminalIdForRegistration();
   const db = getFirebaseDb();
   const errorRef = doc(db, "receptionErrors", log.errorId);
-  await setDoc(errorRef, {
-    errorId: log.errorId,
-    eventId: log.eventId,
-    terminalId,
-    category: log.category,
-    mode: log.mode,
-    timestamp: log.timestamp,
-    receivedAt: serverTimestamp(),
+  await runTransaction(db, async transaction => {
+    const existing = await transaction.get(errorRef);
+    if (existing.exists()) {
+      const saved = existing.data();
+      const sameLog = saved.eventId === log.eventId &&
+        saved.terminalId === terminalId &&
+        saved.category === log.category &&
+        saved.mode === log.mode &&
+        saved.timestamp === log.timestamp;
+      if (!sameLog) throw new Error("RECEPTION_ERROR_ID_COLLISION");
+      return;
+    }
+    transaction.set(errorRef, {
+      errorId: log.errorId,
+      eventId: log.eventId,
+      terminalId,
+      category: log.category,
+      mode: log.mode,
+      timestamp: log.timestamp,
+      receivedAt: serverTimestamp(),
+    });
   });
 }
 
