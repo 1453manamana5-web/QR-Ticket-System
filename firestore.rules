@@ -127,13 +127,65 @@ service cloud.firestore {
         );
     }
 
+    function approvedOwnInstallationForTerminal(terminalId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId == terminalId
+        && exists(/databases/$(database)/documents/terminalOwners/$(terminalId))
+        && get(/databases/$(database)/documents/terminalOwners/$(terminalId)).data.enabled == true
+        && exists(/databases/$(database)/documents/terminals/$(terminalId))
+        && get(/databases/$(database)/documents/terminals/$(terminalId)).data.approved == true;
+    }
+
+    function validTerminalHeartbeatUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let ownerPath = /databases/$(database)/documents/terminalOwners/$(terminalId);
+      let installationPath = /databases/$(database)/documents/terminalInstallations/$(request.auth.uid);
+      let ownerMatches = exists(ownerPath)
+        && get(ownerPath).data.enabled == true
+        && get(ownerPath).data.ownerUid == request.auth.uid;
+      let installationMatches = exists(installationPath)
+        && get(installationPath).data.authUid == request.auth.uid
+        && get(installationPath).data.terminalId == terminalId
+        && get(installationPath).data.approved == true;
+      let managementActive = current.approved == true
+        && current.managementApproved == true
+        && (current.role == "management" || current.role == "both");
+      let receptionActive = current.approved == true
+        && (current.receptionApproved == true
+          || (!current.keys().hasAny(["receptionApproved"]) && current.approved == true))
+        && (current.role == "reception" || current.role == "both");
+      return signedIn()
+        && ((ownerMatches && (managementActive || receptionActive))
+          || (installationMatches && receptionActive))
+        && next.diff(current).affectedKeys().hasOnly([
+          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode"
+        ])
+        && next.status == "online"
+        && next.lastSeen is string
+        && next.updatedAt is string
+        && next.syncPendingCount is int
+        && next.syncPendingCount >= 0
+        && next.syncPendingCount <= 100000
+        && (!next.keys().hasAny(["networkMbps"])
+          || (next.networkMbps is number && next.networkMbps >= 0 && next.networkMbps <= 10000))
+        && (!next.diff(current).affectedKeys().hasAny(["mode"])
+          || (ownerMatches && managementActive
+            && next.mode in ["入口受付", "出口受付", "停止"]));
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow read, write: if false;
     }
 
     match /terminalInstallations/{uid} {
-      allow read, write: if false;
+      // An installation can inspect only its own server-issued grant.
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
     }
 
     match /terminalHandoffRequests/{requestId} {
@@ -144,10 +196,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Pending terminal applications are written only by callable Functions.
-    // Clients must not forge applicant identity or approval state.
+    // Applicants may read only their own application documents; only trusted
+    // backend code may create, approve, revoke, or delete applications.
     match /terminalApplications/{terminalId} {
-      allow read, write: if false;
+      allow get: if signedIn() && resource.data.requestedByUid == request.auth.uid;
+      allow list: if signedIn()
+        && request.query.limit <= 5
+        && resource.data.requestedByUid == request.auth.uid;
+      allow create, update, delete: if false;
     }
 
     // Event and ticket documents are restricted to approved management
@@ -233,10 +289,12 @@ service cloud.firestore {
     // callable Functions so approval, ownership, heartbeat and role fields cannot
     // be forged by a signed-in browser.
     match /terminals/{terminalId} {
-      // All terminal records are server-managed. Clients use callable status
-      // endpoints rather than reading terminal identity/control documents directly.
-      allow get, list: if approvedManagementTerminal();
-      allow create, update, delete: if false;
+      // Management may enumerate devices. A registered installation may read
+      // only its own terminal metadata to display role and remote-control state.
+      allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId);
+      allow list: if approvedManagementTerminal();
+      allow update: if validTerminalHeartbeatUpdate(terminalId);
+      allow create, delete: if false;
     }
 
     // Reception terminals may append validated error metadata only; they cannot
