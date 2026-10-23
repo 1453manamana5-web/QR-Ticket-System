@@ -2,6 +2,7 @@ import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb } from "./firebaseClient";
+import { callBackend } from "./firebaseFunctions";
 import { doc, getDoc, runTransaction, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 
 
