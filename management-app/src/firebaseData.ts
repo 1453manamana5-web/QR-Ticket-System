@@ -3,7 +3,7 @@ import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-tick
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
-export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
+export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; admin?: boolean; subAdmin?: boolean; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
 export type AnalysisRecord = { eventId: string; eventName: string; eventDate: string; total: number; unused: number; inside: number; exited: number; savedAt: string; };
 
 export async function deleteEvent(eventId: string): Promise<void> {
@@ -655,6 +655,8 @@ function terminalFromDocument(terminalId: string, value: Record<string, unknown>
     networkMbps: typeof value.networkMbps === "number" ? value.networkMbps : null,
     battery: typeof value.battery === "number" ? value.battery : null,
     ...(role ? { role } : {}),
+    admin: value.admin === true,
+    subAdmin: value.subAdmin === true,
     managementApproved: value.managementApproved === true,
     receptionApproved: value.receptionApproved === true,
     syncPendingCount: typeof value.syncPendingCount === "number" ? value.syncPendingCount : 0,
