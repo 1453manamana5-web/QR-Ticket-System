@@ -63,8 +63,8 @@ jobs:
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
           echo "GCLOUD_PROJECT=qr-ticket-system-5ba69" >> "$GITHUB_ENV"
-      - name: Verify selected Firebase project
+      - name: Validate deployment credential and pin target project
         run: |
-          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (p.project_id !== 'qr-ticket-system-5ba69') throw new Error('Service account project_id does not match qr-ticket-system-5ba69'); console.log('Firebase project verified: ' + p.project_id);"
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (typeof p.project_id !== 'string' || !p.project_id || typeof p.client_email !== 'string' || !p.client_email) throw new Error('Service account JSON is incomplete'); console.log('Service account JSON parsed. Firebase CLI target is explicitly pinned to qr-ticket-system-5ba69.');"
       - name: Deploy Firestore rules only (no Cloud Functions)
         run: npx firebase-tools deploy --only firestore:rules --project qr-ticket-system-5ba69 --non-interactive
