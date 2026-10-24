@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
@@ -320,10 +320,8 @@ export async function requestTerminalRegistration(input: { terminalId: string; n
   await runTransaction(db, async (tx) => {
     const applicationRef = doc(db, "terminalApplications", terminalId);
     const terminalRef = doc(db, "terminals", terminalId);
-    const [application, terminal, owner] = await Promise.all([
-      tx.get(applicationRef), tx.get(terminalRef), tx.get(doc(db, "terminalOwners", terminalId)),
-    ]);
-    if (application.exists() || terminal.exists() || owner.exists()) throw new Error("TERMINAL_ID_ALREADY_EXISTS");
+    const [application, terminal] = await Promise.all([tx.get(applicationRef), tx.get(terminalRef)]);
+    if (application.exists() || terminal.exists()) throw new Error("TERMINAL_ID_ALREADY_EXISTS");
     tx.set(applicationRef, {
       terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
       status: "pending", requestedAt: now, updatedAt: now,
