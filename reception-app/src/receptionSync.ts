@@ -2,7 +2,6 @@ import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
-import { callBackend } from "./firebaseFunctions";
 import { collection, doc, getDoc, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
 
@@ -110,24 +109,40 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
   const localTerminalId = getTerminalIdForRegistration();
   const current = await readOwnTerminalState();
   if (current.terminalId) {
-    await callBackend<{ terminalId: string }, { released: boolean }>(
-      "releaseOwnReceptionRegistration", { terminalId: current.terminalId },
-    );
-    return;
+    throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
   }
-  await callBackend<{ terminalId: string }, { cancelled: boolean }>(
-    "cancelOwnTerminalApplication", { terminalId: localTerminalId },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const db = getFirebaseDb();
+  const applicationRef = doc(db, "terminalApplications", localTerminalId);
+  const application = await getDoc(applicationRef);
+  if (application.exists() && application.data().requestedByUid === uid &&
+      application.data().status === "pending") {
+    await import("firebase/firestore").then(({ deleteDoc }) => deleteDoc(applicationRef));
+  }
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
   const terminalId = getTerminalIdForRegistration();
   const type = typeof navigator !== "undefined" && /Macintosh|Windows|Linux/i.test(navigator.userAgent)
     ? "Web / PC" : "Web / iPad";
-  await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
-    "registerTerminalApplication",
-    { terminalId, name: name.trim() || "受付端末", type, role: "reception" },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const db = getFirebaseDb();
+  const existing = await getDocs(query(
+    collection(db, "terminalApplications"),
+    where("requestedByUid", "==", uid),
+    limit(5),
+  ));
+  if (existing.docs.some(item => item.data().status === "pending")) {
+    throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
+  }
+  const now = new Date().toISOString();
+  await setDoc(doc(db, "terminalApplications", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: "reception",
+    name: name.trim() || "受付端末", type, status: "pending",
+    requestedAt: now, updatedAt: now,
+  });
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
