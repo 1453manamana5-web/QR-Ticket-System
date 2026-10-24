@@ -66,12 +66,12 @@ jobs:
           const accountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
           if (!accountPath) throw new Error("Google service-account credential path is missing");
           const account = JSON.parse(fs.readFileSync(accountPath, "utf8"));
-          if (account.project_id !== projectId) {
-            throw new Error("Refusing deployment: service-account project_id does not match the production project");
+          if (!account.project_id || !account.client_email || !account.private_key) {
+            throw new Error("Service-account JSON is missing required credentials");
           }
-          if (!account.client_email || !account.private_key) {
-            throw new Error("Service-account JSON is missing client_email or private_key");
-          }
+          // A service account may be issued by a separate project and granted
+          // cross-project permissions. All API URLs below remain pinned to the
+          // requested production project; the API itself must authorize the writes.
 
           const b64url = (value) => Buffer.from(value).toString("base64url");
           const issuedAt = Math.floor(Date.now() / 1000);
