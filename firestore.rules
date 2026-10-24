@@ -450,8 +450,9 @@ service cloud.firestore {
     // A signed-in browser may submit/cancel only its own pending application.
     // Approval and trusted ownership grants remain impossible from client rules.
     match /terminalApplications/{terminalId} {
-      allow get: if (signedIn() && resource.data.requestedByUid == request.auth.uid)
-        || approvedManagementTerminal();
+      allow get: if approvedManagementTerminal()
+        || (signedIn() && !exists(applicationPath(terminalId)) && !exists(terminalPath(terminalId)))
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid);
       allow list: if approvedManagementTerminal()
         || (signedIn() && request.query.limit <= 5 && resource.data.requestedByUid == request.auth.uid);
       allow create: if signedIn()
@@ -571,6 +572,7 @@ service cloud.firestore {
     // Registration and management writes are client transactions guarded by these rules.
     match /terminals/{terminalId} {
       allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId)
+        || (signedIn() && !exists(terminalPath(terminalId)) && !exists(applicationPath(terminalId)))
         || (signedIn() && resource.data.requestedByUid == request.auth.uid && resource.data.approved == false);
       allow list: if approvedManagementTerminal();
       allow create: if validTerminalRegistrationCreate(terminalId);
