@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
@@ -180,14 +180,52 @@ export async function saveMembers(eventId: string, members: MemberRecord[]): Pro
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
-  const ownTerminalId = typeof window !== "undefined"
-    ? localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id")
-    : null;
-  if (ownTerminalId && terminalId === ownTerminalId) throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
-  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { deleted: boolean }>(
-    "deleteManagedTerminal",
-    { managerTerminalId: ownTerminalId ?? "", targetTerminalId: terminalId },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const managerTerminalId = getManagerTerminalId();
+  if (!managerTerminalId || terminalId === managerTerminalId) throw new Error("OWN_TERMINAL_DELETE_BLOCKED");
+  const db = getFirebaseDb();
+  const now = new Date().toISOString();
+
+  await runTransaction(db, async (tx) => {
+    const managerRef = doc(db, "terminals", managerTerminalId);
+    const managerOwnerRef = doc(db, "terminalOwners", managerTerminalId);
+    const managerInstallationRef = doc(db, "terminalInstallations", uid);
+    const targetRef = doc(db, "terminals", terminalId);
+    const targetOwnerRef = doc(db, "terminalOwners", terminalId);
+    const applicationRef = doc(db, "terminalApplications", terminalId);
+    const [manager, managerOwner, managerInstallation, target, targetOwner, application] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(managerInstallationRef),
+      tx.get(targetRef), tx.get(targetOwnerRef), tx.get(applicationRef),
+    ]);
+    if (!manager.exists() || !managerOwner.exists() || !managerInstallation.exists() ||
+        managerOwner.data().ownerUid !== uid || managerOwner.data().enabled !== true ||
+        managerInstallation.data().authUid !== uid || managerInstallation.data().terminalId !== managerTerminalId ||
+        managerInstallation.data().approved !== true || manager.data().approved !== true ||
+        manager.data().managementApproved !== true ||
+        !["management", "both"].includes(String(manager.data().role)) ||
+        (manager.data().admin !== true && manager.data().subAdmin !== true)) {
+      throw new Error("MANAGEMENT_PERMISSION_REQUIRED");
+    }
+    if (!target.exists()) return;
+    const td = target.data();
+    if (td.admin === true || td.subAdmin === true) throw new Error("ADMIN_TERMINAL_DELETE_BLOCKED");
+    if (manager.data().admin !== true && ["management", "both"].includes(String(td.role))) {
+      throw new Error("SUBADMIN_CANNOT_DELETE_MANAGEMENT_TERMINAL");
+    }
+    const ownerData = targetOwner.exists() ? targetOwner.data() : {};
+    const ownerUid = typeof ownerData.ownerUid === "string" ? ownerData.ownerUid :
+      (typeof td.requestedByUid === "string" ? td.requestedByUid : "");
+    if (targetOwner.exists() && (ownerData.enabled !== true || (ownerUid && ownerData.ownerUid !== ownerUid))) {
+      throw new Error("TERMINAL_OWNER_TOMBSTONE_BLOCKS_REUSE");
+    }
+    tx.delete(targetRef);
+    tx.set(targetOwnerRef, {
+      terminalId, ...(ownerUid ? { ownerUid } : {}), enabled: false,
+      deletedAt: now, deletedByUid: uid, updatedAt: now,
+    }, { merge: true });
+    if (application.exists()) tx.delete(applicationRef);
+  });
 }
 
 function getManagerTerminalId(): string {
@@ -276,25 +314,91 @@ export async function requestTerminalRegistration(input: { terminalId: string; n
   if (!/^T-[A-Za-z0-9-]{8,40}$/.test(terminalId) || !name || name.length > 80) {
     throw new Error("INVALID_TERMINAL_APPLICATION");
   }
-  const existing = await getDocs(query(
-    collection(db, "terminalApplications"),
-    where("requestedByUid", "==", uid),
-    limit(5),
-  ));
-  if (existing.docs.some(item => item.data().status === "pending")) {
-    throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
-  }
-  await setDoc(doc(db, "terminalApplications", terminalId), {
-    terminalId, requestedByUid: uid, requestedRole: input.role,
-    name, type: input.type, status: "pending",
-    requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  const existing = await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
+  if (existing.docs.some(item => item.data().status === "pending")) throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
+  const now = new Date().toISOString();
+  await runTransaction(db, async (tx) => {
+    const applicationRef = doc(db, "terminalApplications", terminalId);
+    const terminalRef = doc(db, "terminals", terminalId);
+    const [application, terminal, owner] = await Promise.all([
+      tx.get(applicationRef), tx.get(terminalRef), tx.get(doc(db, "terminalOwners", terminalId)),
+    ]);
+    if (application.exists() || terminal.exists() || owner.exists()) throw new Error("TERMINAL_ID_ALREADY_EXISTS");
+    tx.set(applicationRef, {
+      terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
+      status: "pending", requestedAt: now, updatedAt: now,
+    });
+    tx.set(terminalRef, {
+      terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
+      role: input.role, approved: false, managementApproved: false, receptionApproved: false,
+      admin: false, subAdmin: false, status: "pending", mode: "停止",
+      desiredMode: "停止", requestedAt: now, updatedAt: now,
+      syncPendingCount: 0,
+    });
   });
 }
+
 export async function approveTerminal(targetTerminalId: string): Promise<void> {
-  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { approved: boolean }>(
-    "approveTerminalRegistration", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const managerTerminalId = getManagerTerminalId();
+  if (!managerTerminalId || managerTerminalId === targetTerminalId) throw new Error("INVALID_TERMINAL_APPROVAL");
+  const db = getFirebaseDb();
+  const now = new Date().toISOString();
+  await runTransaction(db, async (tx) => {
+    const managerRef = doc(db, "terminals", managerTerminalId);
+    const managerOwnerRef = doc(db, "terminalOwners", managerTerminalId);
+    const managerInstallationRef = doc(db, "terminalInstallations", uid);
+    const targetRef = doc(db, "terminals", targetTerminalId);
+    const applicationRef = doc(db, "terminalApplications", targetTerminalId);
+    const [manager, managerOwner, managerInstallation, target, application] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(managerInstallationRef),
+      tx.get(targetRef), tx.get(applicationRef),
+    ]);
+    if (!manager.exists() || !managerOwner.exists() || !managerInstallation.exists() ||
+        managerOwner.data().ownerUid !== uid || managerOwner.data().enabled !== true ||
+        managerInstallation.data().authUid !== uid || managerInstallation.data().terminalId !== managerTerminalId ||
+        managerInstallation.data().approved !== true || manager.data().approved !== true ||
+        manager.data().managementApproved !== true ||
+        !["management", "both"].includes(String(manager.data().role)) ||
+        (manager.data().admin !== true && manager.data().subAdmin !== true)) throw new Error("MANAGEMENT_PERMISSION_REQUIRED");
+    if (!target.exists() || !application.exists()) throw new Error("TERMINAL_APPLICATION_NOT_FOUND");
+    const td = target.data(), ad = application.data();
+    if (td.admin === true || td.subAdmin === true || ad.status !== "pending" ||
+        ad.terminalId !== targetTerminalId || ad.requestedByUid !== td.requestedByUid ||
+        ad.requestedRole !== td.requestedRole || td.role !== ad.requestedRole ||
+        !["management", "reception", "both"].includes(String(ad.requestedRole))) {
+      throw new Error("TERMINAL_APPLICATION_INVALID");
+    }
+    const role = ad.requestedRole as "management" | "reception" | "both";
+    if (manager.data().admin !== true && (role === "management" || role === "both")) {
+      throw new Error("SUBADMIN_CANNOT_APPROVE_MANAGEMENT_TERMINAL");
+    }
+    const targetUid = String(ad.requestedByUid);
+    const targetOwnerRef = doc(db, "terminalOwners", targetTerminalId);
+    const targetInstallationRef = doc(db, "terminalInstallations", targetUid);
+    const [owner, installation] = await Promise.all([tx.get(targetOwnerRef), tx.get(targetInstallationRef)]);
+    if (owner.exists() && (owner.data().ownerUid !== targetUid || owner.data().enabled !== true)) {
+      throw new Error("TERMINAL_OWNER_TOMBSTONE_BLOCKS_REUSE");
+    }
+    if (installation.exists() && (installation.data().terminalId !== targetTerminalId ||
+        installation.data().authUid !== targetUid || installation.data().approved !== true)) {
+      throw new Error("TERMINAL_INSTALLATION_CONFLICT");
+    }
+    tx.update(targetRef, {
+      approved: true, status: "offline",
+      managementApproved: role === "management" || role === "both",
+      receptionApproved: role === "reception" || role === "both",
+      approvalUpdatedAt: now, approvalUpdatedByUid: uid, updatedAt: now,
+    });
+    tx.set(targetOwnerRef, { terminalId: targetTerminalId, ownerUid: targetUid, enabled: true, updatedAt: now }, { merge: true });
+    tx.set(targetInstallationRef, {
+      terminalId: targetTerminalId, authUid: targetUid, approved: true, registrationApprovedAt: now,
+    }, { merge: true });
+    tx.update(applicationRef, { status: "approved", decidedAt: now, decidedByUid: uid, updatedAt: now });
+  });
 }
+
 export async function setManagedTerminalMode(targetTerminalId: string, mode: "入口受付" | "出口受付" | "停止"): Promise<void> {
   await ensureFirebaseAuth();
   const managerTerminalId = getManagerTerminalId();
@@ -311,20 +415,115 @@ export async function setManagedTerminalMode(targetTerminalId: string, mode: "�
   });
 }
 export async function setManagedSubAdmin(targetTerminalId: string, enabled: boolean): Promise<void> {
-  await callBackend<{ managerTerminalId: string; targetTerminalId: string; enabled: boolean }, { updated: boolean }>(
-    "setTerminalSubAdmin", { managerTerminalId: getManagerTerminalId(), targetTerminalId, enabled },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const managerTerminalId = getManagerTerminalId();
+  if (!managerTerminalId || managerTerminalId === targetTerminalId) throw new Error("INVALID_REMOTE_TERMINAL");
+  const db = getFirebaseDb();
+  await runTransaction(db, async (tx) => {
+    const managerRef = doc(db, "terminals", managerTerminalId);
+    const managerOwnerRef = doc(db, "terminalOwners", managerTerminalId);
+    const managerInstallationRef = doc(db, "terminalInstallations", uid);
+    const targetRef = doc(db, "terminals", targetTerminalId);
+    const targetOwnerRef = doc(db, "terminalOwners", targetTerminalId);
+    const [manager, managerOwner, managerInstallation, target, targetOwner] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(managerInstallationRef), tx.get(targetRef), tx.get(targetOwnerRef),
+    ]);
+    if (!manager.exists() || !managerOwner.exists() || !managerInstallation.exists() ||
+        manager.data().admin !== true || manager.data().approved !== true || manager.data().managementApproved !== true ||
+        managerOwner.data().ownerUid !== uid || managerOwner.data().enabled !== true ||
+        managerInstallation.data().authUid !== uid || managerInstallation.data().terminalId !== managerTerminalId ||
+        managerInstallation.data().approved !== true || !["management", "both"].includes(String(manager.data().role))) {
+      throw new Error("PRIMARY_ADMIN_REQUIRED");
+    }
+    if (!target.exists() || target.data().admin === true || target.data().approved !== true ||
+        target.data().managementApproved !== true || !["management", "both"].includes(String(target.data().role))) {
+      throw new Error("APPROVED_MANAGEMENT_TERMINAL_REQUIRED");
+    }
+    if (!targetOwner.exists() || targetOwner.data().enabled !== true || typeof targetOwner.data().ownerUid !== "string") {
+      throw new Error("TERMINAL_OWNER_NOT_VERIFIED");
+    }
+    const targetUid = targetOwner.data().ownerUid as string;
+    const targetInstallation = await tx.get(doc(db, "terminalInstallations", targetUid));
+    if (!targetInstallation.exists() || targetInstallation.data().authUid !== targetUid ||
+        targetInstallation.data().approved !== true || targetInstallation.data().terminalId !== targetTerminalId) {
+      throw new Error("TERMINAL_INSTALLATION_NOT_VERIFIED");
+    }
+    tx.update(targetRef, { subAdmin: enabled, subAdminUpdatedAt: new Date().toISOString(), subAdminUpdatedByUid: uid });
+  });
 }
+
 export async function releaseOwnReception(): Promise<void> {
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
   const terminalId = getManagerTerminalId();
-  await callBackend<{ terminalId: string }, { released: boolean }>(
-    "releaseOwnReceptionRegistration", { terminalId },
-  );
+  if (!terminalId) throw new Error("TERMINAL_ID_NOT_FOUND");
+  const db = getFirebaseDb();
+  const now = new Date().toISOString();
+  await runTransaction(db, async (tx) => {
+    const terminalRef = doc(db, "terminals", terminalId);
+    const ownerRef = doc(db, "terminalOwners", terminalId);
+    const installationRef = doc(db, "terminalInstallations", uid);
+    const [terminal, owner, installation] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef)]);
+    const ownsTerminal = owner.exists() && owner.data().enabled === true && owner.data().ownerUid === uid;
+    const hasGrant = installation.exists() && installation.data().authUid === uid &&
+      installation.data().approved === true && installation.data().terminalId === terminalId;
+    if (!ownsTerminal && !hasGrant) throw new Error("RECEPTION_RELEASE_NOT_AUTHORIZED");
+    if (!terminal.exists()) {
+      if (hasGrant) tx.update(installationRef, { approved: false, releasedAt: now });
+      return;
+    }
+    if (!ownsTerminal) {
+      tx.update(installationRef, { approved: false, releasedAt: now });
+      return;
+    }
+    const td = terminal.data();
+    const managementApproved = td.managementApproved === true;
+    const nextVersion = (Number.isSafeInteger(td.receptionApprovalVersion) ? Number(td.receptionApprovalVersion) : 0) + 1;
+    tx.update(terminalRef, {
+      receptionApproved: false, receptionApprovalVersion: nextVersion,
+      approved: managementApproved, mode: "停止", desiredMode: "停止",
+      desiredModeUpdatedAt: now, updatedAt: now, approvalUpdatedAt: now, approvalUpdatedByUid: uid,
+      ...(td.role === "both" && managementApproved ? { role: "management" } : {}),
+    });
+  });
 }
+
 export async function revokeManagedReception(targetTerminalId: string): Promise<void> {
-  await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { released: boolean }>(
-    "revokeTerminalReception", { managerTerminalId: getManagerTerminalId(), targetTerminalId },
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const managerTerminalId = getManagerTerminalId();
+  if (!managerTerminalId || managerTerminalId === targetTerminalId) throw new Error("INVALID_REMOTE_TERMINAL");
+  const db = getFirebaseDb();
+  const now = new Date().toISOString();
+  await runTransaction(db, async (tx) => {
+    const managerRef = doc(db, "terminals", managerTerminalId);
+    const managerOwnerRef = doc(db, "terminalOwners", managerTerminalId);
+    const managerInstallationRef = doc(db, "terminalInstallations", uid);
+    const targetRef = doc(db, "terminals", targetTerminalId);
+    const [manager, managerOwner, managerInstallation, target] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(managerInstallationRef), tx.get(targetRef),
+    ]);
+    if (!manager.exists() || !managerOwner.exists() || !managerInstallation.exists() ||
+        managerOwner.data().ownerUid !== uid || managerOwner.data().enabled !== true ||
+        managerInstallation.data().authUid !== uid || managerInstallation.data().terminalId !== managerTerminalId ||
+        managerInstallation.data().approved !== true || manager.data().approved !== true ||
+        manager.data().managementApproved !== true || !["management", "both"].includes(String(manager.data().role)) ||
+        (manager.data().admin !== true && manager.data().subAdmin !== true)) throw new Error("MANAGEMENT_PERMISSION_REQUIRED");
+    if (!target.exists()) throw new Error("TERMINAL_NOT_FOUND");
+    const td = target.data();
+    if (td.admin === true || td.subAdmin === true) throw new Error("PROTECTED_TERMINAL_RECEPTION_RELEASE_BLOCKED");
+    const role = td.role;
+    if (!["management", "reception", "both"].includes(String(role))) throw new Error("TERMINAL_ROLE_INVALID");
+    const managementApproved = td.managementApproved === true;
+    const nextVersion = (Number.isSafeInteger(td.receptionApprovalVersion) ? Number(td.receptionApprovalVersion) : 0) + 1;
+    tx.update(targetRef, {
+      receptionApproved: false, receptionApprovalVersion: nextVersion,
+      approved: managementApproved, mode: "停止", desiredMode: "停止",
+      desiredModeUpdatedAt: now, updatedAt: now, approvalUpdatedAt: now, approvalUpdatedByUid: uid,
+      ...(role === "both" ? { role: "management" } : {}),
+    });
+  });
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
