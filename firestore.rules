@@ -180,6 +180,19 @@ service cloud.firestore {
             && next.name is string && next.name.size() > 0 && next.name.size() <= 80));
     }
 
+    function validManagedModeUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      return approvedManagementTerminal()
+        && terminalId != managementTerminalId()
+        && current.approved == true
+        && next.diff(current).affectedKeys().hasOnly(["desiredMode", "desiredModeUpdatedAt"])
+        && next.desiredMode in ["入口受付", "出口受付", "停止"]
+        && next.desiredModeUpdatedAt is string
+        && next.desiredModeUpdatedAt.size() > 0
+        && next.desiredModeUpdatedAt.size() <= 40;
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow read, write: if false;
@@ -292,7 +305,7 @@ service cloud.firestore {
       // only its own terminal metadata to display role and remote-control state.
       allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId);
       allow list: if approvedManagementTerminal();
-      allow update: if validTerminalHeartbeatUpdate(terminalId);
+      allow update: if validTerminalHeartbeatUpdate(terminalId) || validManagedModeUpdate(terminalId);
       allow create, delete: if false;
     }
 
