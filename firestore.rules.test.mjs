@@ -423,3 +423,135 @@ test("reception clients cannot write a record for an unpublished event or anothe
     receivedAt: serverTimestamp(),
   }));
 });
+
+
+test("a device can submit a pending terminal application but cannot self-approve it", async () => {
+  const uid = "new-terminal-owner";
+  const terminalId = "T-NEW-DEVICE-01";
+  const db = env.authenticatedContext(uid).firestore();
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.set(doc(db, "terminalApplications", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: "reception",
+    name: "新規受付端末", type: "Web / iPad",
+    status: "pending", requestedAt: now, updatedAt: now,
+  });
+  batch.set(doc(db, "terminals", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: "reception",
+    name: "新規受付端末", type: "Web / iPad", role: "reception",
+    approved: false, managementApproved: false, receptionApproved: false,
+    admin: false, subAdmin: false, status: "pending", mode: "停止",
+    desiredMode: "停止", requestedAt: now, updatedAt: now, syncPendingCount: 0,
+  });
+  await assertSucceeds(batch.commit());
+  await assertFails(updateDoc(doc(db, "terminals", terminalId), {
+    approved: true, managementApproved: true, receptionApproved: true,
+  }));
+});
+
+test("a primary admin can approve a pending terminal only as an atomic trusted grant", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    const now = new Date().toISOString();
+    await setDoc(doc(db, "terminalInstallations", "primary-admin-user"), {
+      terminalId: "T-PRIMARY-ADMIN", authUid: "primary-admin-user", approved: true,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-PRIMARY-ADMIN"), {
+      terminalId: "T-PRIMARY-ADMIN", ownerUid: "primary-admin-user", enabled: true,
+    });
+    await setDoc(doc(db, "terminals", "T-PRIMARY-ADMIN"), {
+      terminalId: "T-PRIMARY-ADMIN", requestedByUid: "primary-admin-user",
+      approved: true, managementApproved: true, receptionApproved: false,
+      role: "management", admin: true, subAdmin: false,
+    });
+    await setDoc(doc(db, "terminals", "T-APPROVAL-TARGET"), {
+      terminalId: "T-APPROVAL-TARGET", requestedByUid: "pending-reception-user",
+      requestedRole: "reception", role: "reception", name: "受付端末",
+      type: "Web / iPad", approved: false, managementApproved: false,
+      receptionApproved: false, admin: false, subAdmin: false, status: "pending",
+      mode: "停止", desiredMode: "停止", requestedAt: now, updatedAt: now, syncPendingCount: 0,
+    });
+    await setDoc(doc(db, "terminalApplications", "T-APPROVAL-TARGET"), {
+      terminalId: "T-APPROVAL-TARGET", requestedByUid: "pending-reception-user",
+      requestedRole: "reception", name: "受付端末", type: "Web / iPad",
+      status: "pending", requestedAt: now, updatedAt: now,
+    });
+  });
+
+  const db = env.authenticatedContext("primary-admin-user").firestore();
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.update(doc(db, "terminals", "T-APPROVAL-TARGET"), {
+    approved: true, status: "offline", managementApproved: false, receptionApproved: true,
+    approvalUpdatedAt: now, approvalUpdatedByUid: "primary-admin-user", updatedAt: now,
+  });
+  batch.set(doc(db, "terminalOwners", "T-APPROVAL-TARGET"), {
+    terminalId: "T-APPROVAL-TARGET", ownerUid: "pending-reception-user", enabled: true, updatedAt: now,
+  });
+  batch.set(doc(db, "terminalInstallations", "pending-reception-user"), {
+    terminalId: "T-APPROVAL-TARGET", authUid: "pending-reception-user",
+    approved: true, registrationApprovedAt: now,
+  });
+  batch.update(doc(db, "terminalApplications", "T-APPROVAL-TARGET"), {
+    status: "approved", decidedAt: now, decidedByUid: "primary-admin-user", updatedAt: now,
+  });
+  await assertSucceeds(batch.commit());
+});
+
+test("management can revoke reception, change sub-admin status, and delete only an unprotected terminal", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    const now = new Date().toISOString();
+    await setDoc(doc(db, "terminalInstallations", "primary-admin-user"), {
+      terminalId: "T-PRIMARY-ADMIN", authUid: "primary-admin-user", approved: true,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-PRIMARY-ADMIN"), {
+      terminalId: "T-PRIMARY-ADMIN", ownerUid: "primary-admin-user", enabled: true,
+    });
+    await setDoc(doc(db, "terminals", "T-PRIMARY-ADMIN"), {
+      terminalId: "T-PRIMARY-ADMIN", approved: true, managementApproved: true,
+      receptionApproved: false, role: "management", admin: true, subAdmin: false,
+    });
+    await setDoc(doc(db, "terminals", "T-LIFECYCLE-TARGET"), {
+      terminalId: "T-LIFECYCLE-TARGET", requestedByUid: "lifecycle-target-user",
+      requestedRole: "both", role: "both", name: "兼用端末", type: "Web / iPad",
+      approved: true, managementApproved: true, receptionApproved: true,
+      admin: false, subAdmin: false, status: "offline", mode: "入口受付",
+      desiredMode: "入口受付", receptionApprovalVersion: 0,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-LIFECYCLE-TARGET"), {
+      terminalId: "T-LIFECYCLE-TARGET", ownerUid: "lifecycle-target-user", enabled: true,
+    });
+    await setDoc(doc(db, "terminalInstallations", "lifecycle-target-user"), {
+      terminalId: "T-LIFECYCLE-TARGET", authUid: "lifecycle-target-user", approved: true,
+    });
+    await setDoc(doc(db, "terminalApplications", "T-LIFECYCLE-TARGET"), {
+      terminalId: "T-LIFECYCLE-TARGET", requestedByUid: "lifecycle-target-user",
+      requestedRole: "both", name: "兼用端末", type: "Web / iPad",
+      status: "approved", requestedAt: now, updatedAt: now,
+    });
+  });
+
+  const db = env.authenticatedContext("primary-admin-user").firestore();
+  const now = new Date().toISOString();
+  await assertSucceeds(updateDoc(doc(db, "terminals", "T-LIFECYCLE-TARGET"), {
+    receptionApproved: false, receptionApprovalVersion: 1, approved: true,
+    mode: "停止", desiredMode: "停止", desiredModeUpdatedAt: now, updatedAt: now,
+    approvalUpdatedAt: now, approvalUpdatedByUid: "primary-admin-user", role: "management",
+  }));
+  await assertSucceeds(updateDoc(doc(db, "terminals", "T-LIFECYCLE-TARGET"), {
+    subAdmin: true, subAdminUpdatedAt: now, subAdminUpdatedByUid: "primary-admin-user",
+  }));
+  await assertFails(deleteDoc(doc(db, "terminals", "T-LIFECYCLE-TARGET")));
+  await assertSucceeds(updateDoc(doc(db, "terminals", "T-LIFECYCLE-TARGET"), {
+    subAdmin: false, subAdminUpdatedAt: now, subAdminUpdatedByUid: "primary-admin-user",
+  }));
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "terminals", "T-LIFECYCLE-TARGET"));
+  batch.set(doc(db, "terminalOwners", "T-LIFECYCLE-TARGET"), {
+    terminalId: "T-LIFECYCLE-TARGET", ownerUid: "lifecycle-target-user",
+    enabled: false, deletedAt: now, deletedByUid: "primary-admin-user", updatedAt: now,
+  });
+  batch.delete(doc(db, "terminalApplications", "T-LIFECYCLE-TARGET"));
+  await assertSucceeds(batch.commit());
+});
