@@ -288,11 +288,19 @@ service cloud.firestore {
       let manager = get(terminalPath(managementTerminalId())).data;
       return approvedManagementTerminal()
         && app.terminalId == terminalId
+        && get(applicationPath(terminalId)).data.status == "pending"
         && app.status == "approved"
         && app.decidedByUid == request.auth.uid
         && target.requestedByUid == app.requestedByUid
         && target.requestedRole == app.requestedRole
-        && target.approved == true
+        && target.approved == false
+        && (!exists(ownerPath(terminalId))
+          || (get(ownerPath(terminalId)).data.enabled == true
+            && get(ownerPath(terminalId)).data.ownerUid == app.requestedByUid))
+        && (!exists(installationPath(app.requestedByUid))
+          || (get(installationPath(app.requestedByUid)).data.authUid == app.requestedByUid
+            && get(installationPath(app.requestedByUid)).data.terminalId == terminalId
+            && get(installationPath(app.requestedByUid)).data.approved == true))
         && owner.terminalId == terminalId
         && owner.ownerUid == app.requestedByUid
         && owner.enabled == true
