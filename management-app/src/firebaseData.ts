@@ -317,23 +317,18 @@ export async function requestTerminalRegistration(input: { terminalId: string; n
   const existing = await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
   if (existing.docs.some(item => item.data().status === "pending")) throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
   const now = new Date().toISOString();
-  await runTransaction(db, async (tx) => {
-    const applicationRef = doc(db, "terminalApplications", terminalId);
-    const terminalRef = doc(db, "terminals", terminalId);
-    const [application, terminal] = await Promise.all([tx.get(applicationRef), tx.get(terminalRef)]);
-    if (application.exists() || terminal.exists()) throw new Error("TERMINAL_ID_ALREADY_EXISTS");
-    tx.set(applicationRef, {
-      terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
-      status: "pending", requestedAt: now, updatedAt: now,
-    });
-    tx.set(terminalRef, {
-      terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
-      role: input.role, approved: false, managementApproved: false, receptionApproved: false,
-      admin: false, subAdmin: false, status: "pending", mode: "停止",
-      desiredMode: "停止", requestedAt: now, updatedAt: now,
-      syncPendingCount: 0,
-    });
+  const batch = writeBatch(db);
+  batch.set(doc(db, "terminalApplications", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
+    status: "pending", requestedAt: now, updatedAt: now,
   });
+  batch.set(doc(db, "terminals", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: input.role, name, type: input.type,
+    role: input.role, approved: false, managementApproved: false, receptionApproved: false,
+    admin: false, subAdmin: false, status: "pending", mode: "停止",
+    desiredMode: "停止", requestedAt: now, updatedAt: now, syncPendingCount: 0,
+  });
+  await batch.commit();
 }
 
 export async function approveTerminal(targetTerminalId: string): Promise<void> {
