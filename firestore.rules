@@ -51,13 +51,395 @@ service cloud.firestore {
         );
     }
 
+    function receptionTerminalId() {
+      return get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId;
+    }
+
+    function activeReceptionEvent(eventId) {
+      return eventId is string
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.receptionTarget == true
+        && (
+          !get(/databases/$(database)/documents/events/$(eventId)).data.keys().hasAny(["eventStatus"])
+          || get(/databases/$(database)/documents/events/$(eventId)).data.eventStatus != "finished"
+        );
+    }
+
+    function validReceptionTicketUpdate(eventId, ticketId) {
+      let recordId = request.resource.data.lastReceptionRecordId;
+      let beforeStatus = resource.data.currentStatus;
+      let afterStatus = request.resource.data.currentStatus;
+      return approvedReceptionTerminal()
+        && activeReceptionEvent(eventId)
+        && request.resource.data.eventId == eventId
+        && request.resource.data.ticketId == ticketId
+        && resource.data.ticketId == ticketId
+        && resource.data.eventId == eventId
+        && resource.data.valid == true
+        && request.resource.data.valid == resource.data.valid
+        && recordId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "currentStatus", "updatedAt", "lastReceptionRecordId"
+        ])
+        && request.resource.data.updatedAt is string
+        && existsAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.recordId == recordId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.ticketId == ticketId
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.terminalId == receptionTerminalId()
+        && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.timestamp == request.resource.data.updatedAt
+        && (
+          (beforeStatus == "unused" && afterStatus == "inside"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "entry")
+          || (beforeStatus == "exited" && afterStatus == "inside"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "reentry")
+          || (beforeStatus == "inside" && afterStatus == "exited"
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.type == "exit")
+        );
+    }
+
+    function validReceptionRecordCreate(eventId, recordId) {
+      let data = request.resource.data;
+      let ticketPath = /databases/$(database)/documents/events/$(eventId)/tickets/$(data.ticketId);
+      return approvedReceptionTerminal()
+        && activeReceptionEvent(eventId)
+        && data.keys().hasOnly(["recordId", "eventId", "ticketId", "terminalId", "type", "timestamp"])
+        && data.recordId == recordId
+        && data.eventId == eventId
+        && data.ticketId is string
+        && data.ticketId.size() > 0
+        && data.ticketId.size() <= 160
+        && data.terminalId == receptionTerminalId()
+        && data.type in ["entry", "exit", "reentry"]
+        && data.timestamp is string
+        && exists(ticketPath)
+        && get(ticketPath).data.valid == true
+        && existsAfter(ticketPath)
+        && getAfter(ticketPath).data.lastReceptionRecordId == recordId
+        && getAfter(ticketPath).data.updatedAt == data.timestamp
+        && (
+          (data.type == "entry" && get(ticketPath).data.currentStatus == "unused"
+            && getAfter(ticketPath).data.currentStatus == "inside")
+          || (data.type == "reentry" && get(ticketPath).data.currentStatus == "exited"
+            && getAfter(ticketPath).data.currentStatus == "inside")
+          || (data.type == "exit" && get(ticketPath).data.currentStatus == "inside"
+            && getAfter(ticketPath).data.currentStatus == "exited")
+        );
+    }
+
+    function approvedOwnInstallationForTerminal(terminalId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
+        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId == terminalId
+        && exists(/databases/$(database)/documents/terminalOwners/$(terminalId))
+        && get(/databases/$(database)/documents/terminalOwners/$(terminalId)).data.enabled == true
+        && exists(/databases/$(database)/documents/terminals/$(terminalId))
+        && get(/databases/$(database)/documents/terminals/$(terminalId)).data.approved == true;
+    }
+
+    function validTerminalHeartbeatUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let ownerPath = /databases/$(database)/documents/terminalOwners/$(terminalId);
+      let installationPath = /databases/$(database)/documents/terminalInstallations/$(request.auth.uid);
+      let ownerMatches = exists(ownerPath)
+        && get(ownerPath).data.enabled == true
+        && get(ownerPath).data.ownerUid == request.auth.uid;
+      let installationMatches = exists(installationPath)
+        && get(installationPath).data.authUid == request.auth.uid
+        && get(installationPath).data.terminalId == terminalId
+        && get(installationPath).data.approved == true;
+      let managementActive = current.approved == true
+        && current.managementApproved == true
+        && (current.role == "management" || current.role == "both");
+      let receptionActive = current.approved == true
+        && (current.receptionApproved == true
+          || (!current.keys().hasAny(["receptionApproved"]) && current.approved == true))
+        && (current.role == "reception" || current.role == "both");
+      return signedIn()
+        && ((ownerMatches && (managementActive || receptionActive))
+          || (installationMatches && receptionActive))
+        && next.diff(current).affectedKeys().hasOnly([
+          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name"
+        ])
+        && next.status == "online"
+        && next.lastSeen is string
+        && next.updatedAt is string
+        && next.syncPendingCount is int
+        && next.syncPendingCount >= 0
+        && next.syncPendingCount <= 100000
+        && (!next.keys().hasAny(["networkMbps"])
+          || (next.networkMbps is number && next.networkMbps >= 0 && next.networkMbps <= 10000))
+        && (!next.diff(current).affectedKeys().hasAny(["mode"])
+          || (ownerMatches && managementActive
+            && next.mode in ["入口受付", "出口受付", "停止"]))
+        && (!next.diff(current).affectedKeys().hasAny(["name"])
+          || (ownerMatches && managementActive
+            && next.name is string && next.name.size() > 0 && next.name.size() <= 80));
+    }
+
+    function validManagedModeUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      return terminalId != managementTerminalId()
+        && current.approved == true
+        && next.diff(current).affectedKeys().hasOnly(["desiredMode", "desiredModeUpdatedAt"])
+        && next.desiredMode in ["入口受付", "出口受付", "停止"]
+        && next.desiredModeUpdatedAt is string
+        && next.desiredModeUpdatedAt.size() > 0
+        && next.desiredModeUpdatedAt.size() <= 40;
+    }
+
+    function applicationPath(terminalId) {
+      return /databases/$(database)/documents/terminalApplications/$(terminalId);
+    }
+
+    function terminalPath(terminalId) {
+      return /databases/$(database)/documents/terminals/$(terminalId);
+    }
+
+    function ownerPath(terminalId) {
+      return /databases/$(database)/documents/terminalOwners/$(terminalId);
+    }
+
+    function installationPath(uid) {
+      return /databases/$(database)/documents/terminalInstallations/$(uid);
+    }
+
+    function validTerminalRegistrationCreate(terminalId) {
+      let data = request.resource.data;
+      let app = getAfter(applicationPath(terminalId)).data;
+      return signedIn()
+        && !exists(ownerPath(terminalId))
+        && !exists(terminalPath(terminalId))
+        && existsAfter(applicationPath(terminalId))
+        && app.terminalId == terminalId
+        && app.requestedByUid == request.auth.uid
+        && app.status == "pending"
+        && app.requestedRole == data.requestedRole
+        && data.keys().hasOnly([
+          "terminalId", "requestedByUid", "requestedRole", "name", "type",
+          "role", "approved", "managementApproved", "receptionApproved",
+          "admin", "subAdmin", "status", "mode", "desiredMode",
+          "requestedAt", "updatedAt", "syncPendingCount"
+        ])
+        && data.terminalId == terminalId
+        && data.requestedByUid == request.auth.uid
+        && data.role == data.requestedRole
+        && data.requestedRole in ["management", "reception", "both"]
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+        && data.type in ["Web / iPad", "Web / PC"]
+        && data.approved == false
+        && data.managementApproved == false
+        && data.receptionApproved == false
+        && data.admin == false && data.subAdmin == false
+        && data.status == "pending"
+        && data.mode == "停止" && data.desiredMode == "停止"
+        && data.requestedAt is string && data.updatedAt is string
+        && data.syncPendingCount == 0;
+    }
+
+    function validTerminalApprovalUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let appPath = applicationPath(terminalId);
+      let ownManager = get(terminalPath(managementTerminalId())).data;
+      let app = get(appPath).data;
+      let appAfter = getAfter(appPath).data;
+      let owner = getAfter(ownerPath(terminalId)).data;
+      let installation = getAfter(installationPath(app.requestedByUid)).data;
+      let role = current.requestedRole;
+      return terminalId != managementTerminalId()
+        && current.approved == false
+        && current.requestedByUid == app.requestedByUid
+        && current.requestedRole == app.requestedRole
+        && app.terminalId == terminalId
+        && app.status == "pending"
+        && next.diff(current).affectedKeys().hasOnly([
+          "approved", "status", "managementApproved", "receptionApproved",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "updatedAt"
+        ])
+        && (ownManager.admin == true || (ownManager.subAdmin == true && role == "reception"))
+        && role in ["management", "reception", "both"]
+        && next.approved == true && next.status == "offline"
+        && next.managementApproved == (role in ["management", "both"])
+        && next.receptionApproved == (role in ["reception", "both"])
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.updatedAt is string
+        && owner.terminalId == terminalId
+        && owner.ownerUid == app.requestedByUid
+        && owner.enabled == true
+        && installation.terminalId == terminalId
+        && installation.authUid == app.requestedByUid
+        && installation.approved == true
+        && appAfter.status == "approved"
+        && appAfter.decidedByUid == request.auth.uid;
+    }
+
+    function validTerminalApprovalGrant(terminalId) {
+      let target = get(terminalPath(terminalId)).data;
+      let app = getAfter(applicationPath(terminalId)).data;
+      let owner = getAfter(ownerPath(terminalId)).data;
+      let installation = getAfter(installationPath(app.requestedByUid)).data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return app.terminalId == terminalId
+        && get(applicationPath(terminalId)).data.status == "pending"
+        && app.status == "approved"
+        && app.decidedByUid == request.auth.uid
+        && target.requestedByUid == app.requestedByUid
+        && target.requestedRole == app.requestedRole
+        && target.approved == false
+        && (!exists(ownerPath(terminalId))
+          || (get(ownerPath(terminalId)).data.enabled == true
+            && get(ownerPath(terminalId)).data.ownerUid == app.requestedByUid))
+        && (!exists(installationPath(app.requestedByUid))
+          || (get(installationPath(app.requestedByUid)).data.authUid == app.requestedByUid
+            && get(installationPath(app.requestedByUid)).data.terminalId == terminalId
+            && get(installationPath(app.requestedByUid)).data.approved == true))
+        && owner.terminalId == terminalId
+        && owner.ownerUid == app.requestedByUid
+        && owner.enabled == true
+        && installation.terminalId == terminalId
+        && installation.authUid == app.requestedByUid
+        && installation.approved == true
+        && (manager.admin == true || (manager.subAdmin == true && target.requestedRole == "reception"));
+    }
+
+    function validSubAdminUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      let owner = get(ownerPath(terminalId)).data;
+      let install = get(installationPath(owner.ownerUid)).data;
+      return manager.admin == true
+        && terminalId != managementTerminalId()
+        && current.admin != true
+        && current.approved == true
+        && current.managementApproved == true
+        && current.role in ["management", "both"]
+        && owner.enabled == true
+        && owner.ownerUid is string
+        && install.authUid == owner.ownerUid
+        && install.terminalId == terminalId
+        && install.approved == true
+        && next.diff(current).affectedKeys().hasOnly(["subAdmin", "subAdminUpdatedAt", "subAdminUpdatedByUid"])
+        && next.subAdmin is bool
+        && next.subAdminUpdatedAt is string
+        && next.subAdminUpdatedByUid == request.auth.uid;
+    }
+
+    function validManagedReceptionRevoke(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return terminalId != managementTerminalId()
+        && (manager.admin == true || manager.subAdmin == true)
+        && current.admin != true && current.subAdmin != true
+        && current.role in ["management", "reception", "both"]
+        && next.diff(current).affectedKeys().hasOnly([
+          "receptionApproved", "receptionApprovalVersion", "approved",
+          "mode", "desiredMode", "desiredModeUpdatedAt", "updatedAt",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "role"
+        ])
+        && next.receptionApproved == false
+        && next.receptionApprovalVersion is int
+        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.approved == (current.managementApproved == true)
+        && next.mode == "停止" && next.desiredMode == "停止"
+        && next.desiredModeUpdatedAt is string && next.updatedAt is string
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.role == (current.role == "both" ? "management" : current.role);
+    }
+
+    function validOwnReceptionRelease(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let owner = get(ownerPath(terminalId)).data;
+      let install = get(installationPath(request.auth.uid)).data;
+      return signedIn()
+        && owner.ownerUid == request.auth.uid && owner.enabled == true
+        && install.authUid == request.auth.uid && install.terminalId == terminalId
+        && install.approved == true
+        && next.diff(current).affectedKeys().hasOnly([
+          "receptionApproved", "receptionApprovalVersion", "approved",
+          "mode", "desiredMode", "desiredModeUpdatedAt", "updatedAt",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "role"
+        ])
+        && next.receptionApproved == false
+        && next.receptionApprovalVersion is int
+        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.approved == (current.managementApproved == true)
+        && next.mode == "停止" && next.desiredMode == "停止"
+        && next.desiredModeUpdatedAt is string && next.updatedAt is string
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.role == (current.role == "both" && current.managementApproved == true ? "management" : current.role);
+    }
+
+    function validTerminalDeletion(terminalId) {
+      let manager = get(terminalPath(managementTerminalId())).data;
+      let target = resource.data;
+      let ownerAfter = getAfter(ownerPath(terminalId)).data;
+      return terminalId != managementTerminalId()
+        && target.admin != true && target.subAdmin != true
+        && (manager.admin == true || !(target.role in ["management", "both"]))
+        && ownerAfter.terminalId == terminalId
+        && ownerAfter.enabled == false
+        && ownerAfter.deletedByUid == request.auth.uid
+        && !existsAfter(applicationPath(terminalId));
+    }
+
+    function validOwnerTombstoneWrite(terminalId) {
+      let targetPath = terminalPath(terminalId);
+      let target = get(targetPath).data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return exists(targetPath)
+        && terminalId != managementTerminalId()
+        && target.admin != true && target.subAdmin != true
+        && (manager.admin == true || !(target.role in ["management", "both"]))
+        && !existsAfter(targetPath)
+        && !existsAfter(applicationPath(terminalId))
+        && next.terminalId == terminalId
+        && next.enabled == false
+        && next.deletedByUid == request.auth.uid
+        && next.updatedAt is string
+        && (!next.keys().hasAny(["ownerUid"]) || next.ownerUid == target.requestedByUid);
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
-      allow read, write: if false;
+      allow get: if approvedManagementTerminal()
+        || (signedIn() && resource.data.ownerUid == request.auth.uid)
+        || (signedIn()
+          && exists(installationPath(request.auth.uid))
+          && get(installationPath(request.auth.uid)).data.authUid == request.auth.uid
+          && get(installationPath(request.auth.uid)).data.approved == true
+          && get(installationPath(request.auth.uid)).data.terminalId == terminalId);
+      allow list: if approvedManagementTerminal();
+      allow create, update: if approvedManagementTerminal()
+        && (validTerminalApprovalGrant(terminalId) || validOwnerTombstoneWrite(terminalId));
+      allow delete: if false;
     }
 
     match /terminalInstallations/{uid} {
-      allow read, write: if false;
+      // Own grant is readable by the installation; approved managers may verify a target grant.
+      allow get: if (signedIn() && request.auth.uid == uid) || approvedManagementTerminal();
+      allow list: if approvedManagementTerminal();
+      allow create, update: if (approvedManagementTerminal()
+          && validTerminalApprovalGrant(request.resource.data.terminalId)
+          && request.resource.data.authUid == uid)
+        || (signedIn() && request.auth.uid == uid
+          && resource.data.authUid == uid
+          && resource.data.approved == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["approved", "releasedAt"])
+          && request.resource.data.approved == false
+          && request.resource.data.releasedAt is string);
+      allow delete: if false;
     }
 
     match /terminalHandoffRequests/{requestId} {
@@ -68,30 +450,79 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Pending terminal applications are written only by callable Functions.
-    // Clients must not forge applicant identity or approval state.
+    // A signed-in browser may submit/cancel only its own pending application.
+    // Approval and trusted ownership grants remain impossible from client rules.
     match /terminalApplications/{terminalId} {
-      allow read, write: if false;
+      allow get: if approvedManagementTerminal()
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid);
+      allow list: if approvedManagementTerminal()
+        || (signedIn() && request.query.limit <= 5 && resource.data.requestedByUid == request.auth.uid);
+      allow create: if signedIn()
+        && !exists(ownerPath(terminalId))
+        && !exists(terminalPath(terminalId))
+        && request.resource.data.keys().hasOnly([
+          "terminalId", "requestedByUid", "requestedRole", "name", "type",
+          "status", "requestedAt", "updatedAt"
+        ])
+        && request.resource.data.terminalId == terminalId
+        && request.resource.data.requestedByUid == request.auth.uid
+        && request.resource.data.requestedRole in ["management", "reception", "both"]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.type in ["Web / iPad", "Web / PC"]
+        && request.resource.data.status == "pending"
+        && request.resource.data.requestedAt is string
+        && request.resource.data.updatedAt is string;
+      allow delete: if (signedIn()
+          && resource.data.requestedByUid == request.auth.uid
+          && resource.data.status == "pending")
+        || (approvedManagementTerminal() && exists(terminalPath(terminalId))
+          && !existsAfter(terminalPath(terminalId)));
+      allow update: if approvedManagementTerminal()
+        && resource.data.status == "pending"
+        && request.resource.data.status == "approved"
+        && request.resource.data.terminalId == terminalId
+        && request.resource.data.requestedByUid == resource.data.requestedByUid
+        && request.resource.data.requestedRole == resource.data.requestedRole
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status", "decidedAt", "decidedByUid", "updatedAt"
+        ])
+        && request.resource.data.decidedAt is string
+        && request.resource.data.updatedAt is string
+        && request.resource.data.decidedByUid == request.auth.uid
+        && getAfter(terminalPath(terminalId)).data.approved == true
+        && getAfter(ownerPath(terminalId)).data.enabled == true
+        && getAfter(installationPath(resource.data.requestedByUid)).data.approved == true;
     }
 
     // Event and ticket documents are restricted to approved management
     // installations. Reception reads published event bundles through the
     // dedicated eventBundles rule; reception ticket-state changes use callables.
     match /events/{eventId} {
-      // Reception clients obtain only the single active event's metadata from a callable.
+      // Reception uses a published bundle; raw event documents remain management-only.
       allow get, list: if approvedManagementTerminal();
       allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
+        // Ticket documents remain management-only; reception mutations are
+        // checked against the existing ticket state inside the rules engine.
         allow read: if approvedManagementTerminal();
-        // Reception ticket status changes go through recordReception (Admin SDK).
-        allow create, update, delete: if approvedManagementTerminal();
+        allow create, delete: if approvedManagementTerminal();
+        // Reception changes are allowed only as an atomic ticket+record write.
+        allow update: if approvedManagementTerminal()
+          || validReceptionTicketUpdate(eventId, ticketId);
       }
 
       match /receptionRecords/{recordId} {
-        allow read: if approvedManagementTerminal();
-        // Writes are only allowed through the server-validated recordReception callable.
-        allow create, update, delete: if false;
+        allow list: if approvedManagementTerminal();
+        allow get: if approvedManagementTerminal()
+          || (approvedReceptionTerminal()
+            && activeReceptionEvent(eventId)
+            && (!exists(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
+              || resource.data.terminalId == receptionTerminalId()));
+        allow create: if validReceptionRecordCreate(eventId, recordId);
+        allow update, delete: if false;
       }
 
       match /analysis/{analysisId} {
@@ -140,20 +571,47 @@ service cloud.firestore {
       allow create, update, delete: if approvedManagementTerminal();
     }
 
-    // Terminal documents are read by clients, but every write is routed through
-    // callable Functions so approval, ownership, heartbeat and role fields cannot
-    // be forged by a signed-in browser.
+    // Registration and management writes are client transactions guarded by these rules.
     match /terminals/{terminalId} {
-      // All terminal records are server-managed. Clients use callable status
-      // endpoints rather than reading terminal identity/control documents directly.
-      allow get, list: if approvedManagementTerminal();
-      allow create, update, delete: if false;
+      allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId)
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid && resource.data.approved == false);
+      allow list: if approvedManagementTerminal();
+      allow create: if validTerminalRegistrationCreate(terminalId);
+      allow update: if validTerminalHeartbeatUpdate(terminalId)
+        || validOwnReceptionRelease(terminalId)
+        || (approvedManagementTerminal()
+          && (validManagedModeUpdate(terminalId)
+            || validTerminalApprovalUpdate(terminalId)
+            || validSubAdminUpdate(terminalId)
+            || validManagedReceptionRevoke(terminalId)));
+      allow delete: if approvedManagementTerminal() && validTerminalDeletion(terminalId);
     }
 
-    // Error metadata is readable by management, but client writes use a callable.
+    // Reception terminals may append validated error metadata only; they cannot
+    // read, revise, or delete the log. Management retains read access.
     match /receptionErrors/{errorId} {
-      allow read: if approvedManagementTerminal();
-      allow create, update, delete: if false;
+      allow list: if approvedManagementTerminal();
+      allow get: if approvedManagementTerminal()
+        || (approvedReceptionTerminal()
+          && (!exists(/databases/$(database)/documents/receptionErrors/$(errorId))
+            || resource.data.terminalId == receptionTerminalId()));
+      allow create: if approvedReceptionTerminal()
+        && request.resource.data.errorId == errorId
+        && request.resource.data.eventId is string
+        && request.resource.data.eventId.size() > 0
+        && request.resource.data.eventId.size() <= 160
+        && request.resource.data.terminalId == receptionTerminalId()
+        && request.resource.data.category in [
+          "unknown_ticket", "invalid_ticket", "invalid_state", "save_failed",
+          "camera_failed", "event_load_failed", "sync_failed"
+        ]
+        && request.resource.data.mode in ["entry", "exit"]
+        && request.resource.data.timestamp is string
+        && request.resource.data.receivedAt == request.time
+        && request.resource.data.keys().hasOnly([
+          "errorId", "eventId", "terminalId", "category", "mode", "timestamp", "receivedAt"
+        ]);
+      allow update, delete: if false;
     }
 
     // Default-deny for every path not explicitly listed above.
