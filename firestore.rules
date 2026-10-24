@@ -183,8 +183,7 @@ service cloud.firestore {
     function validManagedModeUpdate(terminalId) {
       let current = resource.data;
       let next = request.resource.data;
-      return approvedManagementTerminal()
-        && terminalId != managementTerminalId()
+      return terminalId != managementTerminalId()
         && current.approved == true
         && next.diff(current).affectedKeys().hasOnly(["desiredMode", "desiredModeUpdatedAt"])
         && next.desiredMode in ["入口受付", "出口受付", "停止"]
@@ -316,8 +315,7 @@ service cloud.firestore {
       let manager = get(terminalPath(managementTerminalId())).data;
       let owner = get(ownerPath(terminalId)).data;
       let install = get(installationPath(owner.ownerUid)).data;
-      return approvedManagementTerminal()
-        && manager.admin == true
+      return manager.admin == true
         && terminalId != managementTerminalId()
         && current.admin != true
         && current.approved == true
@@ -338,8 +336,7 @@ service cloud.firestore {
       let current = resource.data;
       let next = request.resource.data;
       let manager = get(terminalPath(managementTerminalId())).data;
-      return approvedManagementTerminal()
-        && terminalId != managementTerminalId()
+      return terminalId != managementTerminalId()
         && (manager.admin == true || manager.subAdmin == true)
         && current.admin != true && current.subAdmin != true
         && current.role in ["management", "reception", "both"]
@@ -388,8 +385,7 @@ service cloud.firestore {
       let manager = get(terminalPath(managementTerminalId())).data;
       let target = resource.data;
       let ownerAfter = getAfter(ownerPath(terminalId)).data;
-      return approvedManagementTerminal()
-        && terminalId != managementTerminalId()
+      return terminalId != managementTerminalId()
         && target.admin != true && target.subAdmin != true
         && (manager.admin == true || !(target.role in ["management", "both"]))
         && ownerAfter.terminalId == terminalId
@@ -403,8 +399,7 @@ service cloud.firestore {
       let target = get(targetPath).data;
       let next = request.resource.data;
       let manager = get(terminalPath(managementTerminalId())).data;
-      return approvedManagementTerminal()
-        && exists(targetPath)
+      return exists(targetPath)
         && terminalId != managementTerminalId()
         && target.admin != true && target.subAdmin != true
         && (manager.admin == true || !(target.role in ["management", "both"]))
@@ -427,8 +422,8 @@ service cloud.firestore {
           && get(installationPath(request.auth.uid)).data.approved == true
           && get(installationPath(request.auth.uid)).data.terminalId == terminalId);
       allow list: if approvedManagementTerminal();
-      allow create, update: if validTerminalApprovalGrant(terminalId)
-        || validOwnerTombstoneWrite(terminalId);
+      allow create, update: if approvedManagementTerminal()
+        && (validTerminalApprovalGrant(terminalId) || validOwnerTombstoneWrite(terminalId));
       allow delete: if false;
     }
 
@@ -436,8 +431,9 @@ service cloud.firestore {
       // Own grant is readable by the installation; approved managers may verify a target grant.
       allow get: if (signedIn() && request.auth.uid == uid) || approvedManagementTerminal();
       allow list: if approvedManagementTerminal();
-      allow create, update: if validTerminalApprovalGrant(request.resource.data.terminalId)
-        && request.resource.data.authUid == uid
+      allow create, update: if (approvedManagementTerminal()
+          && validTerminalApprovalGrant(request.resource.data.terminalId)
+          && request.resource.data.authUid == uid)
         || (signedIn() && request.auth.uid == uid
           && resource.data.authUid == uid
           && resource.data.approved == true
@@ -583,12 +579,13 @@ service cloud.firestore {
       allow list: if approvedManagementTerminal();
       allow create: if validTerminalRegistrationCreate(terminalId);
       allow update: if validTerminalHeartbeatUpdate(terminalId)
-        || validManagedModeUpdate(terminalId)
-        || validTerminalApprovalUpdate(terminalId)
-        || validSubAdminUpdate(terminalId)
-        || validManagedReceptionRevoke(terminalId)
-        || validOwnReceptionRelease(terminalId);
-      allow delete: if validTerminalDeletion(terminalId);
+        || validOwnReceptionRelease(terminalId)
+        || (approvedManagementTerminal()
+          && (validManagedModeUpdate(terminalId)
+            || validTerminalApprovalUpdate(terminalId)
+            || validSubAdminUpdate(terminalId)
+            || validManagedReceptionRevoke(terminalId)));
+      allow delete: if approvedManagementTerminal() && validTerminalDeletion(terminalId);
     }
 
     // Reception terminals may append validated error metadata only; they cannot
