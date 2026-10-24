@@ -212,14 +212,32 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Applicants may read only their own application documents; only trusted
-    // backend code may create, approve, revoke, or delete applications.
+    // A signed-in browser may submit/cancel only its own pending application.
+    // Approval and trusted ownership grants remain impossible from client rules.
     match /terminalApplications/{terminalId} {
       allow get: if signedIn() && resource.data.requestedByUid == request.auth.uid;
       allow list: if signedIn()
         && request.query.limit <= 5
         && resource.data.requestedByUid == request.auth.uid;
-      allow create, update, delete: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "terminalId", "requestedByUid", "requestedRole", "name", "type",
+          "status", "requestedAt", "updatedAt"
+        ])
+        && request.resource.data.terminalId == terminalId
+        && request.resource.data.requestedByUid == request.auth.uid
+        && request.resource.data.requestedRole in ["management", "reception", "both"]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.type in ["Web / iPad", "Web / PC"]
+        && request.resource.data.status == "pending"
+        && request.resource.data.requestedAt is string
+        && request.resource.data.updatedAt is string;
+      allow delete: if signedIn()
+        && resource.data.requestedByUid == request.auth.uid
+        && resource.data.status == "pending";
+      allow update: if false;
     }
 
     // Event and ticket documents are restricted to approved management
