@@ -279,9 +279,19 @@ export async function approveTerminal(targetTerminalId: string): Promise<void> {
   );
 }
 export async function setManagedTerminalMode(targetTerminalId: string, mode: "入口受付" | "出口受付" | "停止"): Promise<void> {
-  await callBackend<{ managerTerminalId: string; targetTerminalId: string; mode: string }, { updated: boolean }>(
-    "setManagedTerminalMode", { managerTerminalId: getManagerTerminalId(), targetTerminalId, mode },
-  );
+  await ensureFirebaseAuth();
+  const managerTerminalId = getManagerTerminalId();
+  if (!managerTerminalId || !targetTerminalId || managerTerminalId === targetTerminalId) {
+    throw new Error("INVALID_REMOTE_TERMINAL");
+  }
+  const state = await readOwnTerminalState();
+  if (state.terminalId !== managerTerminalId || state.terminal?.managementApproved !== true) {
+    throw new Error("MANAGEMENT_TERMINAL_NOT_APPROVED");
+  }
+  await updateDoc(doc(getFirebaseDb(), "terminals", targetTerminalId), {
+    desiredMode: mode,
+    desiredModeUpdatedAt: new Date().toISOString(),
+  });
 }
 export async function setManagedSubAdmin(targetTerminalId: string, enabled: boolean): Promise<void> {
   await callBackend<{ managerTerminalId: string; targetTerminalId: string; enabled: boolean }, { updated: boolean }>(
