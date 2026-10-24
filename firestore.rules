@@ -250,8 +250,7 @@ service cloud.firestore {
       let owner = getAfter(ownerPath(terminalId)).data;
       let installation = getAfter(installationPath(app.requestedByUid)).data;
       let role = current.requestedRole;
-      return approvedManagementTerminal()
-        && terminalId != managementTerminalId()
+      return terminalId != managementTerminalId()
         && current.approved == false
         && current.requestedByUid == app.requestedByUid
         && current.requestedRole == app.requestedRole
@@ -285,8 +284,7 @@ service cloud.firestore {
       let owner = getAfter(ownerPath(terminalId)).data;
       let installation = getAfter(installationPath(app.requestedByUid)).data;
       let manager = get(terminalPath(managementTerminalId())).data;
-      return approvedManagementTerminal()
-        && app.terminalId == terminalId
+      return app.terminalId == terminalId
         && get(applicationPath(terminalId)).data.status == "pending"
         && app.status == "approved"
         && app.decidedByUid == request.auth.uid
