@@ -1,7 +1,6 @@
 import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
-import { callBackend } from "./firebaseFunctions";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
 export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
@@ -269,9 +268,27 @@ export async function getOwnTerminalStatus(): Promise<{
   return { approved: false, terminalId: null };
 }
 export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
-  await callBackend<{ terminalId: string; name: string; type: string; role: string }, { applicationId: string }>(
-    "registerTerminalApplication", input,
-  );
+  await ensureFirebaseAuth();
+  const uid = await getFirebaseUid();
+  const db = getFirebaseDb();
+  const terminalId = input.terminalId.trim();
+  const name = input.name.trim();
+  if (!/^T-[A-Za-z0-9-]{8,40}$/.test(terminalId) || !name || name.length > 80) {
+    throw new Error("INVALID_TERMINAL_APPLICATION");
+  }
+  const existing = await getDocs(query(
+    collection(db, "terminalApplications"),
+    where("requestedByUid", "==", uid),
+    limit(5),
+  ));
+  if (existing.docs.some(item => item.data().status === "pending")) {
+    throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
+  }
+  await setDoc(doc(db, "terminalApplications", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: input.role,
+    name, type: input.type, status: "pending",
+    requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
 }
 export async function approveTerminal(targetTerminalId: string): Promise<void> {
   await callBackend<{ managerTerminalId: string; targetTerminalId: string }, { approved: boolean }>(
