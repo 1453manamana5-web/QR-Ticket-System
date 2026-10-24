@@ -55,6 +55,126 @@ jobs:
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
         run: |
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (typeof p.project_id !== 'string' || !p.project_id || typeof p.client_email !== 'string' || !p.client_email) throw new Error('Service account JSON is incomplete'); console.log('Service account JSON parsed. Firebase CLI target is explicitly pinned to qr-ticket-system-5ba69.');"
-      - name: Deploy Firestore rules only (no Cloud Functions)
+      - name: Deploy Firestore rules only through Firebase Rules API (no Cloud Functions or Service Usage preflight)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
-        run: npx firebase-tools deploy --only firestore:rules --project qr-ticket-system-5ba69 --non-interactive
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+
+          const projectId = "qr-ticket-system-5ba69";
+          const accountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+          if (!accountPath) throw new Error("Google service-account credential path is missing");
+          const account = JSON.parse(fs.readFileSync(accountPath, "utf8"));
+          if (account.project_id !== projectId) {
+            throw new Error("Refusing deployment: service-account project_id does not match the production project");
+          }
+          if (!account.client_email || !account.private_key) {
+            throw new Error("Service-account JSON is missing client_email or private_key");
+          }
+
+          const b64url = (value) => Buffer.from(value).toString("base64url");
+          const issuedAt = Math.floor(Date.now() / 1000);
+          const unsignedJwt = [
+            b64url(JSON.stringify({ alg: "RS256", typ: "JWT" })),
+            b64url(JSON.stringify({
+              iss: account.client_email,
+              scope: "https://www.googleapis.com/auth/cloud-platform",
+              aud: "https://oauth2.googleapis.com/token",
+              iat: issuedAt,
+              exp: issuedAt + 3600,
+            })),
+          ].join(".");
+          const signature = crypto.sign("RSA-SHA256", Buffer.from(unsignedJwt), account.private_key).toString("base64url");
+          const assertion = unsignedJwt + "." + signature;
+
+          async function readBody(response) {
+            const text = await response.text();
+            let body;
+            try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+            return { response, body };
+          }
+
+          async function authenticatedFetch(url, options = {}) {
+            const response = await fetch(url, {
+              ...options,
+              headers: {
+                authorization: "Bearer " + accessToken,
+                "content-type": "application/json",
+                ...(options.headers || {}),
+              },
+            });
+            return readBody(response);
+          }
+
+          const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+              assertion,
+            }),
+          });
+          const tokenResult = await readBody(tokenResponse);
+          if (!tokenResult.response.ok || !tokenResult.body.access_token) {
+            throw new Error("OAuth token exchange failed: HTTP " + tokenResult.response.status + " " +
+              JSON.stringify(tokenResult.body).slice(0, 1500));
+          }
+          const accessToken = tokenResult.body.access_token;
+          const apiRoot = "https://firebaserules.googleapis.com/v1";
+          const rulesContent = fs.readFileSync("firestore.rules", "utf8");
+          const fingerprint = crypto.createHash("sha256").update(rulesContent, "utf8").digest("base64");
+          const rulesetUrl = apiRoot + "/projects/" + projectId + "/rulesets";
+          const created = await authenticatedFetch(rulesetUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              source: { files: [{ name: "firestore.rules", content: rulesContent, fingerprint }] },
+            }),
+          });
+          if (!created.response.ok || typeof created.body.name !== "string") {
+            throw new Error("Ruleset validation/creation failed: HTTP " + created.response.status + " " +
+              JSON.stringify(created.body).slice(0, 2500));
+          }
+          const rulesetName = created.body.name;
+          const releaseName = "projects/" + projectId + "/releases/cloud.firestore";
+          const releaseUrl = apiRoot + "/" + releaseName;
+          const current = await authenticatedFetch(releaseUrl, { method: "GET" });
+          let published;
+          if (current.response.ok) {
+            const updated = await authenticatedFetch(releaseUrl + "?updateMask=rulesetName", {
+              method: "PATCH",
+              body: JSON.stringify({
+                release: { name: releaseName, rulesetName },
+                updateMask: "rulesetName",
+              }),
+            });
+            if (!updated.response.ok) {
+              throw new Error("Firestore release update failed: HTTP " + updated.response.status + " " +
+                JSON.stringify(updated.body).slice(0, 2500));
+            }
+            published = updated.body;
+          } else if (current.response.status === 404) {
+            const createdRelease = await authenticatedFetch(apiRoot + "/projects/" + projectId + "/releases", {
+              method: "POST",
+              body: JSON.stringify({ name: releaseName, rulesetName }),
+            });
+            if (!createdRelease.response.ok) {
+              throw new Error("Firestore release creation failed: HTTP " + createdRelease.response.status + " " +
+                JSON.stringify(createdRelease.body).slice(0, 2500));
+            }
+            published = createdRelease.body;
+          } else {
+            throw new Error("Could not inspect the current Firestore release: HTTP " + current.response.status + " " +
+              JSON.stringify(current.body).slice(0, 2500));
+          }
+
+          const verified = await authenticatedFetch(releaseUrl, { method: "GET" });
+          if (!verified.response.ok || verified.body.rulesetName !== rulesetName) {
+            throw new Error("Published Firestore release could not be verified; expected " + rulesetName +
+              ", got " + JSON.stringify(verified.body).slice(0, 1500));
+          }
+          console.log("Firestore rules deployed and verified.");
+          console.log("Project: " + projectId);
+          console.log("Release: " + releaseName);
+          console.log("Ruleset: " + rulesetName);
+          NODE
