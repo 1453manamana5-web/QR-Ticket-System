@@ -406,13 +406,18 @@ service cloud.firestore {
         && next.enabled == false
         && next.deletedByUid == request.auth.uid
         && next.updatedAt is string
-        && (!("ownerUid" in next.keys()) || next.ownerUid == target.requestedByUid);
+        && (!next.keys().hasAny(["ownerUid"]) || next.ownerUid == target.requestedByUid);
     }
 
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
       allow get: if approvedManagementTerminal()
-        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+        || (signedIn() && resource.data.ownerUid == request.auth.uid)
+        || (signedIn()
+          && exists(installationPath(request.auth.uid))
+          && get(installationPath(request.auth.uid)).data.authUid == request.auth.uid
+          && get(installationPath(request.auth.uid)).data.approved == true
+          && get(installationPath(request.auth.uid)).data.terminalId == terminalId);
       allow list: if approvedManagementTerminal();
       allow create, update: if validTerminalApprovalGrant(terminalId)
         || validOwnerTombstoneWrite(terminalId);
