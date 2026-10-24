@@ -58,9 +58,9 @@ jobs:
       - name: Deploy Firestore rules only through Firebase Rules API (no Cloud Functions or Service Usage preflight)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
         run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-          const crypto = require("node:crypto");
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import crypto from "node:crypto";
 
           const projectId = "qr-ticket-system-5ba69";
           const accountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
