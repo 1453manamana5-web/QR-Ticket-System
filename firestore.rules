@@ -193,15 +193,245 @@ service cloud.firestore {
         && next.desiredModeUpdatedAt.size() <= 40;
     }
 
+    function applicationPath(terminalId) {
+      return /databases/$(database)/documents/terminalApplications/$(terminalId);
+    }
+
+    function terminalPath(terminalId) {
+      return /databases/$(database)/documents/terminals/$(terminalId);
+    }
+
+    function ownerPath(terminalId) {
+      return /databases/$(database)/documents/terminalOwners/$(terminalId);
+    }
+
+    function installationPath(uid) {
+      return /databases/$(database)/documents/terminalInstallations/$(uid);
+    }
+
+    function validTerminalRegistrationCreate(terminalId) {
+      let data = request.resource.data;
+      let app = getAfter(applicationPath(terminalId)).data;
+      return signedIn()
+        && !exists(ownerPath(terminalId))
+        && !exists(terminalPath(terminalId))
+        && existsAfter(applicationPath(terminalId))
+        && app.terminalId == terminalId
+        && app.requestedByUid == request.auth.uid
+        && app.status == "pending"
+        && app.requestedRole == data.requestedRole
+        && data.keys().hasOnly([
+          "terminalId", "requestedByUid", "requestedRole", "name", "type",
+          "role", "approved", "managementApproved", "receptionApproved",
+          "admin", "subAdmin", "status", "mode", "desiredMode",
+          "requestedAt", "updatedAt", "syncPendingCount"
+        ])
+        && data.terminalId == terminalId
+        && data.requestedByUid == request.auth.uid
+        && data.role == data.requestedRole
+        && data.requestedRole in ["management", "reception", "both"]
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+        && data.type in ["Web / iPad", "Web / PC"]
+        && data.approved == false
+        && data.managementApproved == false
+        && data.receptionApproved == false
+        && data.admin == false && data.subAdmin == false
+        && data.status == "pending"
+        && data.mode == "停止" && data.desiredMode == "停止"
+        && data.requestedAt is string && data.updatedAt is string
+        && data.syncPendingCount == 0;
+    }
+
+    function validTerminalApprovalUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let appPath = applicationPath(terminalId);
+      let ownManager = get(terminalPath(managementTerminalId())).data;
+      let app = getAfter(appPath).data;
+      let owner = getAfter(ownerPath(terminalId)).data;
+      let installation = getAfter(installationPath(app.requestedByUid)).data;
+      let role = current.requestedRole;
+      return approvedManagementTerminal()
+        && terminalId != managementTerminalId()
+        && current.approved == false
+        && current.requestedByUid == app.requestedByUid
+        && current.requestedRole == app.requestedRole
+        && app.terminalId == terminalId
+        && app.status == "pending"
+        && next.diff(current).affectedKeys().hasOnly([
+          "approved", "status", "managementApproved", "receptionApproved",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "updatedAt"
+        ])
+        && (ownManager.admin == true || (ownManager.subAdmin == true && role == "reception"))
+        && role in ["management", "reception", "both"]
+        && next.approved == true && next.status == "offline"
+        && next.managementApproved == (role in ["management", "both"])
+        && next.receptionApproved == (role in ["reception", "both"])
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.updatedAt is string
+        && owner.terminalId == terminalId
+        && owner.ownerUid == app.requestedByUid
+        && owner.enabled == true
+        && installation.terminalId == terminalId
+        && installation.authUid == app.requestedByUid
+        && installation.approved == true
+        && getAfter(appPath).data.status == "approved"
+        && getAfter(appPath).data.decidedByUid == request.auth.uid;
+    }
+
+    function validTerminalApprovalGrant(terminalId) {
+      let target = get(terminalPath(terminalId)).data;
+      let app = getAfter(applicationPath(terminalId)).data;
+      let owner = getAfter(ownerPath(terminalId)).data;
+      let installation = getAfter(installationPath(app.requestedByUid)).data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return approvedManagementTerminal()
+        && app.terminalId == terminalId
+        && app.status == "approved"
+        && app.decidedByUid == request.auth.uid
+        && target.requestedByUid == app.requestedByUid
+        && target.requestedRole == app.requestedRole
+        && target.approved == true
+        && owner.terminalId == terminalId
+        && owner.ownerUid == app.requestedByUid
+        && owner.enabled == true
+        && installation.terminalId == terminalId
+        && installation.authUid == app.requestedByUid
+        && installation.approved == true
+        && (manager.admin == true || (manager.subAdmin == true && target.requestedRole == "reception"));
+    }
+
+    function validSubAdminUpdate(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      let owner = get(ownerPath(terminalId)).data;
+      let install = get(installationPath(owner.ownerUid)).data;
+      return approvedManagementTerminal()
+        && manager.admin == true
+        && terminalId != managementTerminalId()
+        && current.admin != true
+        && current.approved == true
+        && current.managementApproved == true
+        && current.role in ["management", "both"]
+        && owner.enabled == true
+        && owner.ownerUid is string
+        && install.authUid == owner.ownerUid
+        && install.terminalId == terminalId
+        && install.approved == true
+        && next.diff(current).affectedKeys().hasOnly(["subAdmin", "subAdminUpdatedAt", "subAdminUpdatedByUid"])
+        && next.subAdmin is bool
+        && next.subAdminUpdatedAt is string
+        && next.subAdminUpdatedByUid == request.auth.uid;
+    }
+
+    function validManagedReceptionRevoke(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return approvedManagementTerminal()
+        && terminalId != managementTerminalId()
+        && (manager.admin == true || manager.subAdmin == true)
+        && current.admin != true && current.subAdmin != true
+        && current.role in ["management", "reception", "both"]
+        && next.diff(current).affectedKeys().hasOnly([
+          "receptionApproved", "receptionApprovalVersion", "approved",
+          "mode", "desiredMode", "desiredModeUpdatedAt", "updatedAt",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "role"
+        ])
+        && next.receptionApproved == false
+        && next.receptionApprovalVersion is int
+        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.approved == (current.managementApproved == true)
+        && next.mode == "停止" && next.desiredMode == "停止"
+        && next.desiredModeUpdatedAt is string && next.updatedAt is string
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.role == (current.role == "both" ? "management" : current.role);
+    }
+
+    function validOwnReceptionRelease(terminalId) {
+      let current = resource.data;
+      let next = request.resource.data;
+      let owner = get(ownerPath(terminalId)).data;
+      let install = get(installationPath(request.auth.uid)).data;
+      return signedIn()
+        && owner.ownerUid == request.auth.uid && owner.enabled == true
+        && install.authUid == request.auth.uid && install.terminalId == terminalId
+        && install.approved == true
+        && next.diff(current).affectedKeys().hasOnly([
+          "receptionApproved", "receptionApprovalVersion", "approved",
+          "mode", "desiredMode", "desiredModeUpdatedAt", "updatedAt",
+          "approvalUpdatedAt", "approvalUpdatedByUid", "role"
+        ])
+        && next.receptionApproved == false
+        && next.receptionApprovalVersion is int
+        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.approved == (current.managementApproved == true)
+        && next.mode == "停止" && next.desiredMode == "停止"
+        && next.desiredModeUpdatedAt is string && next.updatedAt is string
+        && next.approvalUpdatedAt is string
+        && next.approvalUpdatedByUid == request.auth.uid
+        && next.role == (current.role == "both" && current.managementApproved == true ? "management" : current.role);
+    }
+
+    function validTerminalDeletion(terminalId) {
+      let manager = get(terminalPath(managementTerminalId())).data;
+      let target = resource.data;
+      let ownerAfter = getAfter(ownerPath(terminalId)).data;
+      return approvedManagementTerminal()
+        && terminalId != managementTerminalId()
+        && target.admin != true && target.subAdmin != true
+        && (manager.admin == true || !(target.role in ["management", "both"]))
+        && ownerAfter.terminalId == terminalId
+        && ownerAfter.enabled == false
+        && ownerAfter.deletedByUid == request.auth.uid
+        && !existsAfter(applicationPath(terminalId));
+    }
+
+    function validOwnerTombstoneWrite(terminalId) {
+      let targetPath = terminalPath(terminalId);
+      let target = get(targetPath).data;
+      let next = request.resource.data;
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return approvedManagementTerminal()
+        && exists(targetPath)
+        && terminalId != managementTerminalId()
+        && target.admin != true && target.subAdmin != true
+        && (manager.admin == true || !(target.role in ["management", "both"]))
+        && !existsAfter(targetPath)
+        && !existsAfter(applicationPath(terminalId))
+        && next.terminalId == terminalId
+        && next.enabled == false
+        && next.deletedByUid == request.auth.uid
+        && next.updatedAt is string
+        && (!("ownerUid" in next.keys()) || next.ownerUid == target.requestedByUid);
+    }
+
     // Client apps must never manage trusted ownership or server-issued handoff state.
     match /terminalOwners/{terminalId} {
-      allow read, write: if false;
+      allow get: if approvedManagementTerminal()
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow list: if approvedManagementTerminal();
+      allow create, update: if validTerminalApprovalGrant(terminalId)
+        || validOwnerTombstoneWrite(terminalId);
+      allow delete: if false;
     }
 
     match /terminalInstallations/{uid} {
-      // An installation can inspect only its own server-issued grant.
-      allow get: if signedIn() && request.auth.uid == uid;
-      allow list, create, update, delete: if false;
+      // Own grant is readable by the installation; approved managers may verify a target grant.
+      allow get: if (signedIn() && request.auth.uid == uid) || approvedManagementTerminal();
+      allow list: if approvedManagementTerminal();
+      allow create, update: if validTerminalApprovalGrant(request.resource.data.terminalId)
+        && request.resource.data.authUid == uid
+        || (signedIn() && request.auth.uid == uid
+          && resource.data.authUid == uid
+          && resource.data.approved == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["approved", "releasedAt"])
+          && request.resource.data.approved == false
+          && request.resource.data.releasedAt is string);
+      allow delete: if false;
     }
 
     match /terminalHandoffRequests/{requestId} {
@@ -215,11 +445,13 @@ service cloud.firestore {
     // A signed-in browser may submit/cancel only its own pending application.
     // Approval and trusted ownership grants remain impossible from client rules.
     match /terminalApplications/{terminalId} {
-      allow get: if signedIn() && resource.data.requestedByUid == request.auth.uid;
-      allow list: if signedIn()
-        && request.query.limit <= 5
-        && resource.data.requestedByUid == request.auth.uid;
+      allow get: if (signedIn() && resource.data.requestedByUid == request.auth.uid)
+        || approvedManagementTerminal();
+      allow list: if approvedManagementTerminal()
+        || (signedIn() && request.query.limit <= 5 && resource.data.requestedByUid == request.auth.uid);
       allow create: if signedIn()
+        && !exists(ownerPath(terminalId))
+        && !exists(terminalPath(terminalId))
         && request.resource.data.keys().hasOnly([
           "terminalId", "requestedByUid", "requestedRole", "name", "type",
           "status", "requestedAt", "updatedAt"
@@ -234,10 +466,26 @@ service cloud.firestore {
         && request.resource.data.status == "pending"
         && request.resource.data.requestedAt is string
         && request.resource.data.updatedAt is string;
-      allow delete: if signedIn()
-        && resource.data.requestedByUid == request.auth.uid
-        && resource.data.status == "pending";
-      allow update: if false;
+      allow delete: if (signedIn()
+          && resource.data.requestedByUid == request.auth.uid
+          && resource.data.status == "pending")
+        || (approvedManagementTerminal() && exists(terminalPath(terminalId))
+          && !existsAfter(terminalPath(terminalId)));
+      allow update: if approvedManagementTerminal()
+        && resource.data.status == "pending"
+        && request.resource.data.status == "approved"
+        && request.resource.data.terminalId == terminalId
+        && request.resource.data.requestedByUid == resource.data.requestedByUid
+        && request.resource.data.requestedRole == resource.data.requestedRole
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status", "decidedAt", "decidedByUid", "updatedAt"
+        ])
+        && request.resource.data.decidedAt is string
+        && request.resource.data.updatedAt is string
+        && request.resource.data.decidedByUid == request.auth.uid
+        && getAfter(terminalPath(terminalId)).data.approved == true
+        && getAfter(ownerPath(terminalId)).data.enabled == true
+        && getAfter(installationPath(resource.data.requestedByUid)).data.approved == true;
     }
 
     // Event and ticket documents are restricted to approved management
@@ -315,16 +563,19 @@ service cloud.firestore {
       allow create, update, delete: if approvedManagementTerminal();
     }
 
-    // Terminal documents are read by clients, but every write is routed through
-    // callable Functions so approval, ownership, heartbeat and role fields cannot
-    // be forged by a signed-in browser.
+    // Registration and management writes are client transactions guarded by these rules.
     match /terminals/{terminalId} {
-      // Management may enumerate devices. A registered installation may read
-      // only its own terminal metadata to display role and remote-control state.
-      allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId);
+      allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId)
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid && resource.data.approved == false);
       allow list: if approvedManagementTerminal();
-      allow update: if validTerminalHeartbeatUpdate(terminalId) || validManagedModeUpdate(terminalId);
-      allow create, delete: if false;
+      allow create: if validTerminalRegistrationCreate(terminalId);
+      allow update: if validTerminalHeartbeatUpdate(terminalId)
+        || validManagedModeUpdate(terminalId)
+        || validTerminalApprovalUpdate(terminalId)
+        || validSubAdminUpdate(terminalId)
+        || validManagedReceptionRevoke(terminalId)
+        || validOwnReceptionRelease(terminalId);
+      allow delete: if validTerminalDeletion(terminalId);
     }
 
     // Reception terminals may append validated error metadata only; they cannot
