@@ -53,41 +53,31 @@ export function subscribeEvents(onChange: (events: Event[]) => void, onError: (e
 async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]): Promise<void> {
   const db = getFirebaseDb();
   const eventRef = doc(db, "events", eventId);
-  const eventSnapshot = await getDocFromServer(eventRef);
-  if (!eventSnapshot.exists()) throw new Error("EVENT_NOT_FOUND");
-  const eventData = eventSnapshot.data();
-  const authToken = typeof eventData.authToken === "string" ? eventData.authToken : "";
-  const now = new Date().toISOString();
-  let nextDataVersion = Math.max(1, Number(eventData.dataVersion) || 1);
-  let bundleRef: ReturnType<typeof doc> | null = null;
-  let savedBundle: Record<string, unknown> | null = null;
-
-  if (authToken) {
-    bundleRef = doc(db, "eventBundles", authToken);
-    const bundleSnapshot = await getDocFromServer(bundleRef);
-    if (bundleSnapshot.exists()) {
-      savedBundle = bundleSnapshot.data();
-      nextDataVersion += 1;
+  await runTransaction(db, async tx => {
+    const eventSnapshot = await tx.get(eventRef);
+    if (!eventSnapshot.exists()) throw new Error("EVENT_NOT_FOUND");
+    const eventData = eventSnapshot.data();
+    const authToken = typeof eventData.authToken === "string" ? eventData.authToken : "";
+    const bundleRef = authToken ? doc(db, "eventBundles", authToken) : null;
+    const bundleSnapshot = bundleRef ? await tx.get(bundleRef) : null;
+    const savedBundle = bundleSnapshot?.exists() ? bundleSnapshot.data() : null;
+    const now = new Date().toISOString();
+    const nextDataVersion = Math.max(1, Number(eventData.dataVersion) || 1) + (savedBundle ? 1 : 0);
+    tx.set(eventRef, {
+      ticketCount: tickets.length,
+      ...(savedBundle ? { dataVersion: nextDataVersion } : {}),
+      updatedAt: now,
+    }, { merge: true });
+    if (bundleRef && savedBundle) {
+      tx.set(bundleRef, {
+        event: {
+          ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
+          eventId, dataVersion: nextDataVersion,
+        },
+        ticketCount: tickets.length, publishedAt: now,
+      }, { merge: true });
     }
-  }
-
-  await setDoc(eventRef, {
-    ticketCount: tickets.length,
-    ...(savedBundle ? { dataVersion: nextDataVersion } : {}),
-    updatedAt: now,
-  }, { merge: true });
-
-  if (!bundleRef || !savedBundle) return;
-  // バンドルに全チケットを再格納しない。件数・版数だけ更新し、実データはサブコレクションを参照する。
-  await setDoc(bundleRef, {
-    event: {
-      ...((savedBundle.event as Record<string, unknown> | undefined) ?? {}),
-      eventId,
-      dataVersion: nextDataVersion,
-    },
-    ticketCount: tickets.length,
-    publishedAt: now,
-  }, { merge: true });
+  });
 }
 
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {

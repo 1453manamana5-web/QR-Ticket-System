@@ -304,20 +304,31 @@ export async function getReceptionRecord(recordId: string): Promise<ReceptionRec
 
 export async function getPendingSyncItems(): Promise<SyncQueueItem[]> {
   const database = await openDatabase();
-
-  const items = await new Promise<SyncQueueItem[]>((resolve, reject) => {
-    const request = database
-      .transaction(STORES.syncQueue, "readonly")
-      .objectStore(STORES.syncQueue)
-      .getAll();
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("同期キューを読み込めませんでした"));
-  });
-
-  database.close();
-  return items.filter((item) => item.status !== "synced");
+  try {
+    return await new Promise<SyncQueueItem[]>((resolve, reject) => {
+      const tx = database.transaction([STORES.syncQueue, STORES.receptionRecords], "readonly");
+      const queue = tx.objectStore(STORES.syncQueue).getAll();
+      const timestamps = new Map<string, number>();
+      let pending: SyncQueueItem[] = [];
+      queue.onsuccess = () => {
+        pending = (queue.result as SyncQueueItem[]).filter(item => item.status !== "synced");
+        for (const item of pending) {
+          const record = tx.objectStore(STORES.receptionRecords).get(item.recordId);
+          record.onsuccess = () => {
+            const parsed = Date.parse((record.result as ReceptionRecord | undefined)?.timestamp ?? "");
+            timestamps.set(item.recordId, Number.isFinite(parsed) ? parsed : 0);
+          };
+        }
+      };
+      tx.oncomplete = () => resolve(pending.sort((a, b) =>
+        (timestamps.get(a.recordId) ?? 0) - (timestamps.get(b.recordId) ?? 0) ||
+        a.recordId.localeCompare(b.recordId)));
+      tx.onerror = () => reject(tx.error ?? new Error("同期キューを読み込めませんでした"));
+      tx.onabort = () => reject(tx.error ?? new Error("同期キューの読み込みが中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function markSyncStatus(

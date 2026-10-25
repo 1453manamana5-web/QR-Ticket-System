@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, getDocsFromServer, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
@@ -65,7 +65,7 @@ export async function getEventAuthPayloadByToken(token: string): Promise<EventAu
   const normalizedToken = token.trim();
   if (!normalizedToken) return null;
   const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "eventBundles", normalizedToken));
+  const snapshot = await getDocFromServer(doc(db, "eventBundles", normalizedToken));
   if (!snapshot.exists()) return null;
   const bundle = snapshot.data() as Partial<EventBundle>;
   if (
@@ -90,7 +90,7 @@ export async function downloadEventData(
   terminalId: string,
 ): Promise<{ localEvent: LocalEventData; tickets: Ticket[] }> {
   const db = getFirebaseDb();
-  const snapshot = await getDoc(doc(db, "eventBundles", payload.authToken));
+  const snapshot = await getDocFromServer(doc(db, "eventBundles", payload.authToken));
 
   if (!snapshot.exists()) {
     throw new Error("EVENT_DATA_NOT_FOUND");
@@ -113,8 +113,12 @@ export async function downloadEventData(
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
 
   // 旧形式の公開バンドルからの移行互換。新形式では必ずサブコレクションが正本。
-  if (tickets.length === 0 && Array.isArray(bundle.tickets) && bundle.tickets.length > 0) {
+  if (tickets.length === 0 && bundle.ticketCount !== 0 && Array.isArray(bundle.tickets) && bundle.tickets.length > 0) {
     tickets = bundle.tickets;
+  }
+
+  if (typeof bundle.ticketCount === "number" && bundle.ticketCount !== tickets.length) {
+    throw new Error("EVENT_TICKET_COUNT_MISMATCH");
   }
 
   const event = bundle.event;

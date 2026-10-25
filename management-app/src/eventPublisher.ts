@@ -27,7 +27,7 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
   const savedTickets = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
   // 旧形式のバンドルだけにチケットが残っている場合は互換用に復元する。
-  if (tickets.length === 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
+  if (tickets.length === 0 && data.ticketCount !== 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
     tickets = data.tickets;
   }
   return { ...data, tickets, ticketCount: tickets.length } as PublishedEventBundle;
@@ -69,10 +69,10 @@ export async function publishEventBundle(
       await batch.commit();
     }
   }
-  const existingEvents = await getDocs(collection(db, "events"));
-  await Promise.all(existingEvents.docs
-    .filter(item => item.id !== event.eventId && item.data().receptionTarget === true)
-    .map(item => setDoc(item.ref, { receptionTarget: false, updatedAt: new Date().toISOString() }, { merge: true })));
+  const existingEvents = await getDocsFromServer(collection(db, "events"));
+  const previousTargets = existingEvents.docs
+    .filter(item => item.id !== event.eventId && item.data().receptionTarget === true);
+  if (previousTargets.length > 448) throw new Error("TOO_MANY_RECEPTION_TARGETS");
   const publishedEvent: Event = {
     ...event,
     eventStatus: event.eventStatus === "finished" ? "finished" : "ready",
@@ -88,11 +88,15 @@ export async function publishEventBundle(
 
   // 管理端末と受付端末の両方で、上でサーバーから確認した同じチケット群を参照する。
 
-  // 先にチケットを含む公開バンドルを保存し、その後イベント一覧のメタデータを更新する。
+  // 公開バンドル・対象イベント・旧対象の解除を同じバッチで切り替える。
   // merge:true にして、同時に保存される他のイベント管理情報を消さない。
   // Firestore文書のサイズ上限を避けるため、バンドルには一覧を埋め込まず件数だけを保存する。
   // チケット本体は上で events/{eventId}/tickets に保存済み。
-  await setDoc(doc(db, "eventBundles", authToken), {
+  const publishBatch = writeBatch(db);
+  for (const previous of previousTargets) {
+    publishBatch.update(previous.ref, { receptionTarget: false, updatedAt: bundle.publishedAt });
+  }
+  publishBatch.set(doc(db, "eventBundles", authToken), {
     event: publishedEvent,
     settings,
     ticketCount: publishedTickets.length,
@@ -101,13 +105,15 @@ export async function publishEventBundle(
   });
 
   const eventRef = doc(db, "events", event.eventId);
-  await setDoc(eventRef, {
+  publishBatch.set(eventRef, {
     ...publishedEvent,
     authToken,
     receptionTarget: publishedEvent.eventStatus !== "finished",
     ticketCount: publishedTickets.length,
     updatedAt: bundle.publishedAt,
   }, { merge: true });
+
+  await publishBatch.commit();
 
   // 成功表示だけ先行しないよう、サーバー側に公開情報が残ったことを確認する。
   const savedEvent = await getDocFromServer(eventRef);
