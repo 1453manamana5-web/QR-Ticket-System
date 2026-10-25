@@ -227,3 +227,24 @@ test("deleting a republished event removes every old bundle without touching ano
   assert.equal((await getDocFromServer(doc(c.managerDb, "eventBundles", other.authToken))).exists(), true);
   assert.equal((await getDocFromServer(doc(c.managerDb, "events", "keep-other"))).exists(), true);
 });
+
+test("real reception registration can be approved by the manager and immediately used to download an event", async () => {
+  const c = clients();
+  await createPublished(c);
+  const uid = "fresh-reception-user";
+  const terminalId = "T-FRESH-RECEPTION";
+  const db = env.authenticatedContext(uid).firestore();
+  const local = loadClientModule("./reception-app/src/localDb.ts", db, uid, terminalId);
+  const registration = loadClientModule("./reception-app/src/receptionSync.ts", db, uid, terminalId, local);
+  await registration.registerReceptionTerminal("New reception");
+  assert.equal((await registration.getTerminalRegistration()).approved, false);
+  await c.management.approveTerminal(terminalId);
+  const approved = await registration.getTerminalRegistration();
+  assert.equal(approved.approved, true);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalOwners", terminalId))).data().ownerUid, uid);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", uid))).data().approved, true);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalApplications", terminalId))).data().status, "approved");
+  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", db, uid, terminalId);
+  const event = await downloader.downloadCurrentFirebaseEventData(terminalId);
+  assert.equal(event.tickets.length, 1);
+});
