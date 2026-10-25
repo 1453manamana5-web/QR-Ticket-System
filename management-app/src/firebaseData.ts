@@ -16,6 +16,9 @@ export async function deleteEvent(eventId: string): Promise<void> {
   const authToken = eventSnapshot.exists() && typeof eventSnapshot.data().authToken === "string"
     ? eventSnapshot.data().authToken as string
     : "";
+  const publishedBundles = await getDocsFromServer(query(
+    collection(db, "eventBundles"), where("event.eventId", "==", eventId),
+  ));
 
   // 親ドキュメントの削除だけではサブコレクションは消えない。
   // 大量チケットでも安定して削除できるよう、Firestoreのバッチ上限より少ない件数で分割する。
@@ -32,8 +35,13 @@ export async function deleteEvent(eventId: string): Promise<void> {
   }
 
   // 公開バンドルを先に削除し、失敗した場合にイベント本体を残して再試行できるようにする。
-  if (authToken) {
-    await deleteDoc(doc(db, "eventBundles", authToken));
+  const bundleRefs = new Map(publishedBundles.docs.map(item => [item.id, item.ref]));
+  if (authToken) bundleRefs.set(authToken, doc(db, "eventBundles", authToken));
+  const refs = [...bundleRefs.values()];
+  for (let start = 0; start < refs.length; start += 450) {
+    const batch = writeBatch(db);
+    for (const ref of refs.slice(start, start + 450)) batch.delete(ref);
+    await batch.commit();
   }
   await deleteDoc(eventRef);
 }
