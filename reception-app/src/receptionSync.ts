@@ -2,7 +2,7 @@ import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
-import { collection, doc, getDoc, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
 
 
@@ -203,7 +203,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket: Ticke
   const db = getFirebaseDb();
   const ticketRef = doc(db, "events", record.eventId, "tickets", record.ticketId);
   const recordRef = doc(db, "events", record.eventId, "receptionRecords", record.recordId);
-  const existingRecord = await getDoc(recordRef);
+  const existingRecord = await getDocFromServer(recordRef);
   if (existingRecord.exists()) {
     const saved = existingRecord.data();
     const sameRecord = saved.eventId === record.eventId &&
