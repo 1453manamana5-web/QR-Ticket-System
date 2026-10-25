@@ -214,3 +214,16 @@ test("download rejects an incomplete ticket inventory instead of marking local d
   await updateDoc(doc(c.managerDb, "eventBundles", bundle.authToken), { ticketCount: 2 });
   await assert.rejects(c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION"), /EVENT_TICKET_COUNT_MISMATCH/);
 });
+
+test("deleting a republished event removes every old bundle without touching another event", async () => {
+  const c = clients();
+  const first = await createPublished(c);
+  const second = await c.publisher.publishEventBundle(makeEvent(), settings, []);
+  const other = await createPublished(c, makeEvent("keep-other"));
+  await c.management.deleteEvent("flow-event");
+  for (const token of [first.authToken, second.authToken]) {
+    assert.equal((await getDocFromServer(doc(c.managerDb, "eventBundles", token))).exists(), false);
+  }
+  assert.equal((await getDocFromServer(doc(c.managerDb, "eventBundles", other.authToken))).exists(), true);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "keep-other"))).exists(), true);
+});
