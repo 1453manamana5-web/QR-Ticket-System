@@ -248,3 +248,16 @@ test("real reception registration can be approved by the manager and immediately
   const event = await downloader.downloadCurrentFirebaseEventData(terminalId);
   assert.equal(event.tickets.length, 1);
 });
+
+
+test("cancel a second pending reception request without releasing the existing manager installation", async () => {
+  const c = clients();
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-EXTRA-RECEPTION");
+  await reception.registerReceptionTerminal("Mistaken same-browser request");
+  await assert.rejects(c.management.approveTerminal("T-EXTRA-RECEPTION"), /TERMINAL_INSTALLATION_CONFLICT/);
+  assert.equal(await reception.resetReceptionTerminalRegistration(), "T-FLOW-MANAGER");
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalApplications", "T-EXTRA-RECEPTION"))).exists(), false);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminals", "T-EXTRA-RECEPTION"))).exists(), false);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", "flow-manager"))).data().terminalId, "T-FLOW-MANAGER");
+  assert.equal((await c.management.loadTerminals()).find(t => t.terminalId === "T-FLOW-MANAGER").approved, true);
+});

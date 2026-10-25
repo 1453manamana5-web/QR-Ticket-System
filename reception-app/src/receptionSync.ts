@@ -2,7 +2,7 @@ import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
-import { collection, doc, getDoc, getDocFromServer, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocsFromServer, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
 
 
@@ -105,15 +105,18 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   return null;
 }
 
-export async function resetReceptionTerminalRegistration(): Promise<void> {
-  const localTerminalId = getTerminalIdForRegistration();
+export async function resetReceptionTerminalRegistration(): Promise<string | null> {
   const current = await readOwnTerminalState();
-  if (current.terminalId) {
-    throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
-  }
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
+  const applications = await getDocsFromServer(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
+  const pending = applications.docs.find(item => item.data().status === "pending");
+  if (!pending) {
+    if (current.terminalId) throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
+    return null;
+  }
+  const localTerminalId = pending.id;
   const applicationRef = doc(db, "terminalApplications", localTerminalId);
   await runTransaction(db, async tx => {
     const application = await tx.get(applicationRef);
@@ -129,6 +132,7 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
     }
     tx.delete(applicationRef);
   });
+  return current.terminalId;
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {

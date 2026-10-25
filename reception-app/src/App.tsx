@@ -458,15 +458,23 @@ export default function App(){
     setBusy(true);
     setError("");
     try {
-      await resetReceptionTerminalRegistration();
-      localStorage.removeItem("qr-ticket-terminal-id");
+      const retainedId = await resetReceptionTerminalRegistration();
+      if (retainedId) {
+        localStorage.setItem("qr-ticket-terminal-id", retainedId);
+        localStorage.setItem("qr-ticket-device-id", retainedId);
+      } else {
+        localStorage.removeItem("qr-ticket-terminal-id");
+      }
       const nextId=getTerminalId();
       console.info("受付端末登録をリセットしました",nextId);
       setTerminalRegistration(null);
       setScreen("registration");
+      if (retainedId) setError("未承認の申請を取り消しました。このブラウザーは承認済み端末として使用中です。受付の登録は別端末から行ってください。");
     } catch (reason) {
       console.error("受付端末登録のリセットに失敗しました", reason);
-      setError("登録申請をリセットできませんでした。");
+      setError(reason instanceof Error && reason.message === "RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL"
+        ? "このブラウザーには承認済みの端末登録があります。受付は別端末から登録してください。"
+        : "登録申請をリセットできませんでした（" + (reason instanceof Error ? reason.message : String(reason)) + "）。");
     } finally {
       setBusy(false);
     }
