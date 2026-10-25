@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { webcrypto } from "node:crypto";
-import vm from "node:vm";
 import { after, before, beforeEach, test } from "node:test";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import * as firestore from "firebase/firestore";
@@ -46,16 +45,17 @@ function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {})
     "./firebaseClient": { getFirebaseDb: () => db, ensureFirebaseAuth: async () => {}, getFirebaseUid: async () => uid },
     "./localDb": local,
   };
-  vm.runInNewContext(compiled, {
-    exports, require: name => {
+  // Run trusted application source in the SDK's realm: Firestore intentionally
+  // rejects plain objects created with another vm context's Object prototype.
+  new Function("exports", "require", "indexedDB", "crypto", "localStorage", "navigator", compiled)(
+    exports, name => {
       if (!(name in dependencies)) throw Error("Unexpected module " + name);
       return dependencies[name];
     },
-    indexedDB: new IDBFactory(), crypto: webcrypto,
-    localStorage: { getItem: () => terminalId, setItem: () => {} },
-    navigator: { userAgent: "flow test" },
-    setTimeout, clearTimeout, console,
-  });
+    new IDBFactory(), webcrypto,
+    { getItem: () => terminalId, setItem: () => {} },
+    { userAgent: "flow test" },
+  );
   return exports;
 }
 function clients() {
