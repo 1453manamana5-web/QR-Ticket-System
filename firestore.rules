@@ -380,6 +380,16 @@ service cloud.firestore {
         && next.role == (current.role == "both" && current.managementApproved == true ? "management" : current.role);
     }
 
+    function validOwnPendingTerminalCancellation(terminalId) {
+      return signedIn()
+        && resource.data.approved == false
+        && resource.data.requestedByUid == request.auth.uid
+        && !exists(ownerPath(terminalId))
+        && get(applicationPath(terminalId)).data.requestedByUid == request.auth.uid
+        && get(applicationPath(terminalId)).data.status == "pending"
+        && !existsAfter(applicationPath(terminalId));
+    }
+
     function validTerminalDeletion(terminalId) {
       let manager = get(terminalPath(managementTerminalId())).data;
       let target = resource.data;
@@ -575,7 +585,10 @@ service cloud.firestore {
     // Registration and management writes are client transactions guarded by these rules.
     match /terminals/{terminalId} {
       allow get: if approvedManagementTerminal() || approvedOwnInstallationForTerminal(terminalId)
-        || (signedIn() && resource.data.requestedByUid == request.auth.uid && resource.data.approved == false);
+        || (signedIn() && resource.data.requestedByUid == request.auth.uid && resource.data.approved == false)
+        || (signedIn() && exists(applicationPath(terminalId))
+          && get(applicationPath(terminalId)).data.requestedByUid == request.auth.uid
+          && get(applicationPath(terminalId)).data.status == "pending");
       allow list: if approvedManagementTerminal();
       allow create: if validTerminalRegistrationCreate(terminalId);
       allow update: if validTerminalHeartbeatUpdate(terminalId)
@@ -585,7 +598,8 @@ service cloud.firestore {
             || validTerminalApprovalUpdate(terminalId)
             || validSubAdminUpdate(terminalId)
             || validManagedReceptionRevoke(terminalId)));
-      allow delete: if approvedManagementTerminal() && validTerminalDeletion(terminalId);
+      allow delete: if (approvedManagementTerminal() && validTerminalDeletion(terminalId))
+        || validOwnPendingTerminalCancellation(terminalId);
     }
 
     // Reception terminals may append validated error metadata only; they cannot

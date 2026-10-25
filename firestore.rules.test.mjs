@@ -619,3 +619,43 @@ test("management can remove reception history during event deletion; reception c
   await assertFails(deleteDoc(ref("unapproved")));
   await assertSucceeds(deleteDoc(ref("delete-manager")));
 });
+
+
+test("pending owner can cancel atomically and reapply, without deleting another or approved terminal", async () => {
+  const uid = "cancel-owner";
+  const terminalId = "T-CANCEL-RECEPTION";
+  const db = env.authenticatedContext(uid).firestore();
+  const now = new Date().toISOString();
+  const create = () => {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "terminalApplications", terminalId), {
+      terminalId, requestedByUid: uid, requestedRole: "reception", name: "受付", type: "Web / iPad",
+      status: "pending", requestedAt: now, updatedAt: now,
+    });
+    batch.set(doc(db, "terminals", terminalId), {
+      terminalId, requestedByUid: uid, requestedRole: "reception", name: "受付", type: "Web / iPad",
+      role: "reception", approved: false, managementApproved: false, receptionApproved: false,
+      admin: false, subAdmin: false, status: "pending", mode: "停止", desiredMode: "停止",
+      requestedAt: now, updatedAt: now, syncPendingCount: 0,
+    });
+    return batch.commit();
+  };
+  await assertSucceeds(create());
+  await assertFails(deleteDoc(doc(db, "terminals", terminalId)));
+  const foreignDb = env.authenticatedContext("other-owner").firestore();
+  const foreignBatch = writeBatch(foreignDb);
+  foreignBatch.delete(doc(foreignDb, "terminals", terminalId));
+  foreignBatch.delete(doc(foreignDb, "terminalApplications", terminalId));
+  await assertFails(foreignBatch.commit());
+  const cancel = writeBatch(db);
+  cancel.delete(doc(db, "terminals", terminalId));
+  cancel.delete(doc(db, "terminalApplications", terminalId));
+  await assertSucceeds(cancel.commit());
+  await assertSucceeds(create());
+  await env.withSecurityRulesDisabled(context =>
+    updateDoc(doc(context.firestore(), "terminals", terminalId), { approved: true }));
+  const approvedCancel = writeBatch(db);
+  approvedCancel.delete(doc(db, "terminals", terminalId));
+  approvedCancel.delete(doc(db, "terminalApplications", terminalId));
+  await assertFails(approvedCancel.commit());
+});

@@ -115,11 +115,20 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
   const applicationRef = doc(db, "terminalApplications", localTerminalId);
-  const application = await getDoc(applicationRef);
-  if (application.exists() && application.data().requestedByUid === uid &&
-      application.data().status === "pending") {
-    await import("firebase/firestore").then(({ deleteDoc }) => deleteDoc(applicationRef));
-  }
+  await runTransaction(db, async tx => {
+    const application = await tx.get(applicationRef);
+    if (!application.exists() || application.data().requestedByUid !== uid ||
+        application.data().status !== "pending") return;
+    const terminalRef = doc(db, "terminals", localTerminalId);
+    const terminal = await tx.get(terminalRef);
+    if (terminal.exists()) {
+      if (terminal.data().approved !== false || terminal.data().requestedByUid !== uid) {
+        throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
+      }
+      tx.delete(terminalRef);
+    }
+    tx.delete(applicationRef);
+  });
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
