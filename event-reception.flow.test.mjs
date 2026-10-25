@@ -35,7 +35,7 @@ beforeEach(async () => {
 });
 after(async () => env.cleanup());
 
-function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {}) {
+function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {}, storage = { getItem: () => terminalId, setItem: () => {} }) {
   const compiled = ts.transpileModule(readFileSync(new URL(file, import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -53,7 +53,7 @@ function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {})
       return dependencies[name];
     },
     new IDBFactory(), webcrypto,
-    { getItem: () => terminalId, setItem: () => {} },
+    storage,
     { userAgent: "flow test" },
   );
   return exports;
@@ -261,3 +261,51 @@ test("cancel a second pending reception request without releasing the existing m
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", "flow-manager"))).data().terminalId, "T-FLOW-MANAGER");
   assert.equal((await c.management.loadTerminals()).find(t => t.terminalId === "T-FLOW-MANAGER").approved, true);
 });
+
+
+test("one verified manager installation can download and operate reception without another registration", async () => {
+  const c = clients();
+  await createPublished(c);
+  const ids = new Map([["qr-ticket-terminal-id", "T-STALE-REQUEST"]]);
+  const storage = { getItem: key => ids.get(key), setItem: (key, value) => ids.set(key, value) };
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER", {}, {}, storage);
+  assert.equal((await reception.getTerminalRegistration()).approved, true);
+  assert.equal(ids.get("qr-ticket-terminal-id"), "T-FLOW-MANAGER");
+  assert.equal(ids.get("qr-ticket-device-id"), "T-FLOW-MANAGER");
+  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  const downloaded = await downloader.downloadCurrentFirebaseEventData(ids.get("qr-ticket-terminal-id"));
+  let ticket = downloaded.tickets[0];
+  for (const [recordId, type, status, timestamp] of [
+    ["same-entry", "entry", "inside", "2026-10-25T02:00:00.000Z"],
+    ["same-exit", "exit", "exited", "2026-10-25T02:01:00.000Z"],
+    ["same-reentry", "reentry", "inside", "2026-10-25T02:02:00.000Z"],
+  ]) {
+    ticket = { ...ticket, currentStatus: status, updatedAt: timestamp };
+    const record = { recordId, type, timestamp, eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-MANAGER" };
+    await reception.syncReceptionRecord(record, ticket);
+    await reception.syncReceptionRecord(record, ticket);
+  }
+  await assert.rejects(reception.syncReceptionRecord({ recordId: "bad-entry", type: "entry", timestamp: "2026-10-25T02:03:00.000Z", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-MANAGER" }, ticket), /permission/i);
+  await reception.saveTerminalHeartbeat("T-FLOW-MANAGER", "entry", 0);
+  assert.equal((await c.management.loadTerminals()).find(item => item.terminalId === "T-FLOW-MANAGER").admin, true);
+  const terminal = (await getDocFromServer(doc(c.managerDb, "terminals", "T-FLOW-MANAGER"))).data();
+  assert.equal(terminal.role, "management");
+  assert.equal(terminal.managementApproved, true);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "terminalApplications"))).size, 0);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 3);
+});
+
+for (const scenario of ["disabled-owner", "revoked-installation", "different-owner"]) {
+  test("same-device reception rejects " + scenario, async () => {
+    const c = clients();
+    await createPublished(c);
+    await env.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      if (scenario === "revoked-installation") await updateDoc(doc(db, "terminalInstallations", "flow-manager"), { approved: false });
+      else await updateDoc(doc(db, "terminalOwners", "T-FLOW-MANAGER"), scenario === "disabled-owner" ? { enabled: false } : { ownerUid: "another-owner" });
+    });
+    const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+    try { assert.notEqual((await reception.getTerminalRegistration())?.approved, true); } catch (error) { assert.match(String(error), /permission/i); }
+    await assert.rejects(reception.syncReceptionRecord({ recordId: "denied", type: "entry", timestamp: "2026-10-25T03:00:00.000Z", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-MANAGER" }, makeTicket("flow-event")), /permission/i);
+  });
+}

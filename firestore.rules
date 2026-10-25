@@ -30,7 +30,8 @@ service cloud.firestore {
     }
 
     function approvedReceptionTerminal() {
-      return signedIn()
+      // Verified management owners can use reception in the same browser.
+      return approvedManagementTerminal() || (signedIn()
         && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
         && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
@@ -48,7 +49,7 @@ service cloud.firestore {
         && (
           get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
           || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
-        );
+        ));
     }
 
     function receptionTerminalId() {
