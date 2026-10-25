@@ -6,14 +6,14 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
-function loadModule(file, dependencies) {
+function loadModule(file, dependencies, storage = { getItem: () => null, setItem: () => {} }) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8")
     .replace(/import\.meta\.env\.[A-Z_]+/g, '"test-config"');
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, require: name => {
+  vm.runInNewContext(compiled, { exports, localStorage: storage, require: name => {
     if (!(name in dependencies)) throw Error("Unexpected dependency: " + name);
     return dependencies[name];
   } });
@@ -125,6 +125,7 @@ test("reception registration atomically creates the application and pending term
 for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
   test("management terminal loading: " + scenario, async () => {
     let listedTerminals = false;
+    const stored = new Map([["qr-ticket-terminal-id", "T-CHANGED-RECEPTION"]]);
     const terminalId = "T-TEST-MANAGEMENT";
     const snapshot = data => ({ exists: () => data !== null, data: () => data });
     const module = loadModule("./management-app/src/firebaseData.ts", {
@@ -154,7 +155,7 @@ for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
           }) }] : [] };
         },
       },
-    });
+    }, { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) });
     if (scenario === "offline") {
       await assert.rejects(module.loadTerminals(), /offline/);
     } else {
@@ -163,5 +164,7 @@ for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
       if (scenario === "pending") assert.equal(result[0].approved, false);
     }
     assert.equal(listedTerminals, scenario === "manager");
+    assert.equal(stored.get("qr-ticket-terminal-id"), scenario === "manager" ? terminalId : "T-CHANGED-RECEPTION");
+    if (scenario === "manager") assert.equal(stored.get("qr-ticket-device-id"), terminalId);
   });
 }
