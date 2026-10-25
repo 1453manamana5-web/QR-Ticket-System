@@ -697,6 +697,8 @@ export async function loadTerminals(): Promise<TerminalRecord[]> {
     // A handed-off reception installation never inherits the owner's management role.
     if (owner.exists() && owner.data().enabled === true && owner.data().ownerUid === uid) {
       const snapshot = await getDocsFromServer(collection(getFirebaseDb(), "terminals"));
+      localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
+      localStorage.setItem("qr-ticket-device-id", state.terminalId);
       return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
     }
   }

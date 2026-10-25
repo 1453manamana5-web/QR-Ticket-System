@@ -572,6 +572,7 @@ export default function App() {
     setTerminalDataHydrated(false);
 
     void loadTerminals().then(remote => {
+      setFirebaseDeviceId(localStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
       setTerminals(remote);
       setTerminalDataHydrated(true);
     }).catch(reason => {
@@ -583,7 +584,8 @@ export default function App() {
 
     try {
       unsubscribe = subscribeTerminals(remote => {
-        setTerminals(remote);
+        setFirebaseDeviceId(localStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
+      setTerminals(remote);
         setTerminalDataHydrated(true);
       }, reason => {
         console.error("Firebase terminal subscription failed", reason);
@@ -1449,7 +1451,8 @@ export default function App() {
       setTerminalNotice("管理端末の登録申請を送信しました。既存の管理者端末から承認されるまでお待ちください。初回管理者の設定は安全な管理者引き継ぎ手続きが必要です。");
     } catch (reason) {
       console.error("Firebase terminal registration failed", reason);
-      setTerminalNotice("端末登録に失敗しました。通信状態とサーバー認証を確認してください。");
+      const code = reason instanceof Error ? reason.message : String(reason);
+      setTerminalNotice("端末登録に失敗しました（" + code + "）。通信状態とサーバー認証を確認してください。");
     }
   };
 
