@@ -115,11 +115,20 @@ export async function resetReceptionTerminalRegistration(): Promise<void> {
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
   const applicationRef = doc(db, "terminalApplications", localTerminalId);
-  const application = await getDoc(applicationRef);
-  if (application.exists() && application.data().requestedByUid === uid &&
-      application.data().status === "pending") {
-    await import("firebase/firestore").then(({ deleteDoc }) => deleteDoc(applicationRef));
-  }
+  await runTransaction(db, async tx => {
+    const application = await tx.get(applicationRef);
+    if (!application.exists() || application.data().requestedByUid !== uid ||
+        application.data().status !== "pending") return;
+    const terminalRef = doc(db, "terminals", localTerminalId);
+    const terminal = await tx.get(terminalRef);
+    if (terminal.exists()) {
+      if (terminal.data().approved !== false || terminal.data().requestedByUid !== uid) {
+        throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
+      }
+      tx.delete(terminalRef);
+    }
+    tx.delete(applicationRef);
+  });
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
@@ -138,11 +147,21 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
   }
   const now = new Date().toISOString();
-  await setDoc(doc(db, "terminalApplications", terminalId), {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "terminalApplications", terminalId), {
     terminalId, requestedByUid: uid, requestedRole: "reception",
     name: name.trim() || "受付端末", type, status: "pending",
     requestedAt: now, updatedAt: now,
   });
+  batch.set(doc(db, "terminals", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: "reception",
+    name: name.trim() || "受付端末", type, role: "reception",
+    approved: false, managementApproved: false, receptionApproved: false,
+    admin: false, subAdmin: false, status: "pending",
+    mode: "停止", desiredMode: "停止", requestedAt: now, updatedAt: now,
+    syncPendingCount: 0,
+  });
+  await batch.commit();
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
