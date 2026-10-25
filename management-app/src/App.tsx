@@ -1335,7 +1335,11 @@ export default function App() {
       setSelectedTerminalId(terminalId);
     } catch (reason) {
       console.error("Firebase terminal approval failed", reason);
-      setTerminalNotice("端末の承認に失敗しました。Firebaseへの接続を確認してください。");
+      const errorCode =
+        typeof reason === "object" && reason !== null && "code" in reason && typeof reason.code === "string"
+          ? reason.code
+          : reason instanceof Error ? reason.message : "UNKNOWN";
+      setTerminalNotice("端末の承認に失敗しました（" + errorCode + "）。申請情報・権限・通信状態を確認してください。");
     }
   };
 
