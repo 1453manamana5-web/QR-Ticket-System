@@ -241,12 +241,12 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
-  const installationSnapshot = await getDoc(doc(db, "terminalInstallations", uid));
+  const installationSnapshot = await getDocFromServer(doc(db, "terminalInstallations", uid));
   if (installationSnapshot.exists()) {
     const grant = installationSnapshot.data();
     if (grant.authUid === uid && grant.approved === true &&
         typeof grant.terminalId === "string") {
-      const terminalSnapshot = await getDoc(doc(db, "terminals", grant.terminalId));
+      const terminalSnapshot = await getDocFromServer(doc(db, "terminals", grant.terminalId));
       if (terminalSnapshot.exists()) {
         return {
           terminalId: grant.terminalId,
@@ -257,7 +257,7 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
     }
   }
 
-  const applications = await getDocs(query(
+  const applications = await getDocsFromServer(query(
     collection(db, "terminalApplications"),
     where("requestedByUid", "==", uid),
     limit(5),
@@ -668,9 +668,7 @@ export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => vo
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = async () => {
     try {
-      await ensureFirebaseAuth();
-      const snapshot = await getDocs(collection(getFirebaseDb(), "terminals"));
-      const terminals = snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
+      const terminals = await loadTerminals();
       if (active) onChange(terminals);
     } catch (error) {
       if (active) onError(error);
@@ -683,9 +681,28 @@ export function subscribeTerminals(onChange: (terminals: TerminalRecord[]) => vo
 }
 
 export async function loadTerminals(): Promise<TerminalRecord[]> {
-  await ensureFirebaseAuth();
-  const snapshot = await getDocs(collection(getFirebaseDb(), "terminals"));
-  return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
+  const state = await readOwnTerminalState();
+  if (!state.terminal || !state.terminalId) {
+    const pending = state.pendingApplication;
+    if (!pending || typeof pending.terminalId !== "string") return [];
+    return [terminalFromDocument(pending.terminalId, {
+      ...pending, role: pending.requestedRole, approved: false,
+      managementApproved: false, receptionApproved: false,
+    })];
+  }
+
+  const own = terminalFromDocument(state.terminalId, state.terminal);
+  if (own.approved && own.managementApproved &&
+      (own.role === "management" || own.role === "both")) {
+    const uid = await getFirebaseUid();
+    const owner = await getDocFromServer(doc(getFirebaseDb(), "terminalOwners", state.terminalId));
+    // A handed-off reception installation never inherits the owner's management role.
+    if (owner.exists() && owner.data().enabled === true && owner.data().ownerUid === uid) {
+      const snapshot = await getDocsFromServer(collection(getFirebaseDb(), "terminals"));
+      return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
+    }
+  }
+  return [own];
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();

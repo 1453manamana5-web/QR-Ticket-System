@@ -388,16 +388,8 @@ export default function App() {
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
-  const [terminals, setTerminals] = useState<ManagedTerminal[]>(() => {
-    try {
-      const raw = localStorage.getItem("qr-ticket-managed-terminals-v2");
-      if (!raw) return defaultTerminals;
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : defaultTerminals;
-    } catch {
-      return defaultTerminals;
-    }
-  });
+  // Cached terminal roles must never unlock the management UI.
+  const [terminals, setTerminals] = useState<ManagedTerminal[]>(defaultTerminals);
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
@@ -584,6 +576,8 @@ export default function App() {
       setTerminalDataHydrated(true);
     }).catch(reason => {
       console.error("Firebase terminal load failed", reason);
+      setTerminals([]);
+      setTerminalNotice("端末の登録状態を確認できません。ネット接続を確認して再読み込みしてください。");
       setTerminalDataHydrated(true);
     });
 
@@ -593,10 +587,14 @@ export default function App() {
         setTerminalDataHydrated(true);
       }, reason => {
         console.error("Firebase terminal subscription failed", reason);
+        setTerminals([]);
+        setTerminalNotice("端末の登録状態を確認できません。ネット接続を確認して再読み込みしてください。");
         setTerminalDataHydrated(true);
       });
     } catch (reason) {
       console.error("Firebase terminal subscription failed", reason);
+        setTerminals([]);
+        setTerminalNotice("端末の登録状態を確認できません。ネット接続を確認して再読み込みしてください。");
       setTerminalDataHydrated(true);
     }
 
