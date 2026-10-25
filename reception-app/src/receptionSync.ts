@@ -138,11 +138,21 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
   }
   const now = new Date().toISOString();
-  await setDoc(doc(db, "terminalApplications", terminalId), {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "terminalApplications", terminalId), {
     terminalId, requestedByUid: uid, requestedRole: "reception",
     name: name.trim() || "受付端末", type, status: "pending",
     requestedAt: now, updatedAt: now,
   });
+  batch.set(doc(db, "terminals", terminalId), {
+    terminalId, requestedByUid: uid, requestedRole: "reception",
+    name: name.trim() || "受付端末", type, role: "reception",
+    approved: false, managementApproved: false, receptionApproved: false,
+    admin: false, subAdmin: false, status: "pending",
+    mode: "停止", desiredMode: "停止", requestedAt: now, updatedAt: now,
+    syncPendingCount: 0,
+  });
+  await batch.commit();
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {

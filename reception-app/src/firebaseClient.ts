@@ -11,7 +11,7 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-function getFirebaseApp() {
+export function getFirebaseApp() {
   const missing = Object.entries(firebaseConfig)
     .filter(([, value]) => typeof value !== "string" || value.trim() === "")
     .map(([key]) => key);
@@ -32,6 +32,7 @@ export function ensureFirebaseAuth(): Promise<Auth> {
   if (!authReady) {
     const auth = getAuth(getFirebaseApp());
     authReady = (async () => {
+      await auth.authStateReady();
       if (!auth.currentUser) await signInAnonymously(auth);
       return auth;
     })().catch((error) => {

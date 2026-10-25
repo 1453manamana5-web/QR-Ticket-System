@@ -496,18 +496,18 @@ service cloud.firestore {
         && getAfter(installationPath(resource.data.requestedByUid)).data.approved == true;
     }
 
-    // Event and ticket documents are restricted to approved management
-    // installations. Reception reads published event bundles through the
-    // dedicated eventBundles rule; reception ticket-state changes use callables.
+    // Reception downloads the selected event and its tickets for offline use.
+    // Other event data and all management writes remain management-only.
     match /events/{eventId} {
-      // Reception uses a published bundle; raw event documents remain management-only.
-      allow get, list: if approvedManagementTerminal();
+      // The client query must include where("receptionTarget", "==", true).
+      allow get, list: if approvedManagementTerminal()
+        || (approvedReceptionTerminal() && resource.data.receptionTarget == true);
       allow create, update, delete: if approvedManagementTerminal();
 
       match /tickets/{ticketId} {
-        // Ticket documents remain management-only; reception mutations are
-        // checked against the existing ticket state inside the rules engine.
-        allow read: if approvedManagementTerminal();
+        // Only the currently active event can be downloaded by reception.
+        allow read: if approvedManagementTerminal()
+          || (approvedReceptionTerminal() && activeReceptionEvent(eventId));
         allow create, delete: if approvedManagementTerminal();
         // Reception changes are allowed only as an atomic ticket+record write.
         allow update: if approvedManagementTerminal()
@@ -522,7 +522,8 @@ service cloud.firestore {
             && (!exists(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
               || resource.data.terminalId == receptionTerminalId()));
         allow create: if validReceptionRecordCreate(eventId, recordId);
-        allow update, delete: if false;
+        allow delete: if approvedManagementTerminal();
+        allow update: if false;
       }
 
       match /analysis/{analysisId} {

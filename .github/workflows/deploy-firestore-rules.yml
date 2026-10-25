@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: firestore-rules-production
+  group: firebase-production-deploy
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +28,13 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
+      - name: Setup Java for Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Firebase client regression tests
+        run: npm run test:client
       - name: Firestore rules emulator tests
         run: npm run test:rules
       - name: Typecheck and build apps
@@ -131,6 +138,9 @@ jobs:
               source: { files: [{ name: "firestore.rules", content: rulesContent, fingerprint }] },
             }),
           });
+          if (created.response.status === 403) {
+            console.error("::error::The deployment service account needs Firebase Rules Admin (roles/firebaserules.admin) on project " + projectId + ". Grant it to the client_email in FIREBASE_SERVICE_ACCOUNT using Google Cloud IAM; do not change Firestore allow rules to fix IAM.");
+          }
           if (!created.response.ok || typeof created.body.name !== "string") {
             throw new Error("Ruleset validation/creation failed: HTTP " + created.response.status + " " +
               JSON.stringify(created.body).slice(0, 2500));

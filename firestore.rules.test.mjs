@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch, query, where } from "firebase/firestore";
 
 let env;
 before(async () => {
@@ -81,7 +81,7 @@ test("approved reception installations cannot read event or ticket documents but
   await assertFails(setDoc(doc(db, "receptionErrors", "forged-error"), { errorId: "forged-error" }));
 });
 
-test("legacy reception terminals can fetch bundles but cannot read raw event documents", async () => {
+test("legacy reception terminals can fetch the published event and bundle", async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, "terminalInstallations", "legacy-reception"), {
@@ -109,7 +109,7 @@ test("legacy reception terminals can fetch bundles but cannot read raw event doc
     });
   });
   const db = env.authenticatedContext("legacy-reception").firestore();
-  await assertFails(getDoc(doc(db, "events", "event-legacy")));
+  await assertSucceeds(getDoc(doc(db, "events", "event-legacy")));
   await assertFails(getDocs(collection(db, "events")));
   await assertSucceeds(getDoc(doc(db, "eventBundles", "legacy-token")));
 });
@@ -554,4 +554,68 @@ test("management can revoke reception, change sub-admin status, and delete only 
   });
   batch.delete(doc(db, "terminalApplications", "T-LIFECYCLE-TARGET"));
   await assertSucceeds(batch.commit());
+});
+
+
+test("reception can discover only published events and download only active tickets", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminalInstallations", "active-reader"), {
+      terminalId: "T-ACTIVE-READER", authUid: "active-reader", approved: true,
+    });
+    await setDoc(doc(db, "terminalOwners", "T-ACTIVE-READER"), {
+      terminalId: "T-ACTIVE-READER", ownerUid: "owner", enabled: true,
+    });
+    await setDoc(doc(db, "terminals", "T-ACTIVE-READER"), {
+      approved: true, role: "reception", receptionApproved: true,
+    });
+    for (const [id, target, status] of [
+      ["active", true, "ready"], ["private", false, "preparing"], ["finished", true, "finished"],
+    ]) {
+      await setDoc(doc(db, "events", id), { eventId: id, receptionTarget: target, eventStatus: status });
+      await setDoc(doc(db, "events", id, "tickets", "ticket-1"), {
+        eventId: id, ticketId: "ticket-1", valid: true, currentStatus: "unused",
+      });
+    }
+  });
+  const db = env.authenticatedContext("active-reader").firestore();
+  await assertSucceeds(getDocs(query(collection(db, "events"), where("receptionTarget", "==", true))));
+  await assertFails(getDocs(collection(db, "events")));
+  await assertFails(getDoc(doc(db, "events", "private")));
+  await assertSucceeds(getDocs(collection(db, "events", "active", "tickets")));
+  await assertSucceeds(getDoc(doc(db, "events", "active", "tickets", "ticket-1")));
+  for (const id of ["private", "finished", "missing"]) {
+    await assertFails(getDocs(collection(db, "events", id, "tickets")));
+  }
+  await assertFails(updateDoc(doc(db, "events", "active"), { receptionTarget: false }));
+  await assertFails(updateDoc(doc(db, "events", "active", "tickets", "ticket-1"), { valid: false }));
+  for (const uid of [null, "unapproved"]) {
+    const denied = uid ? env.authenticatedContext(uid).firestore() : env.unauthenticatedContext().firestore();
+    await assertFails(getDocs(query(collection(denied, "events"), where("receptionTarget", "==", true))));
+    await assertFails(getDocs(collection(denied, "events", "active", "tickets")));
+  }
+  await env.withSecurityRulesDisabled(context =>
+    updateDoc(doc(context.firestore(), "terminalOwners", "T-ACTIVE-READER"), { enabled: false }));
+  await assertFails(getDocs(collection(db, "events", "active", "tickets")));
+});
+
+test("management can remove reception history during event deletion; reception cannot", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    for (const [uid, role] of [["delete-manager", "management"], ["delete-reception", "reception"]]) {
+      await setDoc(doc(db, "terminalInstallations", uid), { terminalId: uid, authUid: uid, approved: true });
+      await setDoc(doc(db, "terminalOwners", uid), { terminalId: uid, ownerUid: uid, enabled: true });
+      await setDoc(doc(db, "terminals", uid), {
+        approved: true, role, managementApproved: role === "management", receptionApproved: role === "reception",
+      });
+    }
+    await setDoc(doc(db, "events", "delete-event"), { receptionTarget: true });
+    await setDoc(doc(db, "events", "delete-event", "receptionRecords", "r1"), {
+      terminalId: "delete-reception",
+    });
+  });
+  const ref = uid => doc(env.authenticatedContext(uid).firestore(), "events", "delete-event", "receptionRecords", "r1");
+  await assertFails(deleteDoc(ref("delete-reception")));
+  await assertFails(deleteDoc(ref("unapproved")));
+  await assertSucceeds(deleteDoc(ref("delete-manager")));
 });
