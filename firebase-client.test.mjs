@@ -159,7 +159,7 @@ for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
       await assert.rejects(module.loadTerminals(), /offline/);
     } else {
       const result = await module.loadTerminals();
-      assert.equal(result.length, scenario === "new" ? 0 : 1);
+      assert.equal(result.length, scenario === "new" || scenario === "handoff" ? 0 : 1);
       if (scenario === "pending") assert.equal(result[0].approved, false);
     }
     assert.equal(listedTerminals, scenario === "manager");

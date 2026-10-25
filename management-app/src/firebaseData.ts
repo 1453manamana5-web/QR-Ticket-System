@@ -702,7 +702,8 @@ export async function loadTerminals(): Promise<TerminalRecord[]> {
       return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));
     }
   }
-  return [own];
+  // Reception-only and handed-off installations cannot unlock management UI.
+  return [];
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();
