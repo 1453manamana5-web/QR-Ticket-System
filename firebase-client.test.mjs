@@ -120,3 +120,48 @@ test("reception registration atomically creates the application and pending term
     assert.equal(terminal[field], false);
   }
 });
+
+
+for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
+  test("management terminal loading: " + scenario, async () => {
+    let listedTerminals = false;
+    const terminalId = "T-TEST-MANAGEMENT";
+    const snapshot = data => ({ exists: () => data !== null, data: () => data });
+    const module = loadModule("./management-app/src/firebaseData.ts", {
+      "./firebaseClient": {
+        ensureFirebaseAuth: async () => {}, getFirebaseUid: async () => "current-uid", getFirebaseDb: () => ({}),
+      },
+      "firebase/firestore": {
+        doc: (_db, ...parts) => parts.join("/"), collection: (_db, ...parts) => parts.join("/"),
+        query: ref => ref, where: () => {}, limit: () => {},
+        getDocFromServer: async ref => {
+          if (scenario === "offline") throw Error("offline");
+          if (ref.startsWith("terminalInstallations/")) return snapshot(
+            scenario === "manager" || scenario === "handoff"
+              ? { terminalId, authUid: "current-uid", approved: true } : null);
+          if (ref.startsWith("terminalOwners/")) return snapshot({
+            enabled: true, ownerUid: scenario === "handoff" ? "original-owner" : "current-uid",
+          });
+          return snapshot({ terminalId, approved: true, managementApproved: true, role: "both" });
+        },
+        getDocsFromServer: async ref => {
+          if (ref === "terminals") {
+            listedTerminals = true;
+            return { docs: [{ id: terminalId, data: () => ({ approved: true, role: "management" }) }] };
+          }
+          return { docs: scenario === "pending" ? [{ data: () => ({
+            terminalId, requestedRole: "management", status: "pending", name: "iPad",
+          }) }] : [] };
+        },
+      },
+    });
+    if (scenario === "offline") {
+      await assert.rejects(module.loadTerminals(), /offline/);
+    } else {
+      const result = await module.loadTerminals();
+      assert.equal(result.length, scenario === "new" || scenario === "handoff" ? 0 : 1);
+      if (scenario === "pending") assert.equal(result[0].approved, false);
+    }
+    assert.equal(listedTerminals, scenario === "manager");
+  });
+}
