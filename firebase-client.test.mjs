@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
-import ts from "typescript";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
 
 function loadModule(file, dependencies) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8")
