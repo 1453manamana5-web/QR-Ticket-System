@@ -87,10 +87,19 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
   if (state.terminal) {
     const terminal = state.terminal;
     const role = terminal.role;
+    const managementOwner = terminal.approved === true && terminal.managementApproved === true &&
+      (role === "management" || role === "both")
+      ? await getDocFromServer(doc(getFirebaseDb(), "terminalOwners", state.terminalId!)) : null;
+    const managementAllowed = managementOwner?.exists() === true &&
+      managementOwner.data().enabled === true && managementOwner.data().ownerUid === await getFirebaseUid();
+    const approved = terminal.approved === true && (managementAllowed ||
+      (terminal.receptionApproved !== false && (role === "reception" || role === "both")));
+    if (approved && state.terminalId) {
+      localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
+      localStorage.setItem("qr-ticket-device-id", state.terminalId);
+    }
     return {
-      approved: terminal.approved === true &&
-        terminal.receptionApproved !== false &&
-        (role === "reception" || role === "both"),
+      approved,
       status: terminal.status === "online" || terminal.status === "offline" ? terminal.status : "pending",
       name: typeof terminal.name === "string" ? terminal.name : "受付端末",
     };

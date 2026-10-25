@@ -469,11 +469,11 @@ export default function App(){
       console.info("受付端末登録をリセットしました",nextId);
       setTerminalRegistration(null);
       setScreen("registration");
-      if (retainedId) setError("未承認の申請を取り消しました。このブラウザーは承認済み端末として使用中です。受付の登録は別端末から行ってください。");
+      if (retainedId) setError("未承認の申請を取り消しました。元の承認済み端末登録を維持しています。受付アプリを再読み込みしてください。");
     } catch (reason) {
       console.error("受付端末登録のリセットに失敗しました", reason);
       setError(reason instanceof Error && reason.message === "RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL"
-        ? "このブラウザーには承認済みの端末登録があります。受付は別端末から登録してください。"
+        ? "このブラウザーには承認済みの端末登録があります。再申請は不要です。受付アプリを再読み込みしてください。"
         : "登録申請をリセットできませんでした（" + (reason instanceof Error ? reason.message : String(reason)) + "）。");
     } finally {
       setBusy(false);
