@@ -1,28 +1,29 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v3";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v4";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
+
+// Publish the entry point only after every dependency is available offline.
+async function cacheShell(cache, response) {
+  if (!response.ok) throw new Error("受付アプリを取得できませんでした");
+  const indexUrl = new URL("index.html", self.location.href).href;
+  const html = await response.clone().text();
+  const paths = [...[...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]),
+    "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav"];
+  await Promise.all(paths.filter(path => path && !path.startsWith("data:")).map(async path => {
+    const url = new URL(path, indexUrl);
+    if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
+    const asset = await fetch(url.href, {cache: "reload"});
+    if (!asset.ok) throw new Error(`受付ファイルを取得できませんでした: ${url.pathname}`);
+    await cache.put(url.href, asset);
+  }));
+  await cache.put(indexUrl, response.clone());
+}
 
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
     const indexUrl = new URL("index.html", self.location.href).href;
-    try {
-      const response = await fetch(indexUrl, { cache: "reload" });
-      if (response.ok) {
-        await cache.put(indexUrl, response.clone());
-        const html = await response.text();
-        const assetPaths = [...[...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]), "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav"]
-          .filter(path => path && !path.startsWith("data:"));
-        await Promise.allSettled(assetPaths.map(async path => {
-          const url = new URL(path, indexUrl);
-          if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
-          const asset = await fetch(url.href, { cache: "reload" });
-          if (asset.ok) await cache.put(url.href, asset);
-        }));
-      }
-    } catch (error) {
-      console.warn("受付アプリの初期キャッシュに失敗しました", error);
-    }
+    await cacheShell(cache, await fetch(indexUrl, {cache: "reload"}));
     await self.skipWaiting();
   })());
 });
@@ -50,11 +51,8 @@ self.addEventListener("fetch", event => {
     event.respondWith((async () => {
       try {
         const response = await fetch(request);
-        if (response.ok) {
-          const cache = await caches.open(SHELL_CACHE);
-          await cache.put(request, response.clone());
-          await cache.put(new URL("index.html", self.location.href).href, response.clone());
-        }
+        const cache = await caches.open(SHELL_CACHE);
+        await cacheShell(cache, response);
         return response;
       } catch {
         const cache = await caches.open(SHELL_CACHE);
