@@ -2852,7 +2852,7 @@ function NavIcon({type}:{type:string}){
                     try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* pointer capture may be unavailable */ }
                     setNavSwipePreview(item.label);
                   }}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (navSuppressClickRef.current) {
                       navSuppressClickRef.current = false;
                       return;

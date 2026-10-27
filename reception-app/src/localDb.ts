@@ -139,19 +139,44 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(
-        [STORES.event, STORES.tickets],
+        [STORES.event, STORES.tickets, STORES.syncQueue, STORES.receptionRecords],
         "readwrite"
       );
       const eventStore = transaction.objectStore(STORES.event);
       const ticketStore = transaction.objectStore(STORES.tickets);
 
-      eventStore.clear();
-      ticketStore.clear();
-      eventStore.put(readyEvent);
-
-      for (const ticket of tickets) {
-        ticketStore.put(ticket);
-      }
+      // Refresh inventory without rolling back locally accepted, unsent scans.
+      const previousTickets = ticketStore.getAll();
+      const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
+      queueRequest.onsuccess = () => {
+        const pendingIds = new Set((queueRequest.result as SyncQueueItem[])
+          .filter(item => item.status !== "synced").map(item => item.recordId));
+        // Queue entries point to records; read them in this same transaction.
+        const pendingTickets = new Set<string>();
+        let remaining = pendingIds.size;
+        const storeInventory = () => {
+          const previous = new Map((previousTickets.result as Ticket[])
+            .filter(ticket => ticket.eventId === eventId).map(ticket => [ticket.ticketId, ticket]));
+          eventStore.clear();
+          ticketStore.clear();
+          eventStore.put(readyEvent);
+          for (const ticket of tickets) {
+            const local = previous.get(ticket.ticketId);
+            ticketStore.put(local && pendingTickets.has(ticket.ticketId)
+              ? {...ticket, currentStatus: local.currentStatus, updatedAt: local.updatedAt}
+              : ticket);
+          }
+        };
+        if (!remaining) { storeInventory(); return; }
+        for (const recordId of pendingIds) {
+          const request = transaction.objectStore(STORES.receptionRecords).get(recordId);
+          request.onsuccess = () => {
+            const record = request.result as ReceptionRecord | undefined;
+            if (record?.eventId === eventId) pendingTickets.add(record.ticketId);
+            if (--remaining === 0) storeInventory();
+          };
+        }
+      };
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
@@ -273,12 +298,13 @@ export async function saveReceptionTransaction(
     transaction.objectStore(STORES.tickets).put(ticket);
     transaction.objectStore(STORES.receptionRecords).put(record);
 
-    const queue: SyncQueueItem = {
-      recordId: record.recordId,
-      status: "pending",
-      retryCount: 0,
+    const queueStore = transaction.objectStore(STORES.syncQueue);
+    const existing = queueStore.getAll();
+    existing.onsuccess = () => {
+      const sequence = (existing.result as SyncQueueItem[])
+        .reduce((maximum, item) => Math.max(maximum, item.sequence ?? 0), 0) + 1;
+      queueStore.put({recordId: record.recordId, status: "pending", retryCount: 0, sequence} satisfies SyncQueueItem);
     };
-    transaction.objectStore(STORES.syncQueue).put(queue);
 
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
@@ -320,9 +346,14 @@ export async function getPendingSyncItems(): Promise<SyncQueueItem[]> {
           };
         }
       };
-      tx.oncomplete = () => resolve(pending.sort((a, b) =>
-        (timestamps.get(a.recordId) ?? 0) - (timestamps.get(b.recordId) ?? 0) ||
-        a.recordId.localeCompare(b.recordId)));
+      tx.oncomplete = () => resolve(pending.sort((a, b) => {
+        if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
+        // Queues captured by older app versions have no insertion sequence.
+        if (a.sequence !== undefined) return 1;
+        if (b.sequence !== undefined) return -1;
+        return (timestamps.get(a.recordId) ?? 0) - (timestamps.get(b.recordId) ?? 0) ||
+          a.recordId.localeCompare(b.recordId);
+      }));
       tx.onerror = () => reject(tx.error ?? new Error("同期キューを読み込めませんでした"));
       tx.onabort = () => reject(tx.error ?? new Error("同期キューの読み込みが中断されました"));
     });
@@ -340,12 +371,12 @@ export async function markSyncStatus(
 
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORES.syncQueue, "readwrite");
-    transaction.objectStore(STORES.syncQueue).put({
-      recordId,
-      status,
-      retryCount,
-      lastAttemptAt: new Date().toISOString(),
-    } satisfies SyncQueueItem);
+    const store = transaction.objectStore(STORES.syncQueue);
+    const request = store.get(recordId);
+    request.onsuccess = () => {
+      const previous = request.result as SyncQueueItem | undefined;
+      if (previous) store.put({...previous, status, retryCount, lastAttemptAt: new Date().toISOString()});
+    };
 
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
@@ -432,8 +463,8 @@ export async function markReceptionErrorLogSynced(errorId: string): Promise<void
 export async function clearLocalEvent(): Promise<void> {
   const database = await openDatabase();
 
-  // イベントデータを消去しても、未同期の受付エラーログは保持する。
-  const storesToClear = Object.values(STORES).filter(storeName => storeName !== "receptionErrors");
+  // Event replacement must never erase unsent records or error logs.
+  const storesToClear = [STORES.event, STORES.tickets];
 
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(storesToClear, "readwrite");

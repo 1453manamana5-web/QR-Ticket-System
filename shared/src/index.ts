@@ -33,6 +33,7 @@ export interface SyncQueueItem {
   status: "pending" | "syncing" | "synced" | "failed";
   retryCount: number;
   lastAttemptAt?: string;
+  sequence?: number;
 }
 
 export interface Event {

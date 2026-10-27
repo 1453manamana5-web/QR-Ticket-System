@@ -12,9 +12,7 @@ type EventBundle = {
 };
 
 
-export async function downloadCurrentFirebaseEventData(
-  terminalId: string,
-): Promise<{ localEvent: LocalEventData; tickets: Ticket[]; authPayload: EventAuthPayload } | null> {
+export async function getCurrentFirebaseEventAuthPayload(): Promise<EventAuthPayload> {
   const db = getFirebaseDb();
   // Firestoreルールが公開対象イベントだけを許可する構成でも取得できるよう、
   // 全イベントを読まず receptionTarget=true の文書だけをサーバー側で検索する。
@@ -57,6 +55,13 @@ export async function downloadCurrentFirebaseEventData(
     authToken: current.authToken,
   };
 
+  return payload;
+}
+
+export async function downloadCurrentFirebaseEventData(
+  terminalId: string,
+): Promise<{ localEvent: LocalEventData; tickets: Ticket[]; authPayload: EventAuthPayload }> {
+  const payload = await getCurrentFirebaseEventAuthPayload();
   const downloaded = await downloadEventData(payload, terminalId);
   return { ...downloaded, authPayload: payload };
 }

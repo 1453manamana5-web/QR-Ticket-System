@@ -1,5 +1,9 @@
 rules_version = '2';
 
+// Reapplication uses the existing terminal ID and authenticated owner UID.
+// terminalApplications: exact bounded registration fields; pending only.
+// terminals: reception-only, already revoked; only name/type/status/times change.
+// Owner/installation mappings and all approval/role fields remain immutable.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -242,6 +246,57 @@ service cloud.firestore {
         && data.syncPendingCount == 0;
     }
 
+    function validReceptionReapplicationData(data, terminalId) {
+      return data.keys().hasAll(["terminalId", "requestedByUid", "requestedRole", "name", "type", "status", "requestedAt", "updatedAt"])
+        && data.keys().hasOnly(["terminalId", "requestedByUid", "requestedRole", "name", "type", "status", "requestedAt", "updatedAt"])
+        && data.terminalId == terminalId
+        && data.terminalId is string && data.terminalId.size() > 0 && data.terminalId.size() <= 160
+        && data.requestedByUid == request.auth.uid
+        && data.requestedRole == "reception"
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+        && data.type in ["Web / iPad", "Web / PC"]
+        && data.status == "pending"
+        && data.requestedAt is string && data.requestedAt.size() > 0 && data.requestedAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 40;
+    }
+
+    function ownsRevokedReceptionTerminal(terminalId) {
+      let terminal = get(terminalPath(terminalId)).data;
+      let owner = get(ownerPath(terminalId)).data;
+      let installation = get(installationPath(request.auth.uid)).data;
+      return signedIn()
+        && owner.enabled == true && owner.ownerUid == request.auth.uid
+        && installation.authUid == request.auth.uid && installation.approved == true
+        && installation.terminalId == terminalId
+        && terminal.terminalId == terminalId && terminal.requestedByUid == request.auth.uid
+        && terminal.role == "reception" && terminal.requestedRole == "reception"
+        && terminal.approved == false && terminal.receptionApproved == false
+        && terminal.managementApproved == false && terminal.admin == false && terminal.subAdmin == false;
+    }
+
+    function validOwnReceptionReapplication(terminalId) {
+      let application = getAfter(applicationPath(terminalId)).data;
+      let terminal = get(terminalPath(terminalId)).data;
+      let next = getAfter(terminalPath(terminalId)).data;
+      return ownsRevokedReceptionTerminal(terminalId)
+        && validReceptionReapplicationData(application, terminalId)
+        && next.diff(terminal).affectedKeys().hasOnly(["name", "type", "status", "requestedAt", "updatedAt"])
+        && next.name == application.name && next.type == application.type
+        && next.status == "pending" && next.requestedAt == application.requestedAt
+        && next.updatedAt == application.updatedAt;
+    }
+
+    function validOwnReceptionReapplicationCancellation(terminalId) {
+      let app = get(applicationPath(terminalId)).data;
+      return ownsRevokedReceptionTerminal(terminalId)
+        && app.requestedByUid == request.auth.uid && app.status == "pending"
+        && !existsAfter(applicationPath(terminalId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
+        && request.resource.data.status == "offline"
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.size() > 0 && request.resource.data.updatedAt.size() <= 40;
+    }
+
     function validTerminalApprovalUpdate(terminalId) {
       let current = resource.data;
       let next = request.resource.data;
@@ -347,7 +402,7 @@ service cloud.firestore {
         ])
         && next.receptionApproved == false
         && next.receptionApprovalVersion is int
-        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.receptionApprovalVersion == (current.get("receptionApprovalVersion", 0) is int ? current.get("receptionApprovalVersion", 0) + 1 : 1)
         && next.approved == (current.managementApproved == true)
         && next.mode == "停止" && next.desiredMode == "停止"
         && next.desiredModeUpdatedAt is string && next.updatedAt is string
@@ -372,7 +427,7 @@ service cloud.firestore {
         ])
         && next.receptionApproved == false
         && next.receptionApprovalVersion is int
-        && next.receptionApprovalVersion == (current.receptionApprovalVersion is int ? current.receptionApprovalVersion + 1 : 1)
+        && next.receptionApprovalVersion == (current.get("receptionApprovalVersion", 0) is int ? current.get("receptionApprovalVersion", 0) + 1 : 1)
         && next.approved == (current.managementApproved == true)
         && next.mode == "停止" && next.desiredMode == "停止"
         && next.desiredModeUpdatedAt is string && next.updatedAt is string
@@ -468,7 +523,7 @@ service cloud.firestore {
         || (signedIn() && resource.data.requestedByUid == request.auth.uid);
       allow list: if approvedManagementTerminal()
         || (signedIn() && request.query.limit <= 5 && resource.data.requestedByUid == request.auth.uid);
-      allow create: if signedIn()
+      allow create: if (request.resource.data.status == "pending" && validOwnReceptionReapplication(terminalId)) || (signedIn()
         && !exists(ownerPath(terminalId))
         && !exists(terminalPath(terminalId))
         && request.resource.data.keys().hasOnly([
@@ -484,13 +539,13 @@ service cloud.firestore {
         && request.resource.data.type in ["Web / iPad", "Web / PC"]
         && request.resource.data.status == "pending"
         && request.resource.data.requestedAt is string
-        && request.resource.data.updatedAt is string;
+        && request.resource.data.updatedAt is string);
       allow delete: if (signedIn()
           && resource.data.requestedByUid == request.auth.uid
           && resource.data.status == "pending")
         || (approvedManagementTerminal() && exists(terminalPath(terminalId))
           && !existsAfter(terminalPath(terminalId)));
-      allow update: if approvedManagementTerminal()
+      allow update: if (request.resource.data.status == "pending" && validOwnReceptionReapplication(terminalId)) || (approvedManagementTerminal()
         && resource.data.status == "pending"
         && request.resource.data.status == "approved"
         && request.resource.data.terminalId == terminalId
@@ -504,7 +559,7 @@ service cloud.firestore {
         && request.resource.data.decidedByUid == request.auth.uid
         && getAfter(terminalPath(terminalId)).data.approved == true
         && getAfter(ownerPath(terminalId)).data.enabled == true
-        && getAfter(installationPath(resource.data.requestedByUid)).data.approved == true;
+        && getAfter(installationPath(resource.data.requestedByUid)).data.approved == true);
     }
 
     // Reception downloads the selected event and its tickets for offline use.
@@ -593,6 +648,11 @@ service cloud.firestore {
       allow list: if approvedManagementTerminal();
       allow create: if validTerminalRegistrationCreate(terminalId);
       allow update: if validTerminalHeartbeatUpdate(terminalId)
+        || (resource.data.approved == false && request.resource.data.approved == false
+          && request.resource.data.status == "pending" && validOwnReceptionReapplication(terminalId))
+        || (resource.data.approved == false && request.resource.data.approved == false
+          && resource.data.status == "pending" && request.resource.data.status == "offline"
+          && validOwnReceptionReapplicationCancellation(terminalId))
         || validOwnReceptionRelease(terminalId)
         || (approvedManagementTerminal()
           && (validManagedModeUpdate(terminalId)
