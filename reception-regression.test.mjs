@@ -373,3 +373,30 @@ test("offline shell preloads all three original audio assets at their full paths
   for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
   assert.ok(stored.includes("https://example.test/QR-Ticket-System/assets/app.js"));
 });
+
+test("partial shell updates never activate or replace the offline entry point",async()=>{
+  const listeners={},stored=new Map();let activated=false,failAsset=false,failHtml=false;
+  const origin="https://example.test";
+  const index=origin+"/QR-Ticket-System/index.html";
+  const response=(text,ok=true)=>({ok,clone(){return this;},text:async()=>text});
+  const old=response("old complete shell");stored.set(index,old);
+  const cache={put:async(url,value)=>stored.set(url,value),match:async request=>stored.get(typeof request==="string"?request:request.url)};
+  new Function("self","URL","caches","fetch","Response",readFileSync(new URL("./reception-app/public/sw.js",import.meta.url),"utf8"))({
+    location:{href:origin+"/QR-Ticket-System/sw.js",origin},
+    addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{activated=true;},
+  },URL,{open:async()=>cache},async request=>{
+    const url=typeof request==="string"?request:request.url;
+    if(url.endsWith(".js")&&failAsset)return response("missing",false);
+    if(url.endsWith("index.html"))return response('<script src="assets/new.js"></script>',!failHtml);
+    return response("asset");
+  },Response);
+  for(const failure of ["asset","html"]){
+    failAsset=failure==="asset";failHtml=failure==="html";
+    let installed;listeners.install({waitUntil:promise=>{installed=promise;}});
+    await assert.rejects(installed);
+    assert.equal(activated,false);assert.equal(stored.get(index),old);
+    let navigation;listeners.fetch({request:{method:"GET",mode:"navigate",url:index},respondWith:promise=>{navigation=promise;}});
+    assert.equal(await navigation,old);
+    assert.equal(stored.get(index),old);
+  }
+});
