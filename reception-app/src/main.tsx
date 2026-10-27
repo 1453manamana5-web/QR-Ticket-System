@@ -18,10 +18,12 @@ async function startApp() {
   try {
     await ensureFirebaseAuth();
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
+      const registerOfflineShell = () => {
         void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
           .catch(error => console.warn("受付アプリのオフライン起動を準備できませんでした", error));
-      }, { once: true });
+      };
+      if(document.readyState === "complete") registerOfflineShell();
+      else window.addEventListener("load", registerOfflineShell, {once: true});
     }
     createRoot(root).render(<StrictMode><App /></StrictMode>);
   } catch (error) {

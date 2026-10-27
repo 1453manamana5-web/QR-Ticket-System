@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { webcrypto } from "node:crypto";
 import { after, before, beforeEach, test } from "node:test";
-import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import { assertFails, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import * as firestore from "firebase/firestore";
 import { IDBFactory } from "fake-indexeddb";
 const ts = createRequire(import.meta.url)("typescript");
@@ -215,6 +215,24 @@ test("download rejects an incomplete ticket inventory instead of marking local d
   await assert.rejects(c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION"), /EVENT_TICKET_COUNT_MISMATCH/);
 });
 
+test("reception reads another terminal's current entry state and keeps record identity after cache replacement", async () => {
+  const c = clients();
+  await createPublished(c);
+  const entry = {recordId: "another-terminal-entry", eventId: "flow-event", ticketId: "ticket-1",
+    terminalId: "T-FLOW-MANAGER", type: "entry", timestamp: "2026-10-27T01:00:00.000Z"};
+  const managerReception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  await managerReception.syncReceptionRecord(entry);
+  const current = await c.reception.getLatestReceptionTicket("flow-event", "ticket-1");
+  assert.equal(current.currentStatus, "inside");
+  const exit = {...entry, recordId: "exit-after-entry", terminalId: "T-FLOW-RECEPTION", type: "exit", timestamp: "2026-10-27T01:01:00.000Z"};
+  await c.reception.syncReceptionRecord(exit);
+  assert.equal((await c.reception.getLatestReceptionTicket("flow-event", "ticket-1")).currentStatus, "exited");
+  // Queue uploads no longer need the current event's local ticket inventory.
+  await c.reception.syncReceptionRecord(exit);
+  await assert.rejects(managerReception.syncReceptionRecord(exit), /RECEPTION_TERMINAL_CHANGED/);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 2);
+});
+
 test("deleting a republished event removes every old bundle without touching another event", async () => {
   const c = clients();
   const first = await createPublished(c);
@@ -247,6 +265,104 @@ test("real reception registration can be approved by the manager and immediately
   const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", db, uid, terminalId);
   const event = await downloader.downloadCurrentFirebaseEventData(terminalId);
   assert.equal(event.tickets.length, 1);
+});
+
+async function registeredReception(c) {
+  const uid = "reapply-reception-user", terminalId = "T-REAPPLY-RECEPTION";
+  const db = env.authenticatedContext(uid).firestore();
+  const registration = loadClientModule("./reception-app/src/receptionSync.ts", db, uid, terminalId);
+  await registration.registerReceptionTerminal("Reapplication test");
+  await c.management.approveTerminal(terminalId);
+  return {uid, terminalId, db, registration};
+}
+
+test("event reapplication preserves terminal identity, requires approval again and works without a legacy version field", async () => {
+  const c = clients();
+  await createPublished(c);
+  const r = await registeredReception(c);
+  assert.equal(await r.registration.requestReceptionEventReapproval("Next event reception"), true);
+  assert.equal((await r.registration.getTerminalRegistration()).approved, false);
+  await assertFails(getDocsFromServer(collection(r.db, "events")));
+  const pending = (await getDocFromServer(doc(c.managerDb, "terminals", r.terminalId))).data();
+  assert.equal(pending.receptionApprovalVersion, 1);
+  assert.equal(pending.role, "reception");
+  assert.equal(pending.managementApproved, false);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", r.uid))).data().terminalId, r.terminalId);
+  await c.management.approveTerminal(r.terminalId);
+  assert.equal((await r.registration.getTerminalRegistration()).approved, true);
+  assert.equal((await r.registration.getLatestReceptionTicket("flow-event", "ticket-1")).currentStatus, "unused");
+});
+
+test("revoked reception can reapply, cancel and reapply again without deleting its owner mapping", async () => {
+  const c = clients();
+  const r = await registeredReception(c);
+  await c.management.revokeManagedReception(r.terminalId);
+  assert.equal(await r.registration.getTerminalRegistration(), null);
+  await r.registration.registerReceptionTerminal("Reapply after event end");
+  assert.equal((await r.registration.getTerminalRegistration()).approved, false);
+  assert.equal(await r.registration.resetReceptionTerminalRegistration(), r.terminalId);
+  assert.equal(await r.registration.getTerminalRegistration(), null);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminals", r.terminalId))).data().status, "offline");
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminalOwners", r.terminalId))).data().enabled, true);
+  await r.registration.registerReceptionTerminal("Reapply again");
+  await c.management.approveTerminal(r.terminalId);
+  assert.equal((await r.registration.getTerminalRegistration()).approved, true);
+});
+
+test("republishing settings advances the event and bundle version so reception refreshes them", async () => {
+  const c = clients();
+  const first = await createPublished(c);
+  const second = await c.publisher.publishEventBundle(makeEvent(), {...settings, reentryEnabled: false}, []);
+  assert.equal(second.event.dataVersion, first.event.dataVersion + 1);
+  const payload = await c.downloader.getCurrentFirebaseEventAuthPayload();
+  assert.equal(payload.dataVersion, second.event.dataVersion);
+  const downloaded = await c.downloader.downloadEventData(payload, "T-FLOW-RECEPTION");
+  assert.equal(downloaded.localEvent.settings.reentryEnabled, false);
+});
+
+test("reapplication rejects wrong owners, revoked grants, management roles, privilege changes and malformed schemas", async () => {
+  const c = clients();
+  const r = await registeredReception(c);
+  await c.management.revokeManagedReception(r.terminalId);
+  const applicationRef = doc(r.db, "terminalApplications", r.terminalId);
+  const terminalRef = doc(r.db, "terminals", r.terminalId);
+  const now = "2026-10-27T01:00:00.000Z";
+  const application = {terminalId: r.terminalId, requestedByUid: r.uid, requestedRole: "reception",
+    name: "Next event", type: "Web / iPad", status: "pending", requestedAt: now, updatedAt: now};
+  const terminalUpdate = {name: application.name, type: application.type, status: "pending", requestedAt: now, updatedAt: now};
+  for (const tamper of [
+    {requestedRole: "management"}, {requestedByUid: "someone-else"}, {name: "x".repeat(81)},
+    {name: 42}, {extra: true}, {status: "approved"}, {updatedAt: "x".repeat(41)},
+  ]) {
+    const batch = firestore.writeBatch(r.db);
+    batch.set(applicationRef, {...application, ...tamper});
+    batch.update(terminalRef, terminalUpdate);
+    await assertFails(batch.commit());
+  }
+  for (const tamper of [{approved: true}, {managementApproved: true}, {admin: true}, {role: "both"}, {requestedByUid: "elsewhere"}]) {
+    const batch = firestore.writeBatch(r.db);
+    batch.set(applicationRef, application);
+    batch.update(terminalRef, {...terminalUpdate, ...tamper});
+    await assertFails(batch.commit());
+  }
+  await assertFails(setDoc(applicationRef, application)); // Missing paired terminal update.
+  await assertFails(updateDoc(terminalRef, terminalUpdate)); // Missing paired application update.
+  await assertFails(setDoc(doc(env.unauthenticatedContext().firestore(), "terminalApplications", r.terminalId), application));
+  await assertFails(setDoc(doc(env.authenticatedContext("other-user").firestore(), "terminalApplications", r.terminalId), application));
+  for (const [path, changes] of [
+    [["terminalOwners", r.terminalId], {enabled: false}],
+    [["terminalInstallations", r.uid], {approved: false}],
+  ]) {
+    await env.withSecurityRulesDisabled(async ctx => {await updateDoc(doc(ctx.firestore(), ...path), changes);});
+    const batch = firestore.writeBatch(r.db);
+    batch.set(applicationRef, application);batch.update(terminalRef, terminalUpdate);
+    await assertFails(batch.commit());
+    await env.withSecurityRulesDisabled(async ctx => {await updateDoc(doc(ctx.firestore(), ...path), Object.fromEntries(Object.keys(changes).map(key => [key, true])));});
+  }
+  // A manager's persistent installation must not be converted into a receptionist.
+  const managerReception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  assert.equal(await managerReception.requestReceptionEventReapproval("Manager reception"), false);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "terminals", "T-FLOW-MANAGER"))).data().managementApproved, true);
 });
 
 

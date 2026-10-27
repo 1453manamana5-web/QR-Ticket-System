@@ -73,8 +73,11 @@ export async function publishEventBundle(
   const previousTargets = existingEvents.docs
     .filter(item => item.id !== event.eventId && item.data().receptionTarget === true);
   if (previousTargets.length > 448) throw new Error("TOO_MANY_RECEPTION_TARGETS");
+  const storedEvent = existingEvents.docs.find(item => item.id === event.eventId)?.data();
+  const savedVersion = Number.isSafeInteger(storedEvent?.dataVersion) ? Number(storedEvent?.dataVersion) : 1;
   const publishedEvent: Event = {
     ...event,
+    dataVersion: Math.max(1, event.dataVersion, savedVersion) + (storedEvent?.authToken ? 1 : 0),
     eventStatus: event.eventStatus === "finished" ? "finished" : "ready",
   };
   const bundle: PublishedEventBundle = {

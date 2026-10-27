@@ -98,6 +98,7 @@ test("reception registration atomically creates the application and pending term
     "firebase/firestore": {
       collection: (...args) => args.slice(1).join("/"), doc: (...args) => args.slice(1).join("/"),
       query: (...args) => args, where: (...args) => args, limit: n => n,
+      getDoc: async () => ({ exists: () => false }),
       getDocs: async () => ({ docs: [] }),
       writeBatch: () => ({ set: (ref, data) => writes.push({ ref, data }), commit: async () => { commits++; } }),
     },

@@ -25,18 +25,20 @@ function isFrontCameraLabel(cameraLabel:string){
     label.includes("インカメラ");
 }
 
-function stopAllVideoTracks(){
-  document.querySelectorAll("video").forEach(video=>{
+// Serialize start/stop across StrictMode remounts and reader changes. An old
+// asynchronous cleanup must finish before another reader acquires the camera.
+let cameraLifecycle=Promise.resolve();
+function enqueueCameraOperation(operation:()=>Promise<void>){
+  cameraLifecycle=cameraLifecycle.then(operation,operation);
+}
+
+function stopVideoTracks(reader:HTMLElement|null){
+  reader?.querySelectorAll("video").forEach(video=>{
     const stream=video.srcObject;
     if(stream instanceof MediaStream){
-      stream.getTracks().forEach(track=>{
-        try{track.stop();}catch(error){console.warn("映像トラックを停止できませんでした",error);}
-      });
+      stream.getTracks().forEach(track=>track.stop());
       video.srcObject=null;
     }
-    try{video.pause();}catch{}
-    video.removeAttribute("src");
-    try{video.load();}catch{}
   });
 }
 
@@ -73,6 +75,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
   useEffect(()=>{
     let active=true;
     let scanner:Html5Qrcode|null=null;
+    const readerElement=document.getElementById(readerId);
     let scanLocked=false;
     let lastDecodedText="";
     let lastDecodedAt=0;
@@ -84,16 +87,13 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         try{if(current.isScanning)await current.stop();}catch(error){console.warn("QRカメラの停止に失敗しました",error);}
         try{current.clear();}catch(error){console.warn("QR表示領域のクリアに失敗しました",error);}
       }
-      // html5-qrcodeの停止後もiPadで映像トラックが残る場合に備えて明示停止。
-      stopAllVideoTracks();
+      // Limit fallback cleanup to this reader; never stop another app's video.
+      stopVideoTracks(readerElement);
     };
 
     const startCamera=async()=>{
       try{
-        await stopCamera();
         if(!active)return;
-
-        const readerElement=document.getElementById(readerId);
         if(!readerElement)throw new Error("カメラ表示領域が見つかりません。");
         readerElement.innerHTML="";
 
@@ -169,11 +169,11 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
       }
     };
 
-    void startCamera();
+    enqueueCameraOperation(startCamera);
     return()=>{
       active=false;
       scanLocked=true;
-      void stopCamera();
+      enqueueCameraOperation(stopCamera);
     };
   },[readerId]);
 
