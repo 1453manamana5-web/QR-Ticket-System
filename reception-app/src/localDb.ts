@@ -299,29 +299,33 @@ export async function saveReceptionTransaction(
 ): Promise<void> {
   const database = await openDatabase();
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(
-      [STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
-      "readwrite"
-    );
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
+        "readwrite"
+      );
 
-    transaction.objectStore(STORES.tickets).put(ticket);
-    transaction.objectStore(STORES.receptionRecords).put(record);
+      transaction.objectStore(STORES.tickets).put(ticket);
+      transaction.objectStore(STORES.receptionRecords).put(record);
 
-    const queueStore = transaction.objectStore(STORES.syncQueue);
-    const existing = queueStore.getAll();
-    existing.onsuccess = () => {
-      const sequence = (existing.result as SyncQueueItem[])
-        .reduce((maximum, item) => Math.max(maximum, item.sequence ?? 0), 0) + 1;
-      queueStore.put({recordId: record.recordId, status: "pending", retryCount: 0, sequence} satisfies SyncQueueItem);
-    };
+      const queueStore = transaction.objectStore(STORES.syncQueue);
+      const existing = queueStore.getAll();
+      existing.onsuccess = () => {
+        const sequence = (existing.result as SyncQueueItem[])
+          .reduce((maximum, item) => Math.max(maximum, item.sequence ?? 0), 0) + 1;
+        queueStore.put({recordId: record.recordId, status: "pending", retryCount: 0, sequence} satisfies SyncQueueItem);
+      };
 
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("受付データを保存できませんでした"));
-  });
-
-  database.close();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("受付データを保存できませんでした"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("受付データの保存が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function getReceptionRecord(recordId: string): Promise<ReceptionRecord | null> {

@@ -678,7 +678,7 @@ export default function App(){
   },[localEvent,mode,busy,remoteStopped,syncPendingRecords]);
 
   const switchMode=()=>{
-    if(remoteStopped)return;
+    if(remoteStopped||scanProcessingRef.current)return;
     if(localEvent?.terminalId)localStorage.setItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`,new Date().toISOString());
     setMode(current=>current==="entry"?"exit":"entry");
     setResult(null);
@@ -964,7 +964,7 @@ export default function App(){
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
-                <button type="button" className="secondary" onClick={()=>{speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
+                <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>
           </div>
