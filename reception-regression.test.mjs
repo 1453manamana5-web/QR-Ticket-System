@@ -400,3 +400,69 @@ test("partial shell updates never activate or replace the offline entry point",a
     assert.equal(stored.get(index),old);
   }
 });
+
+test("aborted local reception save rejects and leaves no partial record or ticket change",async()=>{
+  const factory=new IDBFactory();let abortNext=false;
+  const local=load("./reception-app/src/localDb.ts",{},{indexedDB:{open:(...args)=>{
+    const request=factory.open(...args);
+    request.addEventListener("success",()=>{
+      const db=request.result,transaction=db.transaction.bind(db);
+      db.transaction=(...args)=>{
+        const tx=transaction(...args);
+        if(abortNext&&args[1]==="readwrite"){
+          abortNext=false;
+          const objectStore=tx.objectStore.bind(tx);
+          tx.objectStore=name=>{
+            const store=objectStore(name);
+            if(name==="syncQueue"){
+              const put=store.put.bind(store);
+              store.put=(...values)=>{
+                const request=put(...values);
+                request.addEventListener("success",()=>tx.abort());
+                return request;
+              };
+            }
+            return store;
+          };
+        }
+        return tx;
+      };
+    });return request;
+  }}});
+  await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  abortNext=true;
+  let settled=false;
+  const saving=local.saveReceptionTransaction({...makeTicket(),currentStatus:"inside"},record("aborted"));
+  const checked=assert.rejects(saving,/中断/).then(()=>{settled=true;});
+  for(let i=0;i<50&&!settled;i++)await nextTurn();
+  assert.equal(settled,true,"aborted save must not leave reception permanently busy");
+  await checked;
+  assert.equal((await local.getTicket("ticket-one")).currentStatus,"unused");
+  assert.equal(await local.getReceptionRecord("aborted"),null);
+  assert.equal((await local.getPendingSyncItems()).length,0);
+});
+
+test("exit-mode ready preview displays exit instead of a stale entry result",async()=>{
+  const h=await harness();
+  try{
+    await h.control("出口受付","2026-10-27T01:00:00.000Z");
+    await h.click("受付結果を試験表示");
+    assert.match(h.text(),/退出OK/);
+    assert.doesNotMatch(h.text(),/入場OK/);
+  }finally{await h.close();}
+});
+
+test("manual gate switch cannot change mode during an in-flight scan",async()=>{
+  let release;
+  const h=await harness({latestTicket:()=>new Promise(resolve=>{release=()=>resolve(makeTicket());})});
+  try{
+    await h.click("受付を開始する");
+    const scan=h.scan("ticket-one");
+    for(let i=0;i<50&&!release;i++)await nextTurn();
+    assert.ok(release);
+    await act(async()=>{h.renderer.root.findByProps({"aria-label":"入口受付。左右にスワイプして出口受付へ切り替え"}).props.onClick();});
+    release();await scan;
+    assert.ok(h.renderer.root.findByProps({"aria-label":"入口受付。左右にスワイプして出口受付へ切り替え"}));
+    assert.equal((await h.local.getPendingSyncItems()).length,1);
+  }finally{await h.close();}
+});
