@@ -1037,10 +1037,8 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     };
     setError("");
-    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
-    void saveTicket(event.eventId, nextTicket).catch(reason => {
+    void saveTicket(event.eventId, nextTicket, ["basicInfo"]).catch(reason => {
       console.error(reason);
-      setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? target : ticket));
       setError("チケット番号をFirebaseへ保存できませんでした。通信状態とFirestoreの権限を確認してください。");
     });
   };
@@ -1049,8 +1047,7 @@ export default function App() {
     const target = tickets.find(ticket => ticket.ticketId === ticketId);
     if (!target) return;
     const nextTicket = { ...target, currentStatus: status, updatedAt: new Date().toISOString() };
-    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
-    void saveTicket(event.eventId, nextTicket).catch(reason => {
+    void saveTicket(event.eventId, nextTicket, ["currentStatus"]).catch(reason => {
       console.error(reason);
       setError("チケット状態をFirebaseへ保存できませんでした。");
     });
@@ -1060,8 +1057,7 @@ export default function App() {
     const target = tickets.find(ticket => ticket.ticketId === ticketId);
     if (!target) return;
     const nextTicket = { ...target, valid: !target.valid, updatedAt: new Date().toISOString() };
-    setTickets(current => current.map(ticket => ticket.ticketId === ticketId ? nextTicket : ticket));
-    void saveTicket(event.eventId, nextTicket).catch(reason => {
+    void saveTicket(event.eventId, nextTicket, ["valid"]).catch(reason => {
       console.error(reason);
       setError("チケットの有効状態をFirebaseへ保存できませんでした。");
     });

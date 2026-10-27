@@ -128,10 +128,22 @@ export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<v
   await syncPublishedTicketInventory(eventId, tickets);
 }
 
-export async function saveTicket(eventId: string, ticket: Ticket): Promise<void> {
+export async function saveTicket(
+  eventId: string,
+  ticket: Ticket,
+  fields?: Array<"basicInfo" | "valid" | "currentStatus">
+): Promise<void> {
   const db = getFirebaseDb();
-  await setDoc(doc(db, "events", eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-  // 1枚の変更でも公開データ版数を更新し、受付端末が再ダウンロードできるようにする。
+  const ref = doc(db, "events", eventId, "tickets", ticket.ticketId);
+  if (fields) {
+    // Editing one field must not roll back a reception performed on another terminal.
+    // updateDoc also prevents a deleted ticket from being recreated by a stale editor.
+    const changes: Record<string, unknown> = {updatedAt: ticket.updatedAt};
+    for (const field of fields) changes[field] = ticket[field];
+    await updateDoc(ref, changes);
+  } else {
+    await setDoc(ref, ticket, {merge: true});
+  }
   const currentTickets = await loadEventTickets(eventId);
   await syncPublishedTicketInventory(eventId, currentTickets);
 }

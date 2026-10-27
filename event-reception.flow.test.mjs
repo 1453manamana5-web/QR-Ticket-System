@@ -425,3 +425,19 @@ for (const scenario of ["disabled-owner", "revoked-installation", "different-own
     await assert.rejects(reception.syncReceptionRecord({ recordId: "denied", type: "entry", timestamp: "2026-10-25T03:00:00.000Z", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-MANAGER" }, makeTicket("flow-event")), /permission/i);
   });
 }
+
+test("manager field edits preserve a newer reception and cannot resurrect deleted tickets", async () => {
+  const c = clients();
+  await createPublished(c);
+  const stale = makeTicket("flow-event");
+  await c.reception.syncReceptionRecord({recordId:"concurrent-entry",eventId:"flow-event",ticketId:"ticket-1",terminalId:"T-FLOW-RECEPTION",type:"entry",timestamp:"2026-10-25T01:00:00.000Z"});
+  await c.management.saveTicket("flow-event", {...stale,valid:false}, ["valid"]);
+  let current=(await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data();
+  assert.equal(current.currentStatus,"inside");assert.equal(current.valid,false);
+  await c.management.saveTicket("flow-event", {...stale,basicInfo:{ticketNumber:42}}, ["basicInfo"]);
+  current=(await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data();
+  assert.equal(current.currentStatus,"inside");assert.equal(current.valid,false);assert.equal(current.basicInfo.ticketNumber,42);
+  await c.management.deleteTicket("flow-event","ticket-1");
+  await assert.rejects(c.management.saveTicket("flow-event",stale,["valid"]));
+  assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).exists(),false);
+});
