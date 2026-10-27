@@ -1,9 +1,10 @@
+import type {Transaction} from "firebase/firestore";
 import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
 export type MemberRecord = { memberId: string; memberNumber: number; name: string; };
-export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; admin?: boolean; subAdmin?: boolean; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; };
+export type TerminalRecord = { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; mode: "入口受付" | "出口受付" | "停止"; desiredMode?: "入口受付" | "出口受付" | "停止"; desiredModeUpdatedAt?: string; status: "online" | "offline" | "pending"; approved: boolean; lastSeen: string | null; networkMbps: number | null; battery: number | null; role?: "management" | "reception" | "both"; admin?: boolean; subAdmin?: boolean; managementApproved?: boolean; receptionApproved?: boolean; syncPendingCount?: number; receptionMode?: "entry" | "exit" | "stopped"; receptionEventId?: string; receptionReportedAt?: string; };
 export type AnalysisRecord = { eventId: string; eventName: string; eventDate: string; total: number; unused: number; inside: number; exited: number; savedAt: string; };
 
 export async function deleteEvent(eventId: string): Promise<void> {
@@ -73,6 +74,7 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
     const nextDataVersion = Math.max(1, Number(eventData.dataVersion) || 1) + (savedBundle ? 1 : 0);
     tx.set(eventRef, {
       ticketCount: tickets.length,
+      inventoryRevision:(Number(eventData.inventoryRevision)||0)+1,
       ...(savedBundle ? { dataVersion: nextDataVersion } : {}),
       updatedAt: now,
     }, { merge: true });
@@ -128,32 +130,87 @@ export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<v
   await syncPublishedTicketInventory(eventId, tickets);
 }
 
-export async function saveTicket(
-  eventId: string,
-  ticket: Ticket,
-  fields?: Array<"basicInfo" | "valid" | "currentStatus">
-): Promise<void> {
+async function readInventoryMetadata(tx: Transaction, eventId: string) {
+  const eventRef = doc(getFirebaseDb(), "events", eventId);
+  const event = await tx.get(eventRef);
+  if (!event.exists()) throw new Error("EVENT_NOT_FOUND");
+  const data = event.data();
+  const bundleRef = typeof data.authToken === "string" && data.authToken ? doc(getFirebaseDb(), "eventBundles", data.authToken) : null;
+  const bundle = bundleRef ? await tx.get(bundleRef) : null;
+  return {eventRef,data,bundleRef,bundle};
+}
+function writeInventoryMetadata(tx: Transaction, metadata: Awaited<ReturnType<typeof readInventoryMetadata>>, delta: number) {
+  const {eventRef,data,bundleRef,bundle} = metadata;
+  const version = Math.max(1,Number(data.dataVersion)||1) + (bundle?.exists() ? 1 : 0);
+  const count = Math.max(0,(Number(data.ticketCount)||0)+delta);
+  const now = new Date().toISOString();
+  tx.update(eventRef,{ticketCount:count,inventoryRevision:(Number(data.inventoryRevision)||0)+1,updatedAt:now,...(bundle?.exists()?{dataVersion:version}:{})});
+  if(bundleRef && bundle?.exists())tx.set(bundleRef,{
+    event:{...bundle.data().event,eventId:eventRef.id,dataVersion:version},ticketCount:count,publishedAt:now,
+  },{merge:true});
+}
+
+/** Add only newly issued tickets; existing reception state is never rewritten. */
+export async function appendTickets(eventId: string, tickets: Ticket[], enforceNewNumbers = false): Promise<void> {
   const db = getFirebaseDb();
-  const ref = doc(db, "events", eventId, "tickets", ticket.ticketId);
-  if (fields) {
-    // Editing one field must not roll back a reception performed on another terminal.
-    // updateDoc also prevents a deleted ticket from being recreated by a stale editor.
-    const changes: Record<string, unknown> = {updatedAt: ticket.updatedAt};
-    for (const field of fields) changes[field] = ticket[field];
-    await updateDoc(ref, changes);
-  } else {
-    await setDoc(ref, ticket, {merge: true});
+  const ids = new Set<string>();
+  for (const ticket of tickets) {
+    if (!ticket.ticketId || ticket.ticketId.includes("/") || ticket.eventId !== eventId || ids.has(ticket.ticketId)) throw new Error("INVALID_OR_DUPLICATE_TICKET_ID");
+    ids.add(ticket.ticketId);
   }
-  const currentTickets = await loadEventTickets(eventId);
-  await syncPublishedTicketInventory(eventId, currentTickets);
+  for (let start = 0; start < tickets.length; start += 400) {
+    const chunk = tickets.slice(start, start + 400);
+    await runTransaction(db, async tx => {
+      const metadata = await readInventoryMetadata(tx,eventId);
+      const numbers = chunk.map(ticket=>Number(ticket.basicInfo.ticketNumber));
+      if (enforceNewNumbers && (numbers.some(number=>!Number.isSafeInteger(number)||number<1) || Math.min(...numbers) <= (Number(metadata.data.lastIssuedNumber)||0))) throw new Error("TICKET_NUMBER_CONFLICT_RETRY");
+      const refs = chunk.map(ticket => doc(db,"events",eventId,"tickets",ticket.ticketId));
+      const snapshots = await Promise.all(refs.map(ref => tx.get(ref)));
+      if (snapshots.some(snapshot => snapshot.exists())) throw new Error("TICKET_ALREADY_EXISTS");
+      chunk.forEach((ticket,index)=>tx.set(refs[index],ticket));
+      writeInventoryMetadata(tx,metadata,chunk.length);
+      if(enforceNewNumbers)tx.update(metadata.eventRef,{lastIssuedNumber:Math.max(...numbers)});
+    });
+  }
+}
+
+export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array<"basicInfo" | "valid" | "currentStatus">): Promise<void> {
+  if (ticket.eventId !== eventId || !ticket.ticketId || ticket.ticketId.includes("/")) throw new Error("TICKET_EVENT_ID_MISMATCH");
+  const db = getFirebaseDb();
+  const ref = doc(db,"events",eventId,"tickets",ticket.ticketId);
+  let expectedRevision:number|undefined;
+  if(fields?.includes("basicInfo") && ticket.basicInfo.ticketNumber !== undefined){
+    const number=Number(ticket.basicInfo.ticketNumber);
+    if(!Number.isSafeInteger(number)||number<1)throw new Error("INVALID_TICKET_NUMBER");
+    const before = await getDocFromServer(doc(db,"events",eventId));
+    expectedRevision=Number(before.data()?.inventoryRevision)||0;
+    const inventory=await loadEventTickets(eventId);
+    if(inventory.some(item=>item.ticketId!==ticket.ticketId && Number(item.basicInfo.ticketNumber)===number))throw new Error("DUPLICATE_TICKET_NUMBER");
+  }
+  await runTransaction(db,async tx=>{
+    const metadata = await readInventoryMetadata(tx,eventId);
+    const existing = await tx.get(ref);
+    if(expectedRevision !== undefined && expectedRevision !== (Number(metadata.data.inventoryRevision)||0))throw new Error("TICKET_CHANGED_RETRY");
+    if(fields){
+      if(!existing.exists())throw new Error("TICKET_NOT_FOUND");
+      const changes:Record<string,unknown> = {updatedAt:ticket.updatedAt};
+      for(const field of fields)changes[field]=ticket[field];
+      tx.update(ref,changes);
+    }else tx.set(ref,ticket,{merge:true});
+    writeInventoryMetadata(tx,metadata,existing.exists()?0:1);
+  });
 }
 
 export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
   const db = getFirebaseDb();
-  const { deleteDoc } = await import("firebase/firestore");
-  await deleteDoc(doc(db, "events", eventId, "tickets", ticketId));
-  const remainingTickets = await loadEventTickets(eventId);
-  await syncPublishedTicketInventory(eventId, remainingTickets);
+  const ref = doc(db,"events",eventId,"tickets",ticketId);
+  await runTransaction(db,async tx=>{
+    const metadata = await readInventoryMetadata(tx,eventId);
+    const ticket = await tx.get(ref);
+    if(!ticket.exists())return;
+    tx.delete(ref);
+    writeInventoryMetadata(tx,metadata,-1);
+  });
 }
 
 export function subscribeTickets(eventId: string, onChange: (tickets: Ticket[]) => void, onError: (error: unknown) => void): () => void {
@@ -532,39 +589,13 @@ export async function revokeManagedReception(targetTerminalId: string): Promise<
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
   await ensureFirebaseAuth();
   const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
-  if (!ownTerminalId || terminal.terminalId !== ownTerminalId) {
-    throw new Error("OWN_TERMINAL_ONLY");
-  }
-  const pendingCount = terminal.syncPendingCount ?? 0;
-  if (!Number.isSafeInteger(pendingCount) || pendingCount < 0 || pendingCount > 100000) {
-    throw new Error("INVALID_PENDING_SYNC_COUNT");
-  }
-  const db = getFirebaseDb();
-  const terminalRef = doc(db, "terminals", ownTerminalId);
-  const timestamp = new Date().toISOString();
-  await updateDoc(terminalRef, {
-    status: "online",
-    lastSeen: timestamp,
-    updatedAt: timestamp,
-    syncPendingCount: pendingCount,
-    ...(typeof terminal.networkMbps === "number" && Number.isFinite(terminal.networkMbps)
-      ? { networkMbps: terminal.networkMbps } : {}),
-  });
-
+  if(!ownTerminalId || terminal.terminalId!==ownTerminalId)throw new Error("OWN_TERMINAL_ONLY");
   const state = await readOwnTerminalState();
-  if (state.terminalId !== ownTerminalId || !state.terminal) {
-    throw new Error("OWN_TERMINAL_NOT_APPROVED");
-  }
-  if (state.terminal.managementApproved === true &&
-      (state.terminal.role === "management" || state.terminal.role === "both")) {
-    const patch: Record<string, unknown> = { updatedAt: timestamp, mode: terminal.mode };
-    if (typeof terminal.name === "string" && terminal.name.trim() &&
-        terminal.name.trim() !== state.terminal.name) {
-      if (terminal.name.trim().length > 80) throw new Error("TERMINAL_NAME_TOO_LONG");
-      patch.name = terminal.name.trim();
-    }
-    await updateDoc(terminalRef, patch);
-  }
+  if(state.terminalId!==ownTerminalId || state.terminal?.managementApproved!==true || !["management","both"].includes(String(state.terminal.role)))throw new Error("OWN_TERMINAL_NOT_APPROVED");
+  const name=terminal.name.trim();
+  if(!name || name.length>80)throw new Error("INVALID_TERMINAL_NAME");
+  // Renaming is independent of reception mode and unsent counts.
+  await updateDoc(doc(getFirebaseDb(),"terminals",ownTerminalId),{name,updatedAt:new Date().toISOString()});
 }
 
 
@@ -579,12 +610,15 @@ export async function saveManagementTerminalHeartbeat(terminalId: string): Promi
   await ensureFirebaseAuth();
   const networkMbps = getManagementBrowserDownlink();
   const timestamp = new Date().toISOString();
-  await updateDoc(doc(getFirebaseDb(), "terminals", terminalId), {
-    status: "online",
-    lastSeen: timestamp,
-    updatedAt: timestamp,
-    syncPendingCount: 0,
-    ...(networkMbps !== null ? { networkMbps } : {}),
+  const ref=doc(getFirebaseDb(),"terminals",terminalId);
+  await runTransaction(getFirebaseDb(),async tx=>{
+    const current=await tx.get(ref);
+    if(!current.exists())throw new Error("TERMINAL_NOT_FOUND");
+    tx.update(ref,{
+      status:"online",lastSeen:timestamp,updatedAt:timestamp,
+      ...(!("syncPendingCount" in current.data())?{syncPendingCount:0}:{}),
+      ...(networkMbps!==null?{networkMbps}:{}),
+    });
   });
   return networkMbps;
 }
@@ -669,7 +703,10 @@ function terminalFromDocument(terminalId: string, value: Record<string, unknown>
     subAdmin: value.subAdmin === true,
     managementApproved: value.managementApproved === true,
     receptionApproved: value.receptionApproved === true,
-    syncPendingCount: typeof value.syncPendingCount === "number" ? value.syncPendingCount : 0,
+    ...(Number.isSafeInteger(value.syncPendingCount) ? {syncPendingCount: Number(value.syncPendingCount)} : {}),
+    ...(value.receptionMode === "entry" || value.receptionMode === "exit" || value.receptionMode === "stopped" ? {receptionMode: value.receptionMode} : {}),
+    ...(typeof value.receptionEventId === "string" ? {receptionEventId: value.receptionEventId} : {}),
+    ...(value.receptionReportedAt && typeof value.receptionReportedAt === "object" && "toDate" in value.receptionReportedAt && typeof value.receptionReportedAt.toDate === "function" ? {receptionReportedAt:value.receptionReportedAt.toDate().toISOString()} : {}),
   };
 }
 
@@ -719,7 +756,6 @@ export async function loadTerminals(): Promise<TerminalRecord[]> {
 }
 export async function loadReceptionSettings(eventId: string): Promise<ReceptionSettings | null> {
   const db = getFirebaseDb();
-  const snapshot = await getDocs(collection(db, "events", eventId, "settings"));
-  const first = snapshot.docs[0]?.data();
-  return first ? first as ReceptionSettings : null;
+  const snapshot = await getDoc(doc(db, "events", eventId, "settings", "reception"));
+  return snapshot.exists() ? snapshot.data() as ReceptionSettings : null;
 }

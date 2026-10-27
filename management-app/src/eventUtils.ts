@@ -21,7 +21,7 @@ export function createEventId() {
     String(now.getMonth() + 1).padStart(2, "0"),
     String(now.getDate()).padStart(2, "0"),
   ].join("");
-  const random = crypto.getRandomValues(new Uint32Array(1))[0].toString(36).toUpperCase().slice(0, 4);
+  const random = [...crypto.getRandomValues(new Uint32Array(2))].map(value=>value.toString(36).toUpperCase().padStart(7,"0")).join("");
   return `EV-${stamp}-${random}`;
 }
 

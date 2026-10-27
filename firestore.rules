@@ -4,6 +4,8 @@ rules_version = '2';
 // terminalApplications: exact bounded registration fields; pending only.
 // terminals: reception-only, already revoked; only name/type/status/times change.
 // Owner/installation mappings and all approval/role fields remain immutable.
+// Heartbeat additions (optional): receptionMode entry/exit/stopped; receptionEventId
+// string 1..160; receptionReportedAt server timestamp. They confer no permissions.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -70,6 +72,11 @@ service cloud.firestore {
         );
     }
 
+    function validReceptionTimestamp(value) {
+      return value is string && value.size() >= 20 && value.size() <= 40
+        && value.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,3})?Z$");
+    }
+
     function validReceptionTicketUpdate(eventId, ticketId) {
       let recordId = request.resource.data.lastReceptionRecordId;
       let beforeStatus = resource.data.currentStatus;
@@ -82,11 +89,12 @@ service cloud.firestore {
         && resource.data.eventId == eventId
         && resource.data.valid == true
         && request.resource.data.valid == resource.data.valid
-        && recordId is string
+        && recordId is string && recordId.size() > 0 && recordId.size() <= 160
+        && !exists(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "currentStatus", "updatedAt", "lastReceptionRecordId"
         ])
-        && request.resource.data.updatedAt is string
+        && validReceptionTimestamp(request.resource.data.updatedAt)
         && existsAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId))
         && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.recordId == recordId
         && getAfter(/databases/$(database)/documents/events/$(eventId)/receptionRecords/$(recordId)).data.eventId == eventId
@@ -109,14 +117,14 @@ service cloud.firestore {
       return approvedReceptionTerminal()
         && activeReceptionEvent(eventId)
         && data.keys().hasOnly(["recordId", "eventId", "ticketId", "terminalId", "type", "timestamp"])
-        && data.recordId == recordId
+        && data.recordId == recordId && recordId.size() > 0 && recordId.size() <= 160
         && data.eventId == eventId
         && data.ticketId is string
         && data.ticketId.size() > 0
         && data.ticketId.size() <= 160
         && data.terminalId == receptionTerminalId()
         && data.type in ["entry", "exit", "reentry"]
-        && data.timestamp is string
+        && validReceptionTimestamp(data.timestamp)
         && exists(ticketPath)
         && get(ticketPath).data.valid == true
         && existsAfter(ticketPath)
@@ -167,7 +175,7 @@ service cloud.firestore {
         && ((ownerMatches && (managementActive || receptionActive))
           || (installationMatches && receptionActive))
         && next.diff(current).affectedKeys().hasOnly([
-          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name"
+          "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name", "receptionMode", "receptionEventId", "receptionReportedAt"
         ])
         && next.status == "online"
         && next.lastSeen is string
@@ -175,6 +183,10 @@ service cloud.firestore {
         && next.syncPendingCount is int
         && next.syncPendingCount >= 0
         && next.syncPendingCount <= 100000
+        && (!next.keys().hasAny(["receptionMode"]) || next.receptionMode in ["entry", "exit", "stopped"])
+        && (!next.keys().hasAny(["receptionReportedAt"]) || next.receptionReportedAt is timestamp)
+        && (!next.diff(current).affectedKeys().hasAny(["receptionMode", "receptionEventId", "receptionReportedAt"]) || next.receptionReportedAt == request.time)
+        && (!next.keys().hasAny(["receptionEventId"]) || (next.receptionEventId is string && next.receptionEventId.size() > 0 && next.receptionEventId.size() <= 160))
         && (!next.keys().hasAny(["networkMbps"])
           || (next.networkMbps is number && next.networkMbps >= 0 && next.networkMbps <= 10000))
         && (!next.diff(current).affectedKeys().hasAny(["mode"])
@@ -682,7 +694,7 @@ service cloud.firestore {
           "camera_failed", "event_load_failed", "sync_failed"
         ]
         && request.resource.data.mode in ["entry", "exit"]
-        && request.resource.data.timestamp is string
+        && validReceptionTimestamp(request.resource.data.timestamp)
         && request.resource.data.receivedAt == request.time
         && request.resource.data.keys().hasOnly([
           "errorId", "eventId", "terminalId", "category", "mode", "timestamp", "receivedAt"

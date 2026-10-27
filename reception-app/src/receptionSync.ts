@@ -1,6 +1,6 @@
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
-import { getPendingSyncItems } from "./localDb";
+import { getPendingSyncItems, getPendingReceptionErrorLogs } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 import { collection, doc, getDoc, getDocFromServer, getDocsFromServer, getDocs, limit, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
@@ -318,8 +318,14 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
 
 export async function getLatestReceptionTicket(eventId: string, ticketId: string): Promise<Ticket | null> {
   await ensureFirebaseAuth();
-  const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId));
-  return snapshot.exists() ? snapshot.data() as Ticket : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const snapshot = await Promise.race([
+      getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId)),
+      new Promise<never>((_resolve,reject) => { timer=setTimeout(()=>reject(Object.assign(new Error("受付確認の通信がタイムアウトしました"),{code:"deadline-exceeded"})),1500); })
+    ]);
+    return snapshot.exists() ? snapshot.data() as Ticket : null;
+  } finally { if(timer!==undefined)clearTimeout(timer); }
 }
 
 function getBrowserDownlink(): number | null {
@@ -329,9 +335,9 @@ function getBrowserDownlink(): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number): Promise<number | null> {
+export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number, eventId?: string): Promise<number | null> {
   await ensureFirebaseAuth();
-  const pendingCount = typeof syncPendingCount === "number" ? syncPendingCount : (await getPendingSyncItems()).length;
+  const pendingCount = typeof syncPendingCount === "number" ? syncPendingCount : (await getPendingSyncItems()).length + (await getPendingReceptionErrorLogs()).length;
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0 || pendingCount > 100000) {
     throw new Error("INVALID_PENDING_SYNC_COUNT");
   }
@@ -344,6 +350,7 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
     lastSeen: timestamp,
     updatedAt: timestamp,
     syncPendingCount: pendingCount,
+    ...(eventId ? {receptionMode: mode, receptionEventId: eventId, receptionReportedAt:serverTimestamp()} : {}),
     ...(networkMbps !== null ? { networkMbps } : {}),
   });
 

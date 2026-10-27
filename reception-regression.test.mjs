@@ -466,3 +466,119 @@ test("manual gate switch cannot change mode during an in-flight scan",async()=>{
     assert.equal((await h.local.getPendingSyncItems()).length,1);
   }finally{await h.close();}
 });
+
+test('invalid downloaded inventory is rejected before the previous offline data is replaced',async()=>{
+  const local=localDb();await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  for(const ticket of [{...makeTicket(),valid:'true'},{...makeTicket(),currentStatus:'broken'},{...makeTicket(),eventId:'wrong'},makeTicket(),{...makeTicket(),basicInfo:null}]){
+    const values=ticket===undefined?[]:[ticket];
+    if(ticket.valid===true&&ticket.currentStatus==='unused'&&ticket.eventId==='event-one'&&ticket.basicInfo)values.push(ticket);
+    const next={...makeEvent(),ticketCount:values.length};
+    await assert.rejects(local.prepareLocalEventData(next,values));
+    assert.equal((await local.getTicket('ticket-one')).valid,true);
+    assert.equal((await local.loadLocalEvent()).dataReady,true);
+  }
+});
+
+test('camera failure exposes a retry that remounts the reader and stopping leaves inventory intact',async()=>{
+  const h=await harness();try{
+    await h.click('受付を開始する');
+    const reader=h.renderer.root.findByType(h.Scanner),key=reader._fiber?.key;
+    await act(async()=>reader.props.onError('permission temporarily unavailable'));await h.flush();
+    assert.match(h.text(),/カメラを再起動/);
+    await h.click('カメラを再起動');
+    assert.ok(h.renderer.root.findByType(h.Scanner));
+    await h.click('受付を停止');assert.equal(h.renderer.root.findAllByType(h.Scanner).length,0);
+    assert.equal((await h.local.loadLocalEvent()).dataReady,true);
+    assert.equal((await h.local.countTickets('event-one')),1);
+  }finally{await h.close();}
+});
+
+for(const mode of ['entry','exit'])for(const status of ['unused','inside','exited'])for(const enabled of [true,false]){
+  test(`offline reception matrix: ${mode} ${status} settings=${enabled}`,async()=>{
+    const data={...makeEvent('event-one',2),settings:{entryEnabled:enabled,exitEnabled:enabled,reentryEnabled:enabled}};
+    const bundle=()=>({localEvent:data,tickets:[{...makeTicket(),currentStatus:status}],authPayload:{authToken:'token'}});
+    const h=await harness({automatic:async()=>bundle(),download:async()=>bundle()});
+    try{
+      await h.click('受付を開始する');h.navigator.onLine=false;
+      if(mode==='exit')await h.control('出口受付','2026-10-27T02:00:00.000Z');
+      await h.scan('ticket-one');
+      const allowed=enabled&&(mode==='entry'?status!=='inside':status==='inside');
+      assert.equal((await h.local.getPendingSyncItems()).length,allowed?1:0);
+      if(allowed)assert.equal((await h.local.getTicket('ticket-one')).currentStatus,mode==='exit'?'exited':'inside');
+      else assert.match(h.text(),/受付失敗/);
+    }finally{await h.close();}
+  });
+}
+
+test('delayed Japanese voice discovery never speaks the same result twice or revives an old scan',()=>{
+  const callbacks=new Set(),timers=[],spoken=[];
+  const synth={cancel(){},getVoices:()=>[],speak:value=>spoken.push(value.text),addEventListener:(_event,fn)=>callbacks.add(fn),removeEventListener:(_event,fn)=>callbacks.delete(fn)};
+  const source=readFileSync(new URL('./reception-app/src/App.tsx',import.meta.url),'utf8')+'\nexport {speakReception};';
+  const out={};new Function('exports','require','window','SpeechSynthesisUtterance',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,()=>({getReceptionAudioSettings:()=>({volume:1,voiceGuidance:true})}),{speechSynthesis:synth,setTimeout:fn=>timers.push(fn)},class{constructor(text){this.text=text;}});
+  out.speakReception('entry');out.speakReception('exit');
+  [...callbacks].forEach(fn=>fn());timers.forEach(fn=>fn());
+  assert.deepEqual(spoken,['ご来場ありがとうございました。']);
+});
+
+test('slow server reads have a bounded read-only deadline so downloaded inventory can be used',async()=>{
+  const sync=load('./reception-app/src/receptionSync.ts',{
+    './localDb':{},'./firebaseClient':{ensureFirebaseAuth:async()=>{},getFirebaseDb:()=>({})},
+    'firebase/firestore':{doc:()=>({}),getDocFromServer:()=>new Promise(()=>{})},
+  },{setTimeout:fn=>{fn();return 1;},clearTimeout:()=>{}});
+  await assert.rejects(sync.getLatestReceptionTicket('event-one','ticket-one'),error=>error.code==='deadline-exceeded');
+});
+
+test('version 7 queue upgrades preserve history and allocate new sequences after the largest stored sequence',async()=>{
+  const factory=new IDBFactory();
+  await new Promise((resolve,reject)=>{
+    const request=factory.open('qr-ticket-reception',7);
+    request.onupgradeneeded=()=>{
+      const db=request.result;
+      db.createObjectStore('event',{keyPath:'event.eventId'});
+      db.createObjectStore('tickets',{keyPath:'ticketId'}).createIndex('eventId','eventId');
+      db.createObjectStore('receptionRecords',{keyPath:'recordId'});
+      db.createObjectStore('syncQueue',{keyPath:'recordId'}).createIndex('status','status');
+    };
+    request.onerror=()=>reject(request.error);
+    request.onsuccess=()=>{
+      const db=request.result,tx=db.transaction(['receptionRecords','syncQueue'],'readwrite');
+      for(let i=1;i<=1000;i++){
+        tx.objectStore('receptionRecords').put(record('history-'+i));
+        tx.objectStore('syncQueue').put({recordId:'history-'+i,status:i===1000?'syncing':'synced',retryCount:0,sequence:i});
+      }
+      tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);
+    };
+  });
+  const local=load('./reception-app/src/localDb.ts',{},{indexedDB:factory});
+  await local.saveReceptionTransaction({...makeTicket(),currentStatus:'inside'},record('new-entry'));
+  const pending=await local.getPendingSyncItems();assert.deepEqual(pending.map(item=>item.recordId),['history-1000','new-entry']);
+  assert.equal(pending[1].sequence,1001);assert.ok(await local.getReceptionRecord('history-1'));
+});
+
+test('audio preferences apply gain without changing legacy WAV assets, and success can be disabled',async()=>{
+  let starts=0;const gains=[];
+  class Context{
+    state='running';destination={};resume=async()=>{};decodeAudioData=async()=>({});
+    createGain(){const node={gain:{value:0},connect(){},disconnect(){}};gains.push(node);return node;}
+    createBufferSource(){return {connect(){},disconnect(){},stop(){},start(){starts++;}};}
+  }
+  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),localStorage:{getItem:()=>JSON.stringify({volume:25,successSound:false,voiceGuidance:false})}});
+  await audio.playReceptionAudio('success');assert.equal(starts,0);
+  await audio.playReceptionAudio('error');assert.equal(starts,1);assert.equal(gains[0].gain.value,0.25);
+  assert.equal(audio.getReceptionAudioSettings().voiceGuidance,false);
+});
+
+test('simultaneous local readers cannot accept the same unused ticket twice',async()=>{
+  const local=localDb();await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  const expected=await local.getTicket('ticket-one');
+  const results=await Promise.allSettled([local.saveReceptionTransaction({...expected,currentStatus:'inside'},record('tab-a'),expected),local.saveReceptionTransaction({...expected,currentStatus:'inside'},record('tab-b'),expected)]);
+  assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+  assert.equal((await local.getPendingSyncItems()).length,1);
+});
+
+test('accepting a newly issued server ticket updates local inventory count for the next offline restart',async()=>{
+  const local=localDb();await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  const added={...makeTicket(),ticketId:'new-ticket',currentStatus:'inside'};
+  await local.saveReceptionTransaction(added,{...record('new-ticket-entry'),ticketId:'new-ticket'},null);
+  assert.equal((await local.loadLocalEvent()).ticketCount,2);assert.equal(await local.countTickets('event-one'),2);
+});

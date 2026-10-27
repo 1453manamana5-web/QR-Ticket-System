@@ -25,12 +25,20 @@ export function prepareReceptionAudio(){
   document.addEventListener("pointerdown",unlock,{passive:true});document.addEventListener("keydown",unlock);
   return()=>{document.removeEventListener("pointerdown",unlock);document.removeEventListener("keydown",unlock);};
 }
+export function getReceptionAudioSettings(){
+  try{
+    const value=JSON.parse(localStorage.getItem("qr-ticket-app-settings")??"{}");
+    return {volume:typeof value?.volume === "number" && Number.isFinite(value.volume)?Math.max(0,Math.min(100,value.volume))/100:1,successSound:value?.successSound!==false,voiceGuidance:value?.voiceGuidance!==false};
+  }catch{return {volume:1,successSound:true,voiceGuidance:true};}
+}
 export async function playReceptionAudio(kind:Sound){
   const version=kind==="detected"?resultVersion:++resultVersion;
   if(kind!=="detected")for(const previous of ["success","error"] as Sound[]){try{active.get(previous)?.stop();}catch{}fallback.get(previous)?.pause();}
+  const preferences=getReceptionAudioSettings();
+  if(preferences.volume===0 || (kind==="success"&&!preferences.successSound))return;
   try{
     const ctx=getContext(),ready=buffer(kind);
-    if(ctx&&ready){if(ctx.state!=="running")await ctx.resume();const data=await ready;if(version!==resultVersion)return;try{active.get(kind)?.stop();}catch{}const source=ctx.createBufferSource();source.buffer=data;source.connect(ctx.destination);active.set(kind,source);source.onended=()=>{source.disconnect();if(active.get(kind)===source)active.delete(kind);};source.start();return;}
-    const audio=element(kind);audio.pause();audio.currentTime=0;await audio.play();
+    if(ctx&&ready){if(ctx.state!=="running")await ctx.resume();const data=await ready;if(version!==resultVersion)return;try{active.get(kind)?.stop();}catch{}const source=ctx.createBufferSource();source.buffer=data;const gain=typeof ctx.createGain === "function"?ctx.createGain():null;if(gain){gain.gain.value=preferences.volume;gain.connect(ctx.destination);}source.connect(gain??ctx.destination);active.set(kind,source);source.onended=()=>{source.disconnect();gain?.disconnect();if(active.get(kind)===source)active.delete(kind);};source.start();return;}
+    const audio=element(kind);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;await audio.play();
   }catch(error){console.warn("受付音を再生できませんでした。画面を一度タップしてください。",error);}
 }

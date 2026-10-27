@@ -44,6 +44,7 @@ function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {},
     "firebase/firestore": { ...firestore, ...overrides },
     "./firebaseClient": { getFirebaseDb: () => db, ensureFirebaseAuth: async () => {}, getFirebaseUid: async () => uid },
     "./localDb": local,
+    "./operationSafety": file.endsWith("operationSafety.ts") ? {} : loadClientModule("./management-app/src/operationSafety.ts", db, uid, terminalId),
   };
   // Run trusted application source in the SDK's realm: Firestore intentionally
   // rejects plain objects created with another vm context's Object prototype.
@@ -80,6 +81,8 @@ const makeTicket = (eventId, ticketId = "ticket-1") => ({
   valid: true, updatedAt: "2026-10-25T00:00:00.000Z",
 });
 async function createPublished(c, event = makeEvent(), tickets = [makeTicket(event.eventId)]) {
+  const active = await getDocsFromServer(firestore.query(collection(c.managerDb,"events"),firestore.where("receptionTarget","==",true)));
+  for (const target of active.docs) if (target.id !== event.eventId) await c.reception.saveTerminalHeartbeat("T-FLOW-RECEPTION","stopped",0,target.id);
   await c.management.saveEvent(event);
   await c.management.saveReceptionSettings(event.eventId, settings);
   await c.management.saveTickets(event.eventId, tickets);
@@ -179,15 +182,12 @@ test("451 tickets cross the write-batch boundary and download to IndexedDB witho
 test("a failed publication batch leaves the previous published event available", async () => {
   const c = clients();
   await createPublished(c);
+  await c.reception.saveTerminalHeartbeat("T-FLOW-RECEPTION","stopped",0,"flow-event");
   const next = makeEvent("failed-next");
   await c.management.saveEvent(next);
   await c.management.saveTickets(next.eventId, [makeTicket(next.eventId)]);
   const failing = loadClientModule("./management-app/src/eventPublisher.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER", {}, {
-    writeBatch: db => {
-      const batch = firestore.writeBatch(db);
-      return { set: (...args) => batch.set(...args), update: (...args) => batch.update(...args),
-        commit: async () => { throw Error("simulated-publication-failure"); } };
-    },
+    runTransaction: async()=>{throw Error("simulated-publication-failure");},
   });
   await assert.rejects(failing.publishEventBundle(next, settings, []), /simulated-publication-failure/);
   assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event"))).data().receptionTarget, true);
@@ -440,4 +440,112 @@ test("manager field edits preserve a newer reception and cannot resurrect delete
   await c.management.deleteTicket("flow-event","ticket-1");
   await assert.rejects(c.management.saveTicket("flow-event",stale,["valid"]));
   assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).exists(),false);
+});
+
+test('append issuance never rolls back reception; simultaneous prefixes cannot issue the same numbers',async()=>{
+  const c=clients();await createPublished(c);
+  await c.reception.syncReceptionRecord({recordId:'live-entry',eventId:'flow-event',ticketId:'ticket-1',terminalId:'T-FLOW-RECEPTION',type:'entry',timestamp:'2026-10-25T01:00:00.000Z'});
+  const first={...makeTicket('flow-event','A000002'),basicInfo:{ticketNumber:2}};
+  const second={...makeTicket('flow-event','B000002'),basicInfo:{ticketNumber:2}};
+  const results=await Promise.allSettled([c.management.appendTickets('flow-event',[first],true),c.management.appendTickets('flow-event',[second],true)]);
+  assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+  const tickets=await c.management.loadEventTickets('flow-event');assert.equal(tickets.length,2);
+  assert.equal(tickets.find(ticket=>ticket.ticketId==='ticket-1').currentStatus,'inside');
+  const event=(await getDocFromServer(doc(c.managerDb,'events','flow-event'))).data();
+  const bundle=(await getDocFromServer(doc(c.managerDb,'eventBundles',event.authToken))).data();
+  assert.equal(event.ticketCount,2);assert.equal(bundle.ticketCount,2);assert.equal(bundle.event.dataVersion,event.dataVersion);
+});
+
+test('concurrent deletes and edits keep ticket counts and publication versions atomic',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[makeTicket('flow-event','first'),makeTicket('flow-event','second')]);
+  await Promise.all([c.management.deleteTicket('flow-event','first'),c.management.saveTicket('flow-event',{...makeTicket('flow-event','second'),valid:false},['valid'])]);
+  const event=(await getDocFromServer(doc(c.managerDb,'events','flow-event'))).data();
+  const bundle=(await getDocFromServer(doc(c.managerDb,'eventBundles',event.authToken))).data();
+  assert.equal(event.ticketCount,1);assert.equal(bundle.ticketCount,1);assert.equal(bundle.event.dataVersion,event.dataVersion);
+  assert.equal((await c.management.loadEventTickets('flow-event'))[0].valid,false);
+});
+
+test('publication cannot switch away while reception is active, offline or has unsent records',async()=>{
+  const c=clients();await createPublished(c);
+  const next=makeEvent('new-target');await c.management.saveEvent(next);
+  for(const [mode,count] of [['entry',0],['stopped',1]]){
+    await c.reception.saveTerminalHeartbeat('T-FLOW-RECEPTION',mode,count,'flow-event');
+    await assert.rejects(c.publisher.publishEventBundle(next,settings,[]),/RECEPTION_DATA_NOT_COLLECTED/);
+  }
+  await c.reception.saveTerminalHeartbeat('T-FLOW-RECEPTION','stopped',0,'flow-event');
+  await c.publisher.publishEventBundle(next,settings,[]);
+  assert.equal((await c.downloader.getCurrentFirebaseEventAuthPayload()).eventId,'new-target');
+});
+
+test('republishing stale UI tickets after deletion cannot resurrect them or reset active event status',async()=>{
+  const c=clients();await createPublished(c);const stale=makeTicket('flow-event');
+  await c.management.deleteTicket('flow-event','ticket-1');
+  const published=await c.publisher.publishEventBundle({...makeEvent(),eventStatus:'active'},settings,[stale]);
+  assert.equal(published.ticketCount,0);assert.equal(published.event.eventStatus,'active');
+  assert.equal((await c.management.loadEventTickets('flow-event')).length,0);
+});
+
+test('management heartbeat and renaming cannot clear reception pending data or refresh its acknowledgement',async()=>{
+  const c=clients();await createPublished(c);
+  const reception=loadClientModule('./reception-app/src/receptionSync.ts',c.managerDb,'flow-manager','T-FLOW-MANAGER',c.local);
+  await reception.saveTerminalHeartbeat('T-FLOW-MANAGER','entry',5,'flow-event');
+  const before=(await getDocFromServer(doc(c.managerDb,'terminals','T-FLOW-MANAGER'))).data();
+  await c.management.saveManagementTerminalHeartbeat('T-FLOW-MANAGER');
+  await c.management.saveTerminal({terminalId:'T-FLOW-MANAGER',name:'Renamed',mode:'停止',syncPendingCount:0});
+  const after=(await getDocFromServer(doc(c.managerDb,'terminals','T-FLOW-MANAGER'))).data();
+  assert.equal(after.syncPendingCount,5);assert.equal(after.receptionMode,'entry');
+  assert.equal(after.receptionReportedAt.toMillis(),before.receptionReportedAt.toMillis());
+  assert.equal(after.name,'Renamed');
+});
+
+test('own heartbeat accepts only fresh validated reception metadata and cannot spoof another terminal',async()=>{
+  const c=clients();await createPublished(c);
+  await c.reception.saveTerminalHeartbeat('T-FLOW-RECEPTION','stopped',0,'flow-event');
+  const ref=doc(c.receptionDb,'terminals','T-FLOW-RECEPTION');
+  for(const change of [{receptionMode:'anything',receptionReportedAt:firestore.serverTimestamp()},{receptionEventId:42,receptionReportedAt:firestore.serverTimestamp()},{receptionReportedAt:'fake'},{receptionMode:'entry'}])await assertFails(updateDoc(ref,change));
+  await assertFails(updateDoc(doc(c.receptionDb,'terminals','T-FLOW-MANAGER'),{receptionMode:'stopped',receptionEventId:'flow-event',receptionReportedAt:firestore.serverTimestamp()}));
+});
+
+test('republishing stale event metadata cannot rewind inventory revision or allocation sequence',async()=>{
+  const c=clients();await createPublished(c);
+  const ref=doc(c.managerDb,'events','flow-event');const stale=(await getDocFromServer(ref)).data();
+  await c.management.appendTickets('flow-event',[{...makeTicket('flow-event','issued-2'),basicInfo:{ticketNumber:2}}],true);
+  const before=(await getDocFromServer(ref)).data();
+  await c.publisher.publishEventBundle(stale,settings,[]);
+  const after=(await getDocFromServer(ref)).data();
+  assert.equal(after.inventoryRevision,before.inventoryRevision);assert.equal(after.lastIssuedNumber,2);assert.equal(after.ticketCount,2);
+});
+
+test('an old receipt cannot authorize a ticket-only replay after a manager resets its state',async()=>{
+  const c=clients();await createPublished(c);
+  const entry={recordId:'first-entry',eventId:'flow-event',ticketId:'ticket-1',terminalId:'T-FLOW-RECEPTION',type:'entry',timestamp:'2026-10-25T01:00:00.000Z'};
+  await c.reception.syncReceptionRecord(entry);
+  await c.management.saveTicket('flow-event',{...makeTicket('flow-event'),currentStatus:'unused'},['currentStatus']);
+  await assertFails(updateDoc(doc(c.receptionDb,'events','flow-event','tickets','ticket-1'),{currentStatus:'inside',updatedAt:entry.timestamp,lastReceptionRecordId:entry.recordId}));
+  await c.reception.syncReceptionRecord({...entry,recordId:'new-entry',timestamp:'2026-10-25T02:00:00.000Z'});
+});
+
+test('5000-ticket issuance crosses every transaction boundary and remains downloadable offline',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[]);
+  const tickets=Array.from({length:5000},(_,i)=>({...makeTicket('flow-event','TKT'+String(i+1).padStart(6,'0')),basicInfo:{ticketNumber:i+1}}));
+  await c.management.appendTickets('flow-event',tickets,true);
+  const bundle=await c.downloader.downloadCurrentFirebaseEventData('T-FLOW-RECEPTION');
+  assert.equal(bundle.tickets.length,5000);assert.equal(bundle.localEvent.ticketCount,5000);
+  await c.local.prepareLocalEventData(bundle.localEvent,bundle.tickets);
+  assert.equal(await c.local.countTickets('flow-event'),5000);
+});
+
+test('interrupted multi-chunk issuance preserves completed chunks with matching published counts',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[]);let transactions=0;
+  const failing=loadClientModule('./management-app/src/firebaseData.ts',c.managerDb,'flow-manager','T-FLOW-MANAGER',{}, {runTransaction:async(...args)=>{
+    if(++transactions===2)throw Error('network lost after first chunk');
+    return firestore.runTransaction(...args);
+  }});
+  const tickets=Array.from({length:451},(_,i)=>({...makeTicket('flow-event','new-'+i),basicInfo:{ticketNumber:i+1}}));
+  await assert.rejects(failing.appendTickets('flow-event',tickets,true),/network lost/);
+  assert.equal((await c.management.loadEventTickets('flow-event')).length,400);
+  const current=(await getDocFromServer(doc(c.managerDb,'events','flow-event'))).data();
+  assert.equal(current.ticketCount,400);assert.equal((await getDocFromServer(doc(c.managerDb,'eventBundles',current.authToken))).data().ticketCount,400);
+  await c.management.appendTickets('flow-event',tickets.slice(400),true);
+  assert.equal((await c.management.loadEventTickets('flow-event')).length,451);
 });
