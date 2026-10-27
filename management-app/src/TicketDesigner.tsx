@@ -1,6 +1,8 @@
 import {
   type ChangeEvent,
   type CSSProperties,
+  useEffect,
+  type ReactNode,
   useMemo,
   useRef,
   useState,
@@ -37,6 +39,10 @@ type CardRatio =
 
 type TicketDesignSettings = {
   backgroundImage: string;
+  title?: string;
+  titleX?: number;
+  titleY?: number;
+  titleSize?: number;
 
   cardRatio: CardRatio;
   customWidth: number;
@@ -138,6 +144,27 @@ function loadDesignSettings(
   }
 }
 
+function FloatingPanel({title,className,children,onClose}:{title:string;className:string;children:ReactNode;onClose:()=>void}) {
+  const ref=useRef<HTMLElement>(null);
+  const drag=useRef<{x:number;y:number;left:number;top:number}|null>(null);
+  useEffect(()=>{
+    const panel=ref.current;if(!panel)return;
+    const clamp=()=>{const host=panel.offsetParent as HTMLElement;if(!host)return;
+      if(panel.style.left)panel.style.left=`${Math.max(8,Math.min(parseFloat(panel.style.left),host.clientWidth-panel.offsetWidth-8))}px`;
+      if(panel.style.top)panel.style.top=`${Math.max(8,Math.min(parseFloat(panel.style.top),host.clientHeight-panel.offsetHeight-8))}px`;
+    };
+    const observer=new ResizeObserver(clamp);observer.observe(panel);if(panel.offsetParent)observer.observe(panel.offsetParent);return()=>observer.disconnect();
+  },[]);
+  return <section ref={ref} className={`studio-panel ${className}`}><header onPointerDown={e=>{
+    if((e.target as HTMLElement).closest('button'))return;
+    drag.current={x:e.clientX,y:e.clientY,left:ref.current!.offsetLeft,top:ref.current!.offsetTop};e.currentTarget.setPointerCapture(e.pointerId);
+  }} onPointerMove={e=>{const start=drag.current,panel=ref.current;if(!start||!panel)return;const host=panel.offsetParent as HTMLElement;
+    panel.style.left=`${Math.max(8,Math.min(host.clientWidth-panel.offsetWidth-8,start.left+e.clientX-start.x))}px`;
+    panel.style.top=`${Math.max(8,Math.min(host.clientHeight-panel.offsetHeight-8,start.top+e.clientY-start.y))}px`;
+    panel.style.right='auto';panel.style.bottom='auto';
+  }} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><strong>⠿ &nbsp;{title}</strong><button type="button" onClick={onClose} aria-label={`${title}を閉じる`}>×</button></header><div className="studio-panel-body">{children}</div></section>;
+}
+
 function TicketDesigner({
   tickets,
   eventName,
@@ -168,6 +195,14 @@ function TicketDesigner({
       : 0;
 
   const detectionId = useRef(0);
+  const [panel,setPanel]=useState<"settings"|"range"|null>(null);
+  const [titleSelected,setTitleSelected]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const undo=useRef<TicketDesignSettings[]>([]),redo=useRef<TicketDesignSettings[]>([]);
+  const [,refreshHistory]=useState(0);
+  const checkpoint=()=>{undo.current.push({...settings});if(undo.current.length>40)undo.current.shift();redo.current=[];refreshHistory(n=>n+1);setSaved(false);};
+  const restore=(from:typeof undo,to:typeof redo)=>{const value=from.current.pop();if(value){to.current.push(settings);setSettings(value);refreshHistory(n=>n+1);setSaved(false);}};
+
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
@@ -215,6 +250,7 @@ function TicketDesigner({
       : initialIndex
   );
 
+  useEffect(()=>{setSaved(false);},[settings]);
   const updateSetting = <
     Key extends keyof TicketDesignSettings,
   >(
@@ -521,12 +557,7 @@ function TicketDesigner({
         JSON.stringify(settings)
       );
 
-      alert(
-        `${
-          eventName ||
-          "現在のイベント"
-        }のチケットデザインを保存しました。`
-      );
+      setSaved(true);
     } catch (error) {
       console.error(
         "チケットデザインの保存に失敗しました。",
@@ -658,7 +689,8 @@ function TicketDesigner({
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
-  .ticket-design-qr, .ticket-design-number { position: absolute; }
+  .ticket-design-qr, .ticket-design-number, .ticket-design-title { position: absolute; }
+  .ticket-design-title { transform:translate(-50%,-50%); font-weight:700; white-space:pre-wrap; max-width:95%; line-height:1.2; }
   .ticket-design-qr {
     z-index: 3;
     aspect-ratio: 1 / 1;
@@ -767,331 +799,66 @@ function TicketDesigner({
     );
   }
 
+  const resizePart=(part:"qr"|"number"|"title",e:React.PointerEvent<HTMLElement>)=>{
+    e.stopPropagation();checkpoint();const target=e.currentTarget;target.setPointerCapture(e.pointerId);
+    const start=e.clientX,size=part==="qr"?settings.qrSize:part==="number"?settings.numberSize:settings.titleSize??28;
+    const width=ticketCardRef.current?.getBoundingClientRect().width||500;
+    const move=(ev:PointerEvent)=>updateSetting(part==="qr"?"qrSize":part==="number"?"numberSize":"titleSize",Math.max(part==="qr"?12:10,Math.min(part==="qr"?55:part==="number"?60:80,size+(ev.clientX-start)/width*(part==="qr"?100:120))));
+    const stop=()=>{target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
+  };
+  const movePart=(part:"qr"|"number"|"title",e:React.PointerEvent<HTMLElement>)=>{
+    checkpoint();setTitleSelected(part==="title");setSelectedPart(part==="title"?null:part);
+    const card=ticketCardRef.current;if(!card)return;const rect=card.getBoundingClientRect();
+    const x=e.clientX,y=e.clientY;
+    const left=part==="qr"?settings.qrX:part==="number"?settings.numberX:settings.titleX??32;
+    const top=part==="qr"?settings.qrY:part==="number"?settings.numberY:settings.titleY??30;
+    e.currentTarget.setPointerCapture(e.pointerId);e.stopPropagation();
+    const target=e.currentTarget;
+    const move=(event:PointerEvent)=>{setSettings(current=>({...current,
+      [part==="qr"?"qrX":part==="number"?"numberX":"titleX"]:Math.max(0,Math.min(100,left+(event.clientX-x)/rect.width*100)),
+      [part==="qr"?"qrY":part==="number"?"numberY":"titleY"]:Math.max(0,Math.min(100,top+(event.clientY-y)/rect.height*100))}));};
+    const stop=()=>{target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};
+    target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
+  };
   return (
-    <div className="ticket-designer-background ticket-designer-glass">
-      <section className="ticket-designer-window">
-        <header className="ticket-designer-header">
-          <div>
-            <h2>
-              チケットデザインスタジオ
-            </h2>
-
-            <p>
-              画像をベースに、チケットを直接操作してデザインします
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="ticket-designer-close"
-            onClick={onClose}
-            aria-label="デザイン画面を閉じる"
-          >
-            ×
-          </button>
+    <div className="ticket-designer-background ticket-designer-glass ticket-studio">
+      <section className="ticket-designer-window" role="dialog" aria-modal="true" aria-label="チケットデザイン">
+        <header className="studio-header"><div><strong>チケットデザイン</strong><span>{eventName}</span></div>
+          <nav><span className="studio-save-state">{saved?"✓ 保存済み":"編集中"}</span>
+          <button type="button" disabled={!undo.current.length} onClick={()=>restore(undo,redo)} aria-label="元に戻す">↶</button>
+          <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
+          <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
+          <button type="button" className="studio-primary" onClick={saveDesign}>保存</button>
+          <button type="button" onClick={printTickets}>印刷</button>
+          <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
-
-        <main className="ticket-designer-content">
-          <section className="ticket-designer-preview-section">
-            <div className="ticket-preview-heading">
-              <h3>
-                チケットキャンバス
-              </h3>
-              <button type="button" className="ticket-actual-size-button" onClick={() => setShowActualSize(true)}>実寸・印刷サイズを確認</button>
-
-              <span>
-                {safePrintWidth.toFixed(
-                  1
-                )}
-                mm ×{" "}
-                {printHeightMm.toFixed(
-                  1
-                )}
-                mm
-              </span>
+        <main className="studio-workspace">
+          <nav className="studio-dock" aria-label="編集ツール">
+            <button type="button" onClick={()=>{setPanel(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
+            <button type="button" onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
+            <label>▧<small>背景</small><input type="file" accept="image/*" onChange={handleBackgroundImage}/></label>
+            <button type="button" onClick={()=>{setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
+            <button type="button" onClick={()=>{setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
+            <button type="button" className={panel==="settings"?"active":""} onClick={()=>setPanel(panel==="settings"?null:"settings")}>⚙<small>設定</small></button>
+            <button type="button" className={panel==="range"?"active":""} onClick={()=>setPanel(panel==="range"?null:"range")}>▤<small>一覧</small></button>
+          </nav>
+          <div className="studio-canvas" onClick={()=>{}}>
+            <div className="studio-context" onPointerDownCapture={checkpoint}>
+              <span>{titleSelected?"イベント名":selectedPart==="qr"?"QRコード":selectedPart==="number"?"チケット番号":"キャンバス"}</span>
+              {titleSelected?<><input aria-label="イベント名の文字" value={settings.title??""} onChange={e=>updateSetting("title",e.target.value)}/><input type="number" aria-label="イベント名の文字サイズ" min="10" max="80" value={settings.titleSize??28} onChange={e=>updateSetting("titleSize",Math.max(10,Math.min(80,Number(e.target.value))))}/><button type="button" onClick={()=>updateSetting("title","")}>削除</button></>:
+              selectedPart?<><span>サイズ</span><input type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>setPanel("settings")}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
             </div>
-
-            <div
-              className="ticket-preview-container ticket-touch-canvas"
-              onTouchStart={(event) => {
-                if (event.touches.length === 2) {
-                  const dx = event.touches[0].clientX - event.touches[1].clientX;
-                  const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  pinchStartDistance.current = Math.max(1, Math.hypot(dx, dy));
-                  pinchStartZoom.current = liveZoom.current;
-                  dragTarget.current = null;
-                  panDragStart.current = null;
-                  event.preventDefault();
-                }
-              }}
-              onTouchMove={(event) => {
-                if (event.touches.length === 2 && pinchStartDistance.current !== null) {
-                  const dx = event.touches[0].clientX - event.touches[1].clientX;
-                  const dy = event.touches[0].clientY - event.touches[1].clientY;
-                  const distance = Math.hypot(dx, dy);
-                  const nextZoom = Math.max(0.5, Math.min(3, pinchStartZoom.current * distance / pinchStartDistance.current));
-                  liveZoom.current = nextZoom;
-                  // Update only the ticket transform during the gesture; do not re-render
-                  // the entire editor for every touch-move event.
-                  if (ticketCardRef.current) {
-                    ticketCardRef.current.style.transform = `translate(${previewPan.x}px, ${previewPan.y}px) scale(${nextZoom}) translateZ(0)`;
-                  }
-                  event.preventDefault();
-                }
-              }}
-              onTouchEnd={(event) => {
-                if (event.touches.length < 2 && pinchStartDistance.current !== null) {
-                  pinchStartDistance.current = null;
-                  setPreviewZoom(liveZoom.current);
-                }
-              }}
-            >
-              <div className="ticket-canvas-zoom-tools">
-                <button type="button" onClick={() => { const next = Math.max(0.5, +(liveZoom.current - 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="縮小">−</button>
-                <span>{Math.round(previewZoom * 100)}%</span>
-                <button type="button" onClick={() => { const next = Math.min(3, +(liveZoom.current + 0.1).toFixed(2)); liveZoom.current = next; setPreviewZoom(next); }} aria-label="拡大">＋</button>
-                <button type="button" onClick={() => { liveZoom.current = 1; setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); if (ticketCardRef.current) ticketCardRef.current.style.transform = "translate(0px, 0px) scale(1) translateZ(0)"; }}>位置・倍率をリセット</button>
+            <div className="studio-paper-area" onPointerDown={e=>{if((e.target as HTMLElement).closest('.ticket-draggable-part'))return;panDragStart.current={pointerId:e.pointerId,x:e.clientX,y:e.clientY,panX:previewPan.x,panY:previewPan.y};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const start=panDragStart.current;if(start?.pointerId===e.pointerId)setPreviewPan({x:start.panX+e.clientX-start.x,y:start.panY+e.clientY-start.y});}} onPointerUp={()=>{panDragStart.current=null;}} onPointerCancel={()=>{panDragStart.current=null;}} onTouchStart={e=>{if(e.touches.length===2){pinchStartDistance.current=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pinchStartZoom.current=previewZoom;}}} onTouchMove={e=>{if(e.touches.length===2&&pinchStartDistance.current){const distance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);setPreviewZoom(Math.max(.5,Math.min(3,pinchStartZoom.current*distance/pinchStartDistance.current)));}}} onTouchEnd={()=>{pinchStartDistance.current=null;}}>
+              <div ref={ticketCardRef} className="ticket-design-card" style={{...previewTicketStyle,transform:`translate(${previewPan.x}px,${previewPan.y}px) scale(${previewZoom})`,transformOrigin:"center"}}>
+                {!settings.backgroundImage&&<div className="studio-paper-placeholder"><span>TICKET</span><small>{eventName}</small></div>}
+                {settings.title&&<div className={`ticket-design-title ticket-draggable-part ${titleSelected?"is-selected":""}`} style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}} onPointerDown={e=>movePart("title",e)}>{settings.title}{titleSelected&&<button className="studio-resize" aria-label="文字をリサイズ" onPointerDown={e=>resizePart("title",e)}/>}</div>}
+                <div className={`ticket-design-qr ticket-draggable-part ${selectedPart==="qr"?"is-selected":""}`} style={{left:`${settings.qrX}%`,top:`${settings.qrY}%`,width:`${settings.qrSize}%`}} onPointerDown={e=>movePart("qr",e)}><LazyQrCode value={previewTicket?qrValue(previewTicket):""} size={500} level="M" marginSize={1}/>{selectedPart==="qr"&&<button className="studio-resize" aria-label="QRをリサイズ" onPointerDown={e=>resizePart("qr",e)}/>}</div>
+                <div className={`ticket-design-number ticket-draggable-part ${selectedPart==="number"?"is-selected":""}`} style={{left:`${settings.numberX}%`,top:`${settings.numberY}%`,fontSize:`${settings.numberSize}px`}} onPointerDown={e=>movePart("number",e)}>{previewTicket?.qrNumber}{selectedPart==="number"&&<button className="studio-resize" aria-label="番号をリサイズ" onPointerDown={e=>resizePart("number",e)}/>}</div>
               </div>
-              {previewTicket !==
-                null && (
-                <div
-                  ref={ticketCardRef}
-                  className="ticket-design-card"
-                  onPointerDown={(event) => {
-                    if ((event.target as HTMLElement).closest(".ticket-draggable-part")) return;
-                    panDragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: previewPan.x, panY: previewPan.y };
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    event.preventDefault();
-                  }}
-                  onPointerMove={(event) => {
-                    const start = panDragStart.current;
-                    if (!start || start.pointerId !== event.pointerId) return;
-                    setPreviewPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
-                  }}
-                  onPointerUp={(event) => {
-                    if (panDragStart.current?.pointerId === event.pointerId) panDragStart.current = null;
-                  }}
-                  onPointerCancel={() => { panDragStart.current = null; }}
-                  style={{
-                    ...previewTicketStyle,
-                    transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom}) translateZ(0)`,
-                    transformOrigin: "top left",
-                  }}
-                >
-                  {settings.backgroundImage ===
-                    "" && (
-                    <div className="ticket-no-background">
-                      背景画像を選択してください
-                    </div>
-                  )}
-
-                  <div
-                    className="ticket-design-qr ticket-draggable-part"
-                    onPointerDown={(event) => {
-                      if (selectedPart !== "qr") {
-                        setSelectedPart("qr");
-                        dragTarget.current = null;
-                        event.stopPropagation();
-                        return;
-                      }
-                      dragTarget.current = "qr";
-                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.qrX, top: settings.qrY };
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      event.stopPropagation();
-                    }}
-                    onPointerMove={(event) => {
-                      if (dragTarget.current !== "qr") return;
-                      const card = event.currentTarget.parentElement as HTMLDivElement;
-                      const scale = Math.max(0.5, liveZoom.current);
-                      const baseWidth = card.offsetWidth;
-                      const baseHeight = card.offsetHeight;
-                      if (!baseWidth || !baseHeight) return;
-                      updateSetting("qrX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
-                      updateSetting("qrY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
-                    }}
-                    onPointerUp={() => { dragTarget.current = null; }}
-                    style={{
-                      left: `${settings.qrX}%`,
-                      top: `${settings.qrY}%`,
-                      width: `${settings.qrSize}%`,
-                    }}
-                  >
-                    <LazyQrCode
-                      value={qrValue(previewTicket)}
-                      size={500}
-                      level="M"
-                      marginSize={1}
-                    />
-                  </div>
-
-                  <div
-                    className="ticket-design-number ticket-draggable-part"
-                    onPointerDown={(event) => {
-                      if (selectedPart !== "number") {
-                        setSelectedPart("number");
-                        dragTarget.current = null;
-                        event.stopPropagation();
-                        return;
-                      }
-                      dragTarget.current = "number";
-                      dragStart.current = { x: event.clientX, y: event.clientY, left: settings.numberX, top: settings.numberY };
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      event.stopPropagation();
-                    }}
-                    onPointerMove={(event) => {
-                      if (dragTarget.current !== "number") return;
-                      const card = event.currentTarget.parentElement as HTMLDivElement;
-                      const scale = Math.max(0.5, liveZoom.current);
-                      const baseWidth = card.offsetWidth;
-                      const baseHeight = card.offsetHeight;
-                      if (!baseWidth || !baseHeight) return;
-                      updateSetting("numberX", Math.max(0, Math.min(100, dragStart.current.left + (event.clientX - dragStart.current.x) / scale / baseWidth * 100)));
-                      updateSetting("numberY", Math.max(0, Math.min(100, dragStart.current.top + (event.clientY - dragStart.current.y) / scale / baseHeight * 100)));
-                    }}
-                    onPointerUp={() => { dragTarget.current = null; }}
-                    style={{
-                      left: `${settings.numberX}%`,
-                      top: `${settings.numberY}%`,
-                      fontSize:
-                        `${settings.numberSize}px`,
-                    }}
-                  >
-                    {
-                      previewTicket.qrNumber
-                    }
-                  </div>
-                </div>
-              )}
             </div>
-
-            <section className="ticket-print-range">
-              <h3>
-                印刷する範囲
-              </h3>
-
-              <div className="ticket-range-inputs">
-                <label>
-                  最初のチケット
-
-                  <select
-                    value={
-                      startIndex
-                    }
-                    onChange={(
-                      event
-                    ) => {
-                      const newStart =
-                        Number(
-                          event.target
-                            .value
-                        );
-
-                      setStartIndex(
-                        newStart
-                      );
-
-                      if (
-                        endIndex <
-                        newStart
-                      ) {
-                        setEndIndex(
-                          newStart
-                        );
-                      }
-                    }}
-                  >
-                    {printableTickets.map(
-                      (
-                        ticket,
-                        index
-                      ) => (
-                        <option
-                          key={
-                            ticket.id
-                          }
-                          value={
-                            index
-                          }
-                        >
-                          {
-                            ticket.qrNumber
-                          }
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-
-                <span>～</span>
-
-                <label>
-                  最後のチケット
-
-                  <select
-                    value={
-                      endIndex
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setEndIndex(
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  >
-                    {printableTickets.map(
-                      (
-                        ticket,
-                        index
-                      ) => (
-                        <option
-                          key={
-                            ticket.id
-                          }
-                          value={
-                            index
-                          }
-                          disabled={
-                            index <
-                            startIndex
-                          }
-                        >
-                          {
-                            ticket.qrNumber
-                          }
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-              </div>
-
-              <div className="ticket-range-summary">
-                印刷対象：
-
-                <strong>
-                  {
-                    selectedTickets.length
-                  }
-                  枚
-                </strong>
-
-                <span>
-                  ※無効なチケットは除外されます
-                </span>
-              </div>
-            </section>
-          </section>
-
-          <section className="ticket-designer-settings">
-            <h3>
-              デザイン設定
-            </h3>
-
-            <div className="ticket-setting-group">
+            <div className="studio-zoom"><button type="button" aria-label="縮小" onClick={()=>setPreviewZoom(z=>Math.max(.5,z-.1))}>−</button><span>{Math.round(previewZoom*100)}%</span><button type="button" aria-label="拡大" onClick={()=>setPreviewZoom(z=>Math.min(3,z+.1))}>＋</button><button type="button" onClick={()=>{setPreviewZoom(1);setPreviewPan({x:0,y:0});}}>画面に合わせる</button></div>
+          </div>
+          {panel==="settings"&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>setPanel(null)}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
               <h4>
                 チケットサイズ
               </h4>
@@ -1497,42 +1264,124 @@ function TicketDesigner({
                 <span>mm</span>
               </label>
             </div>
-          </section>
+<div className="studio-reset"><button type="button" onClick={resetDesign}>初期状態に戻す</button></div></div></FloatingPanel>}
+          {panel==="range"&&<FloatingPanel title="チケット一覧・印刷範囲" className="studio-inventory" onClose={()=>setPanel(null)}><div className="ticket-print-range"><div className="studio-thumbnails">{printableTickets.slice(Math.max(0,startIndex-2),Math.max(0,startIndex-2)+12).map(ticket=><button type="button" key={ticket.id} aria-label={`チケット ${ticket.qrNumber} を表示`} onClick={()=>{const index=printableTickets.indexOf(ticket);setStartIndex(index);if(endIndex<index)setEndIndex(index);}} style={{backgroundImage:settings.backgroundImage?`url("${settings.backgroundImage}")`:undefined}}><span>{ticket.qrNumber}</span></button>)}</div><div className="ticket-range-inputs">
+                <label>
+                  最初のチケット
+
+                  <select
+                    value={
+                      startIndex
+                    }
+                    onChange={(
+                      event
+                    ) => {
+                      const newStart =
+                        Number(
+                          event.target
+                            .value
+                        );
+
+                      setStartIndex(
+                        newStart
+                      );
+
+                      if (
+                        endIndex <
+                        newStart
+                      ) {
+                        setEndIndex(
+                          newStart
+                        );
+                      }
+                    }}
+                  >
+                    {printableTickets.map(
+                      (
+                        ticket,
+                        index
+                      ) => (
+                        <option
+                          key={
+                            ticket.id
+                          }
+                          value={
+                            index
+                          }
+                        >
+                          {
+                            ticket.qrNumber
+                          }
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+
+                <span>～</span>
+
+                <label>
+                  最後のチケット
+
+                  <select
+                    value={
+                      endIndex
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setEndIndex(
+                        Number(
+                          event.target
+                            .value
+                        )
+                      )
+                    }
+                  >
+                    {printableTickets.map(
+                      (
+                        ticket,
+                        index
+                      ) => (
+                        <option
+                          key={
+                            ticket.id
+                          }
+                          value={
+                            index
+                          }
+                          disabled={
+                            index <
+                            startIndex
+                          }
+                        >
+                          {
+                            ticket.qrNumber
+                          }
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+              </div>
+
+              <div className="ticket-range-summary">
+                印刷対象：
+
+                <strong>
+                  {
+                    selectedTickets.length
+                  }
+                  枚
+                </strong>
+
+                <span>
+                  ※無効なチケットは除外されます
+                </span>
+              </div>
+</div></FloatingPanel>}
+          <div className="studio-status"><span>{safePrintWidth.toFixed(1)} × {printHeightMm.toFixed(1)} mm</span><span>印刷対象 {selectedTickets.length}枚</span></div>
         </main>
-
-        <footer className="ticket-designer-buttons">
-          <button
-            type="button"
-            className="ticket-design-save"
-            onClick={saveDesign}
-          >
-            デザインを保存
-          </button>
-
-          <button
-            type="button"
-            className="ticket-design-print"
-            onClick={printTickets}
-          >
-            選択した範囲を印刷
-          </button>
-
-          <button
-            type="button"
-            className="ticket-design-reset"
-            onClick={resetDesign}
-          >
-            初期状態に戻す
-          </button>
-
-          <button
-            type="button"
-            className="ticket-design-cancel"
-            onClick={onClose}
-          >
-            閉じる
-          </button>
-        </footer>
       </section>
 
       {showActualSize && (
@@ -1551,7 +1400,8 @@ function TicketDesigner({
             </div>
             <div className="ticket-actual-size-preview-wrap">
               <div className="ticket-actual-size-preview" style={({ "--ticket-actual-size-width": `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" } as CSSProperties & { "--ticket-actual-size-width": string })}>
-                <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
+                {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+      <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
                 <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize * screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
@@ -1609,6 +1459,7 @@ function TicketDesigner({
                           : `url("${settings.backgroundImage}")`,
                     }}
                   >
+                    {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
                     <div
                       className="ticket-design-qr"
                       style={{
@@ -1676,6 +1527,7 @@ export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventNam
   return (
     <div className="ticket-qr-design-preview" style={cardStyle}>
       {!settings.backgroundImage && <div className="ticket-no-background" style={{ background: "linear-gradient(135deg,#f2f5fa,#dce4f0)" }}>背景画像が未設定です</div>}
+      {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
       <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
         <LazyQrCode value={qrValue} size={500} level="M" marginSize={1} />
       </div>
