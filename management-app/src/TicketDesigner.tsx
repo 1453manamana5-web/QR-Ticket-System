@@ -39,6 +39,7 @@ type CardRatio =
 
 type StudioImage={id:string;src:string;x:number;y:number;width:number;name:string};
 type TicketDesignSettings = {
+  rotations?:Record<string,number>;
   images?:StudioImage[];
   layerOrder?:string[];
   locked?:Record<string,boolean>;
@@ -107,7 +108,8 @@ const defaultSettings: TicketDesignSettings = {
 
 function layerStyle(settings:TicketDesignSettings,id:string):CSSProperties {
   const order=settings.layerOrder??["number","qr","title",...(settings.images??[]).map(image=>image.id)];
-  return {zIndex:Math.max(0,order.indexOf(id))+2};
+  const angle=settings.rotations?.[id]??0;
+  return {"--ticket-element-angle":`${Number.isFinite(angle)?angle:0}deg`,zIndex:Math.max(0,order.indexOf(id))+2,transform:`translate(-50%,-50%) rotate(${Number.isFinite(angle)?angle:0}deg)`,transformOrigin:"center center"} as CSSProperties;
 }
 function textStyle(settings:TicketDesignSettings):CSSProperties{return {...layerStyle(settings,"title"),color:settings.titleColor??"#162e4a",fontFamily:settings.titleFont??"sans-serif",fontWeight:settings.titleBold===false?400:700};}
 function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesignSettings;onSelect?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;onResize?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;selected?:string|null}){
@@ -827,6 +829,19 @@ function TicketDesigner({
   const layers=settings.layerOrder??["number","qr","title",...images.map(image=>image.id)];
   const activeLayer=selectedImage??(titleSelected?"title":selectedPart);
   const activeLocked=Boolean(activeLayer&&settings.locked?.[activeLayer]);
+  const normalizeAngle=(value:number)=>Number.isFinite(value)?Math.round((((value+180)%360+360)%360-180)*10)/10:0;
+  const setRotation=(id:string,value:number)=>setSettings(current=>current.locked?.[id]?current:({...current,rotations:{...current.rotations,[id]:normalizeAngle(value)}}));
+  const rotation=activeLayer?settings.rotations?.[activeLayer]??0:0;
+  const activeImage=images.find(image=>image.id===activeLayer);
+  const rotationPosition=activeImage?{x:activeImage.x,y:activeImage.y}:activeLayer==="qr"?{x:settings.qrX,y:settings.qrY}:activeLayer==="number"?{x:settings.numberX,y:settings.numberY}:{x:settings.titleX??32,y:settings.titleY??30};
+  const startRotation=(e:React.PointerEvent<HTMLButtonElement>)=>{
+    e.stopPropagation();if(!activeLayer||activeLocked||!ticketCardRef.current)return;checkpoint();
+    const id=activeLayer,rect=ticketCardRef.current.getBoundingClientRect(),cx=rect.left+rect.width*rotationPosition.x/100,cy=rect.top+rect.height*rotationPosition.y/100;
+    const initial=Math.atan2(e.clientY-cy,e.clientX-cx)*180/Math.PI,target=e.currentTarget;target.setPointerCapture(e.pointerId);
+    const move=(event:PointerEvent)=>{const delta=Math.atan2(event.clientY-cy,event.clientX-cx)*180/Math.PI-initial;let angle=normalizeAngle(rotation+delta);const step=Math.round(angle/15)*15;if(Math.abs(step-angle)<3)angle=step;setRotation(id,angle);};
+    const stop=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",stop);target.removeEventListener("pointercancel",stop);};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",stop);target.addEventListener("pointercancel",stop);
+  };
   const imageUpload=(event:ChangeEvent<HTMLInputElement>)=>{const file=event.target.files?.[0];event.target.value="";if(!file)return;if(!file.type.startsWith("image/")||file.type==="image/svg+xml"){alert("PNG・JPEG・WebPなどの画像を選択してください。");return;}if(file.size>5*1024*1024){alert("追加画像は5MB以下にしてください。");return;}const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=="string")return;checkpoint();const id="image-"+crypto.randomUUID();const image={id,src:reader.result,x:50,y:50,width:30,name:file.name};setSettings(current=>({...current,images:[...(current.images??[]),image],layerOrder:[...(current.layerOrder??["number","qr","title",...(current.images??[]).map(i=>i.id)]),id]}));selectLayer(id);};reader.onerror=()=>alert("画像を読み込めませんでした。");reader.readAsDataURL(file);};
   const resizePart=(part:string,e:React.PointerEvent<HTMLElement>)=>{
     e.stopPropagation();selectLayer(part);if(settings.locked?.[part])return;checkpoint();const target=e.currentTarget;target.setPointerCapture(e.pointerId);
@@ -874,12 +889,14 @@ function TicketDesigner({
           </nav>
           <div className="studio-canvas" onClick={()=>{}}>
             <div className="studio-context" onPointerDownCapture={checkpoint}>
+              {activeLayer&&<label className="studio-angle">角度 <input aria-label="回転角度" type="number" min="-180" max="180" step="1" disabled={activeLocked} value={rotation} onChange={e=>setRotation(activeLayer,Number(e.target.value))}/>°<button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,rotation-15)}>−15°</button><button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,rotation+15)}>＋15°</button><button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,0)}>0°</button></label>}
               <span>{titleSelected?"イベント名":selectedPart==="qr"?"QRコード":selectedPart==="number"?"チケット番号":"キャンバス"}</span>
               {selectedImage?<><span>追加画像{activeLocked?"（ロック中）":""}</span><button type="button" disabled={activeLocked} onClick={()=>{checkpoint();setSettings(current=>({...current,images:current.images?.filter(i=>i.id!==selectedImage),layerOrder:layers.filter(id=>id!==selectedImage)}));setSelectedImage(null);}}>削除</button></>:titleSelected?<><input disabled={activeLocked} aria-label="イベント名の文字" value={settings.title??""} onChange={e=>updateSetting("title",e.target.value)}/><input disabled={activeLocked} type="number" aria-label="イベント名の文字サイズ" min="10" max="80" value={settings.titleSize??28} onChange={e=>updateSetting("titleSize",Math.max(10,Math.min(80,Number(e.target.value))))}/><input aria-label="文字色" type="color" disabled={activeLocked} value={settings.titleColor??"#162e4a"} onChange={e=>updateSetting("titleColor",e.target.value)}/><select aria-label="フォント" disabled={activeLocked} value={settings.titleFont??"sans-serif"} onChange={e=>updateSetting("titleFont",e.target.value)}><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select><button type="button" disabled={activeLocked} aria-pressed={settings.titleBold!==false} onClick={()=>updateSetting("titleBold",settings.titleBold===false)}>太字</button><button type="button" disabled={activeLocked} onClick={()=>updateSetting("title","")}>削除</button></>:
               selectedPart?<><span>サイズ</span><input disabled={activeLocked} type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>setPanel("settings")}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
             </div>
             <div className="studio-paper-area" onPointerDown={e=>{if((e.target as HTMLElement).closest('.ticket-draggable-part'))return;panDragStart.current={pointerId:e.pointerId,x:e.clientX,y:e.clientY,panX:previewPan.x,panY:previewPan.y};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const start=panDragStart.current;if(start?.pointerId===e.pointerId)setPreviewPan({x:start.panX+e.clientX-start.x,y:start.panY+e.clientY-start.y});}} onPointerUp={()=>{panDragStart.current=null;}} onPointerCancel={()=>{panDragStart.current=null;}} onTouchStart={e=>{if(e.touches.length===2){pinchStartDistance.current=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pinchStartZoom.current=previewZoom;}}} onTouchMove={e=>{if(e.touches.length===2&&pinchStartDistance.current){const distance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);setPreviewZoom(Math.max(.5,Math.min(3,pinchStartZoom.current*distance/pinchStartDistance.current)));}}} onTouchEnd={()=>{pinchStartDistance.current=null;}}>
               <div ref={ticketCardRef} className="ticket-design-card" style={{...previewTicketStyle,transform:`translate(${previewPan.x}px,${previewPan.y}px) scale(${previewZoom})`,transformOrigin:"center"}}>
+                {activeLayer&&!activeLocked&&<div className="studio-rotation-anchor" style={{left:`${rotationPosition.x}%`,top:`${rotationPosition.y}%`,transform:`rotate(${rotation}deg)`}}><button type="button" className="studio-rotate-handle" aria-label="選択要素を回転" onPointerDown={startRotation}>↻</button></div>}
                 <AddedImages settings={settings} selected={selectedImage} onSelect={movePart} onResize={resizePart}/>
                 {guides.x!==undefined&&<div className="studio-guide vertical" style={{left:`${guides.x}%`}}/>}{guides.y!==undefined&&<div className="studio-guide horizontal" style={{top:`${guides.y}%`}}/>}
                 {!settings.backgroundImage&&<div className="studio-paper-placeholder"><span>TICKET</span><small>{eventName}</small></div>}
