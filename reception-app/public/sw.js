@@ -1,4 +1,4 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v2";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v3";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
 
@@ -11,11 +11,10 @@ self.addEventListener("install", event => {
       if (response.ok) {
         await cache.put(indexUrl, response.clone());
         const html = await response.text();
-        const assetPaths = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
-          .map(match => match[1])
+        const assetPaths = [...[...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]), "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav"]
           .filter(path => path && !path.startsWith("data:"));
         await Promise.allSettled(assetPaths.map(async path => {
-          const url = new URL(path, self.location.origin);
+          const url = new URL(path, indexUrl);
           if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
           const asset = await fetch(url.href, { cache: "reload" });
           if (asset.ok) await cache.put(url.href, asset);

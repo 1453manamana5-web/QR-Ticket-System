@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
+import {prepareReceptionAudio,playReceptionAudio} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
@@ -63,6 +64,7 @@ async function logReceptionError(
 }
 
 export default function App(){
+  useEffect(()=>prepareReceptionAudio(),[]);
   const [screen,setScreen]=useState<Screen>("registration");
   const screenRef=useRef<Screen>(screen);
   screenRef.current=screen;
@@ -424,7 +426,8 @@ export default function App(){
 
   useEffect(()=>{
     if(!result)return;
-    const timer=window.setTimeout(()=>setResult(null),2500);
+    if(result.kind==="error")void playReceptionAudio("error");
+    const timer=window.setTimeout(()=>setResult(null),result.kind==="success"?1100:1800);
     return()=>window.clearTimeout(timer);
   },[result]);
 
@@ -588,6 +591,7 @@ export default function App(){
     }
 
     scanProcessingRef.current=true;
+    void playReceptionAudio("detected");
     setBusy(true);
     setResult(null);
 
@@ -812,7 +816,7 @@ export default function App(){
             <h2>受付失敗</h2>
             <p className="entry-result-primary">受付できません</p>
             <p className="entry-result-number">このチケットはすでに入場しています。</p>
-            <p className="entry-result-secondary">約2.5秒後に読み取り画面へ戻ります</p>
+            <p className="entry-result-secondary">次のQRは続けて読み取れます</p>
           </> : <>
             <div className={testEntry ? "entry-result-icon entry-ticket-success-icon" : "exit-result-icon exit-ticket-success-icon"} aria-hidden="true">
               <svg viewBox="0 0 120 120" focusable="false">
@@ -835,7 +839,7 @@ export default function App(){
           <div style={{display:"flex",gap:"10px",justifyContent:"center",flexWrap:"wrap",marginTop:"24px"}}>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");speakReception("entry");void playSuccessSound();}}>入口結果</button>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");speakReception("exit");void playSuccessSound();}}>出口結果</button>
-            <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");window.speechSynthesis?.cancel();}}>エラー結果</button>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");void playReceptionAudio("error");window.speechSynthesis?.cancel();}}>エラー結果</button>
           </div>
           <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
         </section>
@@ -1095,7 +1099,7 @@ export default function App(){
             <h2>受付失敗</h2>
             <p className={entry ? "entry-result-primary" : "exit-result-primary"}>{result.title}</p>
             <p className={entry ? "entry-result-number" : "exit-result-number"}>{result.detail}</p>
-            <p className={entry ? "entry-result-secondary" : "exit-result-secondary"}>約2.5秒後に読み取り画面へ戻ります</p>
+            <p className={entry ? "entry-result-secondary" : "exit-result-secondary"}>次のQRは続けて読み取れます</p>
           </>}
         </section>
       )}
@@ -1150,55 +1154,7 @@ function speakReception(type:ReceptionType){
   }
 }
 
-function playSuccessSound(){
-  // 旧アプリの qr_scan_detected.wav を分析した音色・長さに寄せた確認音。
-  // 約0.245秒、約890Hzを中心に、少量の倍音と自然な減衰を加える。
-  try{
-    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
-    const context=new AudioContextClass();
-
-    const startSound=()=>{
-      const now=context.currentTime;
-      const duration=0.245;
-      const oscillator=context.createOscillator();
-      const gain=context.createGain();
-
-      oscillator.type="sine";
-      oscillator.frequency.setValueAtTime(890,now);
-
-      // 旧音源に近い、短い「ピッ」という立ち上がりから滑らかに減衰する包絡。
-      gain.gain.setValueAtTime(0.0001,now);
-      gain.gain.exponentialRampToValueAtTime(0.105,now+0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001,now+duration);
-
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start(now);
-      oscillator.stop(now+duration+0.01);
-
-      // 旧音源に含まれる倍音感を軽く再現。
-      const harmonic=context.createOscillator();
-      const harmonicGain=context.createGain();
-      harmonic.type="sine";
-      harmonic.frequency.setValueAtTime(1780,now);
-      harmonicGain.gain.setValueAtTime(0.0001,now);
-      harmonicGain.gain.exponentialRampToValueAtTime(0.028,now+0.012);
-      harmonicGain.gain.exponentialRampToValueAtTime(0.0001,now+duration);
-      harmonic.connect(harmonicGain);
-      harmonicGain.connect(context.destination);
-      harmonic.start(now);
-      harmonic.stop(now+duration+0.01);
-
-      window.setTimeout(()=>void context.close(),350);
-    };
-
-    if(context.state==="suspended"){
-      void context.resume().then(startSound).catch(()=>{});
-    }else{
-      startSound();
-    }
-  }catch{}
-}
+function playSuccessSound(){void playReceptionAudio("success");}
 function getTerminalId():string{
   const key="qr-ticket-terminal-id";
   const existing=localStorage.getItem(key);

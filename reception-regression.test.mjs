@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {webcrypto} from "node:crypto";
+import {createHash} from "node:crypto";
 import {setImmediate as nextTurn} from "node:timers/promises";
 import {test} from "node:test";
 import {IDBFactory} from "fake-indexeddb";
@@ -101,7 +102,8 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
   const bundle={localEvent:makeEvent(),tickets:[makeTicket()],authPayload:{type:"qr-ticket-event-auth",...makeEvent().event,authToken:"test-token"}};
   function Scanner(){return null;}
   const dependencies={
-    "./QrScanner":{default:Scanner},"./localDb":local,
+    "./QrScanner":{default:Scanner},
+    "./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async()=>{}},"./localDb":local,
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -315,4 +317,59 @@ test("offline shell registration still runs when authentication completes after 
   await nextTurn();
   assert.equal(registered.length,1);
   assert.equal(registered[0][0],"/QR-Ticket-System/sw.js");
+});
+
+test("fast scanner serializes processing, accepts the next QR after 60ms and suppresses a held QR",async()=>{
+  let decode,resolveFirst,now=1000;
+  const timers=[],accepted=[];
+  class Camera {
+    static async getCameras(){return [{id:"front",label:"Front"}];}
+    constructor(){this.isScanning=false;}
+    async start(_camera,options,onResult){assert.equal(options.fps,30);decode=onResult;this.isScanning=true;}
+    async stop(){this.isScanning=false;}
+    clear(){}
+    async applyVideoConstraints(){}
+  }
+  const Scanner=load("./reception-app/src/QrScanner.tsx",{"html5-qrcode":{Html5Qrcode:Camera,Html5QrcodeSupportedFormats:{QR_CODE:0}}},{
+    document:{getElementById:()=>({innerHTML:"",querySelectorAll:()=>[]})},
+    window:{setTimeout:(fn,delay)=>{assert.equal(delay,60);timers.push(fn);}},
+    Date:{now:()=>now},console:{info:()=>{},warn:()=>{},error:()=>{}},
+  }).default;
+  let renderer;
+  await act(async()=>{renderer=create(React.createElement(Scanner,{readerId:"test",onResult:async value=>{accepted.push(value);if(value==="A")await new Promise(resolve=>{resolveFirst=resolve;});}}));await nextTurn();});
+  decode("A");await nextTurn();decode("B");assert.deepEqual(accepted,["A"]);
+  resolveFirst();await nextTurn();timers.shift()();now=1200;decode("B");await nextTurn();timers.shift()();
+  for(now=1500;now<=2700;now+=300)decode("B");
+  assert.deepEqual(accepted,["A","B"]);
+  now=3300;decode("B");await nextTurn();assert.deepEqual(accepted,["A","B","B"]);
+  await act(async()=>renderer.unmount());
+});
+
+test("legacy WAV assets are byte-identical; audio unlock does not wait for network preloading",async()=>{
+  const expected={"qr_scan_detected.wav":"c030f32e524b8c5f9b43b987d9ab78fb28cc5ac52685a4969505140c67967994","qr_result_chime.wav":"fb6d5070938612822bbe550bce935752ff45a69fafb0b02cb457cec70139b55a","qr_gate_error_chime_v1.wav":"6a7ad6060edd3325181aea0bfeb8fbcc59318c21e61a06a0993972d1dc68bd22"};
+  for(const [file,hash] of Object.entries(expected))assert.equal(createHash("sha256").update(readFileSync(new URL("./reception-app/public/sounds/"+file,import.meta.url))).digest("hex"),hash);
+  const listeners={},requests=[],pending=[];let resumes=0,starts=0;
+  class Context {
+    state="suspended";destination={};
+    async resume(){resumes++;this.state="running";}
+    async decodeAudioData(){return {};}
+    createBufferSource(){return {connect:()=>{},disconnect:()=>{},start:()=>{starts++;},stop:()=>{}};}
+  }
+  const audio=load("./reception-app/src/receptionAudio.ts",{},{window:{AudioContext:Context},document:{addEventListener:(event,fn)=>{listeners[event]=fn;},removeEventListener:event=>delete listeners[event]},fetch:url=>{requests.push(url);return new Promise(resolve=>pending.push(()=>resolve({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)})));}});
+  const cleanup=audio.prepareReceptionAudio();assert.equal(requests.length,3);
+  listeners.pointerdown();assert.equal(resumes,1);
+  pending.forEach(resolve=>resolve());await audio.playReceptionAudio("success");assert.equal(starts,1);
+  cleanup();assert.equal(listeners.pointerdown,undefined);
+});
+
+test("offline shell preloads all three original audio assets at their full paths",async()=>{
+  const listeners={},stored=[];let installed;
+  const response={ok:true,clone(){return this;},text:async()=>'<script src="/QR-Ticket-System/assets/app.js"></script>'};
+  new Function("self","URL","caches","fetch",readFileSync(new URL("./reception-app/public/sw.js",import.meta.url),"utf8"))({
+    location:{href:"https://example.test/QR-Ticket-System/sw.js",origin:"https://example.test"},
+    addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},
+  },URL,{open:async()=>({put:async url=>stored.push(url)})},async()=>response);
+  listeners.install({waitUntil:promise=>{installed=promise;}});await installed;
+  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
+  assert.ok(stored.includes("https://example.test/QR-Ticket-System/assets/app.js"));
 });
