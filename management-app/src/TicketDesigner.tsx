@@ -37,7 +37,15 @@ type CardRatio =
   | "9:16"
   | "custom";
 
+type StudioImage={id:string;src:string;x:number;y:number;width:number;name:string};
 type TicketDesignSettings = {
+  images?:StudioImage[];
+  layerOrder?:string[];
+  locked?:Record<string,boolean>;
+  titleColor?:string;
+  titleFont?:string;
+  titleBold?:boolean;
+
   backgroundImage: string;
   title?: string;
   titleX?: number;
@@ -96,6 +104,15 @@ const defaultSettings: TicketDesignSettings = {
   numberY: 72,
   numberSize: 18,
 };
+
+function layerStyle(settings:TicketDesignSettings,id:string):CSSProperties {
+  const order=settings.layerOrder??["number","qr","title",...(settings.images??[]).map(image=>image.id)];
+  return {zIndex:Math.max(0,order.indexOf(id))+2};
+}
+function textStyle(settings:TicketDesignSettings):CSSProperties{return {...layerStyle(settings,"title"),color:settings.titleColor??"#162e4a",fontFamily:settings.titleFont??"sans-serif",fontWeight:settings.titleBold===false?400:700};}
+function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesignSettings;onSelect?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;onResize?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;selected?:string|null}){
+ return <>{(settings.images??[]).map(image=><div key={image.id} className={`studio-image ${onSelect?"ticket-draggable-part":""} ${selected===image.id?"is-selected":""}`} style={{position:"absolute",left:`${image.x}%`,top:`${image.y}%`,width:`${image.width}%`,transform:"translate(-50%,-50%)",...layerStyle(settings,image.id)}} onPointerDown={onSelect?e=>onSelect(image.id,e):undefined}><img src={image.src} alt={image.name} draggable={false} style={{display:"block",width:"100%",height:"auto"}}/>{onResize&&selected===image.id&&!settings.locked?.[image.id]&&<button type="button" className="studio-resize" aria-label="画像をリサイズ" onPointerDown={e=>onResize(image.id,e)}/>}</div>)}</>;
+}
 
 function createDesignStorageKey(
   eventName: string
@@ -195,8 +212,12 @@ function TicketDesigner({
       : 0;
 
   const detectionId = useRef(0);
-  const [panel,setPanel]=useState<"settings"|"range"|null>(null);
+  const [panel,setPanel]=useState<"settings"|"range"|"layers"|null>(null);
   const [titleSelected,setTitleSelected]=useState(false);
+  const [selectedImage,setSelectedImage]=useState<string|null>(null);
+  const [guides,setGuides]=useState<{x?:number;y?:number}>({});
+  const [snapEnabled,setSnapEnabled]=useState(true);
+
   const [saved,setSaved]=useState(false);
   const undo=useRef<TicketDesignSettings[]>([]),redo=useRef<TicketDesignSettings[]>([]);
   const [,refreshHistory]=useState(0);
@@ -209,7 +230,7 @@ function TicketDesigner({
       () => loadDesignSettings(eventName)
     );
   const [showEditor, setShowEditor] = useState(
-    () => loadDesignSettings(eventName).backgroundImage !== ""
+    () => {const saved=loadDesignSettings(eventName);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
   );
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
@@ -257,6 +278,8 @@ function TicketDesigner({
     key: Key,
     value: TicketDesignSettings[Key]
   ) => {
+    const part=String(key).startsWith("qr")?"qr":String(key).startsWith("number")?"number":String(key).startsWith("title")?"title":null;
+    if(part&&settings.locked?.[part])return;
     setSettings(
       (currentSettings) => ({
         ...currentSettings,
@@ -799,26 +822,31 @@ function TicketDesigner({
     );
   }
 
-  const resizePart=(part:"qr"|"number"|"title",e:React.PointerEvent<HTMLElement>)=>{
-    e.stopPropagation();checkpoint();const target=e.currentTarget;target.setPointerCapture(e.pointerId);
-    const start=e.clientX,size=part==="qr"?settings.qrSize:part==="number"?settings.numberSize:settings.titleSize??28;
+  const selectLayer=(id:string)=>{setSelectedImage(id.startsWith("image-")?id:null);setTitleSelected(id==="title");setSelectedPart(id==="qr"||id==="number"?id:null);};
+  const images=settings.images??[];
+  const layers=settings.layerOrder??["number","qr","title",...images.map(image=>image.id)];
+  const activeLayer=selectedImage??(titleSelected?"title":selectedPart);
+  const activeLocked=Boolean(activeLayer&&settings.locked?.[activeLayer]);
+  const imageUpload=(event:ChangeEvent<HTMLInputElement>)=>{const file=event.target.files?.[0];event.target.value="";if(!file)return;if(!file.type.startsWith("image/")||file.type==="image/svg+xml"){alert("PNG・JPEG・WebPなどの画像を選択してください。");return;}if(file.size>5*1024*1024){alert("追加画像は5MB以下にしてください。");return;}const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=="string")return;checkpoint();const id="image-"+crypto.randomUUID();const image={id,src:reader.result,x:50,y:50,width:30,name:file.name};setSettings(current=>({...current,images:[...(current.images??[]),image],layerOrder:[...(current.layerOrder??["number","qr","title",...(current.images??[]).map(i=>i.id)]),id]}));selectLayer(id);};reader.onerror=()=>alert("画像を読み込めませんでした。");reader.readAsDataURL(file);};
+  const resizePart=(part:string,e:React.PointerEvent<HTMLElement>)=>{
+    e.stopPropagation();selectLayer(part);if(settings.locked?.[part])return;checkpoint();const target=e.currentTarget;target.setPointerCapture(e.pointerId);
+    const image=images.find(i=>i.id===part),start=e.clientX,size=image?image.width:part==="qr"?settings.qrSize:part==="number"?settings.numberSize:settings.titleSize??28;
     const width=ticketCardRef.current?.getBoundingClientRect().width||500;
-    const move=(ev:PointerEvent)=>updateSetting(part==="qr"?"qrSize":part==="number"?"numberSize":"titleSize",Math.max(part==="qr"?12:10,Math.min(part==="qr"?55:part==="number"?60:80,size+(ev.clientX-start)/width*(part==="qr"?100:120))));
+    const move=(ev:PointerEvent)=>{const value=Math.max(image?5:part==="qr"?12:10,Math.min(image?100:part==="qr"?55:part==="number"?60:80,size+(ev.clientX-start)/width*(image||part==="qr"?100:120)));if(image)setSettings(current=>({...current,images:current.images?.map(i=>i.id===part?{...i,width:value}:i)}));else updateSetting(part==="qr"?"qrSize":part==="number"?"numberSize":"titleSize",value);};
     const stop=()=>{target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
   };
-  const movePart=(part:"qr"|"number"|"title",e:React.PointerEvent<HTMLElement>)=>{
-    checkpoint();setTitleSelected(part==="title");setSelectedPart(part==="title"?null:part);
-    const card=ticketCardRef.current;if(!card)return;const rect=card.getBoundingClientRect();
-    const x=e.clientX,y=e.clientY;
-    const left=part==="qr"?settings.qrX:part==="number"?settings.numberX:settings.titleX??32;
-    const top=part==="qr"?settings.qrY:part==="number"?settings.numberY:settings.titleY??30;
-    e.currentTarget.setPointerCapture(e.pointerId);e.stopPropagation();
-    const target=e.currentTarget;
-    const move=(event:PointerEvent)=>{setSettings(current=>({...current,
-      [part==="qr"?"qrX":part==="number"?"numberX":"titleX"]:Math.max(0,Math.min(100,left+(event.clientX-x)/rect.width*100)),
-      [part==="qr"?"qrY":part==="number"?"numberY":"titleY"]:Math.max(0,Math.min(100,top+(event.clientY-y)/rect.height*100))}));};
-    const stop=()=>{target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};
-    target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
+  const movePart=(part:string,e:React.PointerEvent<HTMLElement>)=>{
+    e.stopPropagation();selectLayer(part);if(settings.locked?.[part])return;checkpoint();
+    const card=ticketCardRef.current;if(!card)return;const rect=card.getBoundingClientRect(),item=e.currentTarget.getBoundingClientRect();
+    const x=e.clientX,y=e.clientY,image=images.find(i=>i.id===part);
+    const left=image?image.x:part==="qr"?settings.qrX:part==="number"?settings.numberX:settings.titleX??32;
+    const top=image?image.y:part==="qr"?settings.qrY:part==="number"?settings.numberY:settings.titleY??30;
+    const halfX=item.width/rect.width*50,halfY=item.height/rect.height*50;
+    const peers=[{id:"qr",x:settings.qrX,y:settings.qrY},{id:"number",x:settings.numberX,y:settings.numberY},...(settings.title?[{id:"title",x:settings.titleX??32,y:settings.titleY??30}]:[]),...images].filter(i=>i.id!==part);
+    const snap=(value:number,targets:{value:number;line:number}[],threshold:number)=>{const closest=targets.reduce((a,b)=>Math.abs(b.value-value)<Math.abs(a.value-value)?b:a);return snapEnabled&&Math.abs(closest.value-value)<threshold?{value:closest.value,line:closest.line}:{value:Math.max(0,Math.min(100,value)),line:undefined};};
+    const target=e.currentTarget;target.setPointerCapture(e.pointerId);
+    const move=(event:PointerEvent)=>{const nx=snap(left+(event.clientX-x)/rect.width*100,[{value:halfX,line:0},{value:50,line:50},{value:100-halfX,line:100},...peers.map(p=>({value:p.x,line:p.x}))],7/rect.width*100);const ny=snap(top+(event.clientY-y)/rect.height*100,[{value:halfY,line:0},{value:50,line:50},{value:100-halfY,line:100},...peers.map(p=>({value:p.y,line:p.y}))],7/rect.height*100);setGuides({x:nx.line,y:ny.line});setSettings(current=>image?({...current,images:current.images?.map(i=>i.id===part?{...i,x:nx.value,y:ny.value}:i)}):({...current,[part==="qr"?"qrX":part==="number"?"numberX":"titleX"]:nx.value,[part==="qr"?"qrY":part==="number"?"numberY":"titleY"]:ny.value}));};
+    const stop=()=>{setGuides({});target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
   };
   return (
     <div className="ticket-designer-background ticket-designer-glass ticket-studio">
@@ -834,30 +862,35 @@ function TicketDesigner({
         </header>
         <main className="studio-workspace">
           <nav className="studio-dock" aria-label="編集ツール">
-            <button type="button" onClick={()=>{setPanel(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
-            <button type="button" onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
+            <button type="button" onClick={()=>{setPanel(null);setSelectedImage(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
+            <button type="button" onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setSelectedImage(null);setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
+            <label>▧<small>画像</small><input aria-label="画像を追加" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={imageUpload}/></label>
+            <button type="button" onClick={()=>setPanel(panel==="layers"?null:"layers")}>▱<small>レイヤー</small></button>
             <label>▧<small>背景</small><input type="file" accept="image/*" onChange={handleBackgroundImage}/></label>
-            <button type="button" onClick={()=>{setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
-            <button type="button" onClick={()=>{setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
+            <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
+            <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
             <button type="button" className={panel==="settings"?"active":""} onClick={()=>setPanel(panel==="settings"?null:"settings")}>⚙<small>設定</small></button>
             <button type="button" className={panel==="range"?"active":""} onClick={()=>setPanel(panel==="range"?null:"range")}>▤<small>一覧</small></button>
           </nav>
           <div className="studio-canvas" onClick={()=>{}}>
             <div className="studio-context" onPointerDownCapture={checkpoint}>
               <span>{titleSelected?"イベント名":selectedPart==="qr"?"QRコード":selectedPart==="number"?"チケット番号":"キャンバス"}</span>
-              {titleSelected?<><input aria-label="イベント名の文字" value={settings.title??""} onChange={e=>updateSetting("title",e.target.value)}/><input type="number" aria-label="イベント名の文字サイズ" min="10" max="80" value={settings.titleSize??28} onChange={e=>updateSetting("titleSize",Math.max(10,Math.min(80,Number(e.target.value))))}/><button type="button" onClick={()=>updateSetting("title","")}>削除</button></>:
-              selectedPart?<><span>サイズ</span><input type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>setPanel("settings")}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
+              {selectedImage?<><span>追加画像{activeLocked?"（ロック中）":""}</span><button type="button" disabled={activeLocked} onClick={()=>{checkpoint();setSettings(current=>({...current,images:current.images?.filter(i=>i.id!==selectedImage),layerOrder:layers.filter(id=>id!==selectedImage)}));setSelectedImage(null);}}>削除</button></>:titleSelected?<><input disabled={activeLocked} aria-label="イベント名の文字" value={settings.title??""} onChange={e=>updateSetting("title",e.target.value)}/><input disabled={activeLocked} type="number" aria-label="イベント名の文字サイズ" min="10" max="80" value={settings.titleSize??28} onChange={e=>updateSetting("titleSize",Math.max(10,Math.min(80,Number(e.target.value))))}/><input aria-label="文字色" type="color" disabled={activeLocked} value={settings.titleColor??"#162e4a"} onChange={e=>updateSetting("titleColor",e.target.value)}/><select aria-label="フォント" disabled={activeLocked} value={settings.titleFont??"sans-serif"} onChange={e=>updateSetting("titleFont",e.target.value)}><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select><button type="button" disabled={activeLocked} aria-pressed={settings.titleBold!==false} onClick={()=>updateSetting("titleBold",settings.titleBold===false)}>太字</button><button type="button" disabled={activeLocked} onClick={()=>updateSetting("title","")}>削除</button></>:
+              selectedPart?<><span>サイズ</span><input disabled={activeLocked} type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>setPanel("settings")}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
             </div>
             <div className="studio-paper-area" onPointerDown={e=>{if((e.target as HTMLElement).closest('.ticket-draggable-part'))return;panDragStart.current={pointerId:e.pointerId,x:e.clientX,y:e.clientY,panX:previewPan.x,panY:previewPan.y};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const start=panDragStart.current;if(start?.pointerId===e.pointerId)setPreviewPan({x:start.panX+e.clientX-start.x,y:start.panY+e.clientY-start.y});}} onPointerUp={()=>{panDragStart.current=null;}} onPointerCancel={()=>{panDragStart.current=null;}} onTouchStart={e=>{if(e.touches.length===2){pinchStartDistance.current=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pinchStartZoom.current=previewZoom;}}} onTouchMove={e=>{if(e.touches.length===2&&pinchStartDistance.current){const distance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);setPreviewZoom(Math.max(.5,Math.min(3,pinchStartZoom.current*distance/pinchStartDistance.current)));}}} onTouchEnd={()=>{pinchStartDistance.current=null;}}>
               <div ref={ticketCardRef} className="ticket-design-card" style={{...previewTicketStyle,transform:`translate(${previewPan.x}px,${previewPan.y}px) scale(${previewZoom})`,transformOrigin:"center"}}>
+                <AddedImages settings={settings} selected={selectedImage} onSelect={movePart} onResize={resizePart}/>
+                {guides.x!==undefined&&<div className="studio-guide vertical" style={{left:`${guides.x}%`}}/>}{guides.y!==undefined&&<div className="studio-guide horizontal" style={{top:`${guides.y}%`}}/>}
                 {!settings.backgroundImage&&<div className="studio-paper-placeholder"><span>TICKET</span><small>{eventName}</small></div>}
-                {settings.title&&<div className={`ticket-design-title ticket-draggable-part ${titleSelected?"is-selected":""}`} style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}} onPointerDown={e=>movePart("title",e)}>{settings.title}{titleSelected&&<button className="studio-resize" aria-label="文字をリサイズ" onPointerDown={e=>resizePart("title",e)}/>}</div>}
-                <div className={`ticket-design-qr ticket-draggable-part ${selectedPart==="qr"?"is-selected":""}`} style={{left:`${settings.qrX}%`,top:`${settings.qrY}%`,width:`${settings.qrSize}%`}} onPointerDown={e=>movePart("qr",e)}><LazyQrCode value={previewTicket?qrValue(previewTicket):""} size={500} level="M" marginSize={1}/>{selectedPart==="qr"&&<button className="studio-resize" aria-label="QRをリサイズ" onPointerDown={e=>resizePart("qr",e)}/>}</div>
-                <div className={`ticket-design-number ticket-draggable-part ${selectedPart==="number"?"is-selected":""}`} style={{left:`${settings.numberX}%`,top:`${settings.numberY}%`,fontSize:`${settings.numberSize}px`}} onPointerDown={e=>movePart("number",e)}>{previewTicket?.qrNumber}{selectedPart==="number"&&<button className="studio-resize" aria-label="番号をリサイズ" onPointerDown={e=>resizePart("number",e)}/>}</div>
+                {settings.title&&<div className={`ticket-design-title ticket-draggable-part ${titleSelected?"is-selected":""}`} style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}} onPointerDown={e=>movePart("title",e)}>{settings.title}{titleSelected&&<button className="studio-resize" aria-label="文字をリサイズ" onPointerDown={e=>resizePart("title",e)}/>}</div>}
+                <div className={`ticket-design-qr ticket-draggable-part ${selectedPart==="qr"?"is-selected":""}`} style={{...layerStyle(settings,"qr"),left:`${settings.qrX}%`,top:`${settings.qrY}%`,width:`${settings.qrSize}%`}} onPointerDown={e=>movePart("qr",e)}><LazyQrCode value={previewTicket?qrValue(previewTicket):""} size={500} level="M" marginSize={1}/>{selectedPart==="qr"&&<button className="studio-resize" aria-label="QRをリサイズ" onPointerDown={e=>resizePart("qr",e)}/>}</div>
+                <div className={`ticket-design-number ticket-draggable-part ${selectedPart==="number"?"is-selected":""}`} style={{...layerStyle(settings,"number"),left:`${settings.numberX}%`,top:`${settings.numberY}%`,fontSize:`${settings.numberSize}px`}} onPointerDown={e=>movePart("number",e)}>{previewTicket?.qrNumber}{selectedPart==="number"&&<button className="studio-resize" aria-label="番号をリサイズ" onPointerDown={e=>resizePart("number",e)}/>}</div>
               </div>
             </div>
             <div className="studio-zoom"><button type="button" aria-label="縮小" onClick={()=>setPreviewZoom(z=>Math.max(.5,z-.1))}>−</button><span>{Math.round(previewZoom*100)}%</span><button type="button" aria-label="拡大" onClick={()=>setPreviewZoom(z=>Math.min(3,z+.1))}>＋</button><button type="button" onClick={()=>{setPreviewZoom(1);setPreviewPan({x:0,y:0});}}>画面に合わせる</button></div>
           </div>
+          {panel==="layers"&&<FloatingPanel title="レイヤー" className="studio-inspector" onClose={()=>setPanel(null)}><div className="studio-layers"><label><input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)}/>吸着・整列ガイド</label><p>上の項目ほど手前に表示されます</p>{[...layers].reverse().filter(id=>id!=="title"||settings.title).map(id=><div key={id} className={activeLayer===id?"active":""}><button type="button" onClick={()=>selectLayer(id)}>{id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(i=>i.id===id)?.name??"画像"}</button><button type="button" aria-label={`${id}をロック切替`} aria-pressed={Boolean(settings.locked?.[id])} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{settings.locked?.[id]?"固定":"自由"}</button><button type="button" aria-label={`${id}を前へ`} disabled={layers.indexOf(id)===layers.length-1} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i+1]]=[order[i+1],order[i]];updateSetting("layerOrder",order);}}>↑</button><button type="button" aria-label={`${id}を後ろへ`} disabled={layers.indexOf(id)===0} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i-1]]=[order[i-1],order[i]];updateSetting("layerOrder",order);}}>↓</button></div>)}<p>背景画像は常に最背面に固定されます。</p></div></FloatingPanel>}
           {panel==="settings"&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>setPanel(null)}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
               <h4>
                 チケットサイズ
@@ -1400,11 +1433,11 @@ function TicketDesigner({
             </div>
             <div className="ticket-actual-size-preview-wrap">
               <div className="ticket-actual-size-preview" style={({ "--ticket-actual-size-width": `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" } as CSSProperties & { "--ticket-actual-size-width": string })}>
-                {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
-      <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
+                <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+      <div className="ticket-design-qr" style={{ ...layerStyle(settings,"qr"), left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
-                <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize * screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
+                <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize * screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
               </div>
             </div>
             <div className="ticket-screen-calibration">
@@ -1459,11 +1492,11 @@ function TicketDesigner({
                           : `url("${settings.backgroundImage}")`,
                     }}
                   >
-                    {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+                    <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
                     <div
                       className="ticket-design-qr"
                       style={{
-                        left: `${settings.qrX}%`,
+                        ...layerStyle(settings,"qr"), left: `${settings.qrX}%`,
                         top: `${settings.qrY}%`,
                         width: `${settings.qrSize}%`,
                       }}
@@ -1479,7 +1512,7 @@ function TicketDesigner({
                     <div
                       className="ticket-design-number"
                       style={{
-                        left: `${settings.numberX}%`,
+                        ...layerStyle(settings,"number"), left: `${settings.numberX}%`,
                         top: `${settings.numberY}%`,
                         fontSize: `${settings.numberSize}px`,
                       }}
@@ -1527,11 +1560,11 @@ export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventNam
   return (
     <div className="ticket-qr-design-preview" style={cardStyle}>
       {!settings.backgroundImage && <div className="ticket-no-background" style={{ background: "linear-gradient(135deg,#f2f5fa,#dce4f0)" }}>背景画像が未設定です</div>}
-      {settings.title&&<div className="ticket-design-title" style={{left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
-      <div className="ticket-design-qr" style={{ left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
+      <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+      <div className="ticket-design-qr" style={{ ...layerStyle(settings,"qr"), left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
         <LazyQrCode value={qrValue} size={500} level="M" marginSize={1} />
       </div>
-      <div className="ticket-design-number" style={{ left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{ticketNumber}</div>
+      <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize}px` }}>{ticketNumber}</div>
     </div>
   );
 }
