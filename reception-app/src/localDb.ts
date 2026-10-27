@@ -305,10 +305,10 @@ export async function saveReceptionTransaction(
         [STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
         "readwrite"
       );
-  
+
       transaction.objectStore(STORES.tickets).put(ticket);
       transaction.objectStore(STORES.receptionRecords).put(record);
-  
+
       const queueStore = transaction.objectStore(STORES.syncQueue);
       const existing = queueStore.getAll();
       existing.onsuccess = () => {
@@ -316,7 +316,7 @@ export async function saveReceptionTransaction(
           .reduce((maximum, item) => Math.max(maximum, item.sequence ?? 0), 0) + 1;
         queueStore.put({recordId: record.recordId, status: "pending", retryCount: 0, sequence} satisfies SyncQueueItem);
       };
-  
+
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("受付データを保存できませんでした"));
