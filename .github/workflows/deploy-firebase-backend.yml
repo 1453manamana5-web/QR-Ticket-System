@@ -19,6 +19,8 @@ jobs:
   deploy:
     if: ${{ inputs.confirm_production == 'DEPLOY' }}
     runs-on: ubuntu-latest
+    environment:
+      name: firebase-production
     steps:
       - name: Require Firebase service account secret
         env:
