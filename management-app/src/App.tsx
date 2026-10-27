@@ -159,18 +159,6 @@ export default function App() {
   const [newStartTime, setNewStartTime] = useState("10:00");
   const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
-  useEffect(() => {
-    if (!event.eventId) {
-      setBundle(null);
-      return;
-    }
-    let cancelled = false;
-    setBundle(null);
-    void loadPublishedEventBundle(event.eventId).then(savedBundle => {
-      if (!cancelled) setBundle(savedBundle);
-    }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
-    return () => { cancelled = true; };
-  }, [event.eventId, event.dataVersion]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
   const [receptionErrors, setReceptionErrors] = useState<Awaited<ReturnType<typeof loadReceptionErrors>>>([]);
@@ -433,14 +421,37 @@ export default function App() {
   const firebaseTicketHydratedRef = useRef(false);
   const deletedEventIdsRef = useRef(new Set<string>());
 
+  const ownManagementTerminalApproved = terminals.some(
+    terminal =>
+      terminal.terminalId === firebaseDeviceId &&
+      (terminal.role === "management" || terminal.role === "both") &&
+      terminal.approved && terminal.managementApproved === true,
+  );
+  useEffect(() => {
+    if (!ownManagementTerminalApproved || !event.eventId) {
+      setBundle(null);
+      return;
+    }
+    let cancelled = false;
+    setBundle(null);
+    void loadPublishedEventBundle(event.eventId).then(savedBundle => {
+      if (!cancelled) setBundle(savedBundle);
+    }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
+    return () => { cancelled = true; };
+  }, [event.eventId, event.dataVersion, ownManagementTerminalApproved]);
+
+
   useEffect(() => {
     try { localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [eventHistory]);
 
   useEffect(() => {
+    if (!ownManagementTerminalApproved) return;
+    let active = true;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeEvents(events => {
+        if (!active) return;
         const realEvents = events.filter(item => item.eventId && !deletedEventIdsRef.current.has(item.eventId));
         firebaseEventHydratedRef.current = true;
         setEventHistory(realEvents);
@@ -451,14 +462,14 @@ export default function App() {
     } catch (reason) {
       console.error("Firebase event subscription failed", reason);
     }
-    return () => unsubscribe?.();
-  }, []);
+    return () => { active = false; unsubscribe?.(); };
+  }, [ownManagementTerminalApproved]);
 
   useEffect(() => {
     firebaseTicketHydratedRef.current = false;
     setTickets([]);
     let active = true;
-    if (!event.eventId) {
+    if (!ownManagementTerminalApproved || !event.eventId) {
       setTickets([]);
       return;
     }
@@ -473,9 +484,9 @@ export default function App() {
       console.error("Firebase ticket subscription failed", reason);
     }
     return () => { active = false; unsubscribe?.(); };
-  }, [event.eventId]);
+  }, [event.eventId, ownManagementTerminalApproved]);
   useEffect(() => {
-    if (!event.eventId) {
+    if (!ownManagementTerminalApproved || !event.eventId) {
       setReceptionErrors([]);
       setReceptionErrorsLoading(false);
       return;
@@ -490,13 +501,13 @@ export default function App() {
       })
       .finally(() => { if (!cancelled) setReceptionErrorsLoading(false); });
     return () => { cancelled = true; };
-  }, [event.eventId]);
+  }, [event.eventId, ownManagementTerminalApproved]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     let active = true;
     setReceptionRecords([]);
-    if (!event.eventId) {
+    if (!ownManagementTerminalApproved || !event.eventId) {
       setReceptionRecords([]);
       return;
     }
@@ -508,11 +519,11 @@ export default function App() {
       console.error("Firebase reception record subscription failed", reason);
     }
     return () => { active = false; unsubscribe?.(); };
-  }, [event.eventId]);
+  }, [event.eventId, ownManagementTerminalApproved]);
 
   useEffect(() => {
     const targetEventId = selectedAnalysisEventId || event.eventId;
-    if (page !== "分析" || !targetEventId || targetEventId === event.eventId) {
+    if (!ownManagementTerminalApproved || page !== "分析" || !targetEventId || targetEventId === event.eventId) {
       setHistoricalAnalysisData(current => current.eventId === targetEventId && !current.loading
         ? current
         : { eventId: targetEventId, tickets: [], records: [], loading: false });
@@ -540,7 +551,7 @@ export default function App() {
     });
 
     return () => { cancelled = true; };
-  }, [page, selectedAnalysisEventId, event.eventId]);
+  }, [page, selectedAnalysisEventId, event.eventId, ownManagementTerminalApproved]);
 
   useEffect(() => {
     setEventHistory(current => current.filter(item => item.eventId));
@@ -594,7 +605,7 @@ export default function App() {
     setTicketQrModalTicket(null);
     setTicketDesignModalOpen(false);
     setTicketCreateModalOpen(false);
-    if (!event.eventId) return;
+    if (!ownManagementTerminalApproved || !event.eventId) return;
     void loadReceptionSettings(event.eventId).then(remote => {
       if (active) {
         if (remote) setSettings(remote);
@@ -604,7 +615,7 @@ export default function App() {
     void loadMembers(event.eventId).then(remote => { if (active) setMembers(remote); }).catch(reason => console.error("Firebase member load failed", reason));
     void loadAnalysis(event.eventId).then(remote => { if (active) setAnalysisHistory(remote); }).catch(reason => console.error("Firebase analysis load failed", reason));
     return () => { active = false; };
-  }, [event.eventId]);
+  }, [event.eventId, ownManagementTerminalApproved]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -642,12 +653,7 @@ export default function App() {
     return () => unsubscribe?.();
   }, []);
 
-  const ownManagementTerminalApproved = terminals.some(
-    terminal =>
-      terminal.terminalId === firebaseDeviceId &&
-      (terminal.role === "management" || terminal.role === "both") &&
-      terminal.approved,
-  );
+
 
   useEffect(() => {
     if (!terminalDataHydrated || !ownManagementTerminalApproved) return;
@@ -690,7 +696,7 @@ export default function App() {
 
 
   useEffect(() => {
-    if (!(event as Event & {receptionTarget?:boolean}).receptionTarget) return;
+    if (!ownManagementTerminalApproved || !(event as Event & {receptionTarget?:boolean}).receptionTarget) return;
 
     const finishEvent = async () => {
       if (finalizationRunning.current || !terminalDataHydrated || !firebaseTicketHydratedRef.current) return;
@@ -769,7 +775,7 @@ export default function App() {
     syncAutomaticStatus();
     const timer = window.setInterval(syncAutomaticStatus, 5000);
     return () => window.clearInterval(timer);
-  }, [event, eventHistory, ticketStats, terminals]);
+  }, [event, eventHistory, ticketStats, terminals, ownManagementTerminalApproved]);
 
   const filteredTickets = useMemo(() => {
     const query = ticketQuery.trim().toLowerCase();
@@ -1517,7 +1523,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!event.eventId) {
+    if (!ownManagementTerminalApproved || !event.eventId) {
       setAiPreviousEventData({ eventId: "", eventName: "", eventDate: "", tickets: [], records: [], loading: false, error: false });
       return;
     }
@@ -1552,7 +1558,7 @@ export default function App() {
         setAiPreviousEventData({ eventId: previousEvent.eventId, eventName: previousEvent.eventName, eventDate: previousEvent.eventDate || "", tickets: [], records: [], loading: false, error: true });
       });
     return () => { cancelled = true; };
-  }, [event.eventId, event.eventDate, eventHistory]);
+  }, [event.eventId, event.eventDate, eventHistory, ownManagementTerminalApproved]);
 
   const aiHourlyAnalysis = useMemo(() => {
     const buckets = new Map<number, { entry: number; exit: number; reentry: number }>();

@@ -144,3 +144,20 @@ test('backup restoration saves missing data to Firebase and preserves newer exis
     assert.equal(h.savedSettings.at(-1).deviceName,'Saved manager');
   }finally{await h.close();}
 });
+
+test('management subscriptions begin after approval, stop on revocation and reconnect after reapproval',async()=>{
+  let registration,events,subscriptions=0,cleanups=0;
+  const h=await harness({loadTerminals:async()=>[],subscribeTerminals:callback=>{registration=callback;callback([]);return()=>{};},subscribeEvents:callback=>{events=callback;subscriptions++;callback([event()]);return()=>{cleanups++;};}});
+  try{
+    assert.equal(subscriptions,0);assert.match(h.text(),/端末登録申請/);
+    await act(async()=>registration([manager]));await h.flush();
+    assert.equal(subscriptions,1);assert.match(h.text(),/event-a/);
+    await act(async()=>registration([]));await h.flush();assert.equal(cleanups,1);
+    await act(async()=>events([event('stale-event')]));await h.flush();
+    await act(async()=>registration([manager]));await h.flush();
+    assert.equal(subscriptions,2);assert.doesNotMatch(h.text(),/stale-event/);
+    await h.nav('チケット管理');
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-home-card ticket-list-launch'}).props.onClick());await h.flush();
+    assert.equal(h.renderer.root.findAll(node=>node.props.className==='ticket-screen-row').length,1);
+  }finally{await h.close();}
+});
