@@ -470,6 +470,11 @@ export default function App(){
     setError("");
     try{
       await registerReceptionTerminal(name);
+      // A manually resubmitted terminal must not restore its previous event
+      // after approval and immediately request another approval for that event.
+      await clearLocalEvent();
+      setLocalEvent(null);
+      setAuthPayload(null);
       localStorage.setItem("qr-ticket-reception-name",name);
       setTerminalRegistration({approved:false,status:"pending",name});
     }catch(reason){

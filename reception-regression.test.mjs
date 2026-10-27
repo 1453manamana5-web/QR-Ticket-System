@@ -45,6 +45,8 @@ test("inventory refresh preserves unsent ticket state, validity edits and queue"
   assert.equal(await local.loadLocalEvent(),null);
   assert.equal((await local.getPendingSyncItems()).length,1);
   assert.equal((await local.getReceptionRecord("pending-entry")).type,"entry");
+  await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  assert.equal((await local.getTicket("ticket-one")).currentStatus,"inside");
 });
 
 test("queue preserves capture order even for identical timestamps and clock rollback",async()=>{
@@ -84,7 +86,7 @@ test("one upload worker serializes concurrent triggers and blocks dependent reco
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,reapprove=false}={}) {
+async function harness({saved=true,automatic,latestTicket,download,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map();
@@ -111,7 +113,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
       getEventAuthPayloadByToken:async()=>bundle.authPayload,
     },
     "./receptionSync":{
-      subscribeTerminalRegistration:(cb,onError)=>{registrationCallback=cb;registrationError=onError;cb({approved:true,status:"online",name:"Test terminal"});return()=>{};},
+      subscribeTerminalRegistration:(cb,onError)=>{registrationCallback=cb;registrationError=onError;cb(initialRegistration);return()=>{};},
       subscribeTerminalControl:(_id,cb)=>{controlCallback=cb;cb("停止",null);return()=>{};},
       registerReceptionTerminal:async()=>{registerCalls++;},
       requestReceptionEventReapproval:async()=>reapprove,
@@ -141,6 +143,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
     get inventoryDownloads(){return inventoryDownloads;},
     scan:async value=>{await act(async()=>{await renderer.root.findByType(Scanner).props.onResult(value);});await flush();},
     control:async(mode,at)=>{await act(async()=>controlCallback(mode,at));},
+    approve:async()=>{await act(async()=>registrationCallback({approved:true,status:"online",name:"Test terminal"}));await flush();},
     revoke:async()=>{await act(async()=>registrationError({code:"permission-denied"}));await flush();},
     poll:async()=>{await act(async()=>{for(const {fn} of [...intervals.values()])await fn();});await flush();},
     close:async()=>{await act(async()=>renderer.unmount());},
@@ -215,6 +218,20 @@ test("a reception-only terminal returns to pending approval when publication swi
     assert.match(h.text(),/受付端末の承認待ち/);
     assert.equal(await h.local.loadLocalEvent(),null);
     assert.equal((await h.local.getPendingSyncItems()).length,1);
+  }finally{await h.close();}
+});
+
+test("manual reapplication clears the old event and resumes after approval without a second request",async()=>{
+  const h=await harness({initialRegistration:null});
+  try{
+    await h.local.saveReceptionTransaction({...makeTicket(),currentStatus:"inside"},record("before-reapplication"));
+    await h.click("受付端末を登録申請");
+    assert.equal(await h.local.loadLocalEvent(),null);
+    assert.equal((await h.local.getPendingSyncItems()).length,1);
+    await h.approve();
+    assert.match(h.text(),/受付準備完了/);
+    assert.equal(h.registerCalls,1);
+    assert.equal((await h.local.getTicket("ticket-one")).currentStatus,"inside");
   }finally{await h.close();}
 });
 

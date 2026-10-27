@@ -149,10 +149,11 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       const previousTickets = ticketStore.getAll();
       const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
       queueRequest.onsuccess = () => {
-        const pendingIds = new Set((queueRequest.result as SyncQueueItem[])
-          .filter(item => item.status !== "synced").map(item => item.recordId));
+        const pendingQueue = (queueRequest.result as SyncQueueItem[]).filter(item => item.status !== "synced");
+        const pendingIds = new Set(pendingQueue.map(item => item.recordId));
+        const sequences = new Map(pendingQueue.map(item => [item.recordId, item.sequence]));
         // Queue entries point to records; read them in this same transaction.
-        const pendingTickets = new Set<string>();
+        const pendingRecords = new Map<string, {record: ReceptionRecord; sequence?: number}>();
         let remaining = pendingIds.size;
         const storeInventory = () => {
           const previous = new Map((previousTickets.result as Ticket[])
@@ -162,8 +163,10 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           eventStore.put(readyEvent);
           for (const ticket of tickets) {
             const local = previous.get(ticket.ticketId);
-            ticketStore.put(local && pendingTickets.has(ticket.ticketId)
-              ? {...ticket, currentStatus: local.currentStatus, updatedAt: local.updatedAt}
+            const pending = pendingRecords.get(ticket.ticketId)?.record;
+            ticketStore.put(pending
+              ? {...ticket, currentStatus: local?.currentStatus ?? (pending.type === "exit" ? "exited" : "inside"),
+                updatedAt: local?.updatedAt ?? pending.timestamp}
               : ticket);
           }
         };
@@ -172,7 +175,14 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           const request = transaction.objectStore(STORES.receptionRecords).get(recordId);
           request.onsuccess = () => {
             const record = request.result as ReceptionRecord | undefined;
-            if (record?.eventId === eventId) pendingTickets.add(record.ticketId);
+            if (record?.eventId === eventId) {
+              const previous = pendingRecords.get(record.ticketId);
+              const sequence = sequences.get(recordId);
+              const newer = !previous || (sequence !== undefined
+                ? previous.sequence === undefined || sequence > previous.sequence
+                : previous.sequence === undefined && record.timestamp >= previous.record.timestamp);
+              if (newer) pendingRecords.set(record.ticketId, {record, sequence});
+            }
             if (--remaining === 0) storeInventory();
           };
         }
