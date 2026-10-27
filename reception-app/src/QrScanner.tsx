@@ -79,6 +79,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
     let scanLocked=false;
     let lastDecodedText="";
     let lastDecodedAt=0;
+    let lastHandledSeenAt=0;
 
     const stopCamera=async()=>{
       const current=scanner;
@@ -120,10 +121,10 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         await instance.start(
           cameraConfig,
           {
-            fps:18,
+            fps:30,
             qrbox:(viewfinderWidth,viewfinderHeight)=>{
               const minimumSide=Math.min(viewfinderWidth,viewfinderHeight);
-              const calculatedSize=Math.floor(minimumSide*0.9);
+              const calculatedSize=Math.min(450,Math.floor(minimumSide*0.9));
               const availableSize=Math.max(160,minimumSide-16);
               const finalSize=Math.min(calculatedSize,availableSize);
               return {width:finalSize,height:finalSize};
@@ -132,24 +133,28 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
             disableFlip:true
           },
           decodedText=>{
-            if(!active||scanLocked)return;
+            if(!active)return;
             const normalizedValue=decodedText.trim();
             if(!normalizedValue)return;
 
             const now=Date.now();
-            if(normalizedValue===lastDecodedText&&now-lastDecodedAt<1200)return;
+            const previousSeenAt=lastHandledSeenAt;
+            if(normalizedValue===lastDecodedText)lastHandledSeenAt=now;
+            if(scanLocked)return;
+            // Require removal from view before accepting the same QR again.
+            if(normalizedValue===lastDecodedText&&(now-lastDecodedAt<1000||now-previousSeenAt<450))return;
+            lastHandledSeenAt=now;
             lastDecodedText=normalizedValue;
             lastDecodedAt=now;
             scanLocked=true;
-            // 処理中の二重読取を防ぎつつ、結果画面の表示後は次のQRを読めるようにする。
-            // 以前は scanLocked が解除されず、1回目の読取後にカメラが永久に反応しなかった。
+            // Serialize acceptance, without waiting for the result animation.
             void Promise.resolve()
               .then(()=>onResultRef.current(normalizedValue))
               .catch(error=>console.error("QRコードの受付処理に失敗しました",error))
               .finally(()=>{
                 window.setTimeout(()=>{
                   if(active)scanLocked=false;
-                },2600);
+                },60);
               });
           },
           ()=>undefined
