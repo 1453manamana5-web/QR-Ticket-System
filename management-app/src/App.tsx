@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { callBackend } from "./firebaseFunctions";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, type PublishedEventBundle } from "./eventPublisher";
+import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, saveEventStatus, type PublishedEventBundle } from "./eventPublisher";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
+import {parseManagementBackup} from "./backup";
+import {localDateValue, receptionDataCollected, csvCell} from "./operationSafety";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, saveTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 type AnalysisRecord = {
   eventId: string;
@@ -23,7 +25,7 @@ function loadAnalysisHistory(): AnalysisRecord[] {
     const raw = localStorage.getItem("qr-ticket-analysis-history");
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item.eventId === "string" && typeof item.eventName === "string" && typeof item.savedAt === "string" && [item.total,item.unused,item.inside,item.exited].every(Number.isFinite)) : [];
   } catch {
     return [];
   }
@@ -134,13 +136,16 @@ export default function App() {
     if (deltaX > 0 && sidebarCollapsed) setSidebarCollapsed(false);
   };
   const [event, setEvent] = useState<Event>(baseEvent);
+  const currentEventId = useRef(event.eventId);
+  currentEventId.current = event.eventId;
+  const finalizationRunning = useRef(false);
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
     try {
       const raw = localStorage.getItem("qr-ticket-event-history");
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item: Event) => item?.eventId);
+      return parsed.filter((item: Event) => item && typeof item.eventId === "string" && typeof item.eventName === "string" && typeof item.eventDate === "string" && typeof item.startTime === "string" && typeof item.endTime === "string");
     } catch {
       return [];
     }
@@ -160,6 +165,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
+    setBundle(null);
     void loadPublishedEventBundle(event.eventId).then(savedBundle => {
       if (!cancelled) setBundle(savedBundle);
     }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
@@ -196,6 +202,7 @@ export default function App() {
   const [ticketStartNumber, setTicketStartNumber] = useState(1);
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
   const [savedEventName, setSavedEventName] = useState("");
+  const [eventSettingsReady, setEventSettingsReady] = useState("");
   const [settings, setSettings] = useState<ReceptionSettings>({
     entryEnabled: true,
     exitEnabled: true,
@@ -217,16 +224,26 @@ export default function App() {
     deviceName: "受付端末",
     aiLabEnabled: false,
   };
+  const normalizeAppSettings = (input: unknown): AppSettings => {
+    const value = input && typeof input === "object" ? input as Record<string,unknown> : {};
+    const result = {...defaultAppSettings};
+    for (const key of ["successSound","voiceGuidance","controlAssist","aiLabEnabled"] as const) if(typeof value[key] === "boolean")result[key]=value[key];
+    if(typeof value.volume === "number" && Number.isFinite(value.volume))result.volume=Math.max(0,Math.min(100,value.volume));
+    if(typeof value.deviceName === "string")result.deviceName=value.deviceName.slice(0,80);
+    return result;
+  };
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
     try {
       const raw = localStorage.getItem("qr-ticket-app-settings");
       if (!raw) return defaultAppSettings;
-      return { ...defaultAppSettings, ...JSON.parse(raw) };
+      return normalizeAppSettings(JSON.parse(raw));
     } catch {
       return defaultAppSettings;
     }
   });
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [appSettingsHydrated, setAppSettingsHydrated] = useState("");
+  const appSettingsEdited = useRef(false);
   const [aiLabMenuOpen, setAiLabMenuOpen] = useState(false);
   const [aiLabPanel, setAiLabPanel] = useState<"受付分析" | "システム診断" | "改善提案" | "警告履歴" | "AIイベント分析アシスタント" | "AIイベント終了レポート" | null>(null);
   const [aiReportText, setAiReportText] = useState("");
@@ -234,7 +251,8 @@ export default function App() {
   const [aiLabWarnings, setAiLabWarnings] = useState<AiLabWarning[]>(() => {
     try {
       const raw = localStorage.getItem("qr-ticket-ai-lab-warnings");
-      return raw ? (JSON.parse(raw) as AiLabWarning[]) : [];
+      const parsed=raw?JSON.parse(raw):[];
+      return Array.isArray(parsed)?parsed.filter(item=>item && [item.id,item.eventId,item.title,item.detail,item.detectedAt].every(value=>typeof value === "string")):[];
     } catch {
       return [];
     }
@@ -385,6 +403,9 @@ export default function App() {
     managementApproved?: boolean;
     receptionApproved?: boolean;
     syncPendingCount?: number;
+    receptionMode?: "entry" | "exit" | "stopped";
+    receptionEventId?: string;
+    receptionReportedAt?: string;
   };
   const defaultTerminals: ManagedTerminal[] = [];
 
@@ -413,7 +434,7 @@ export default function App() {
   const deletedEventIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
-    localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory));
+    try { localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [eventHistory]);
 
   useEffect(() => {
@@ -435,6 +456,8 @@ export default function App() {
 
   useEffect(() => {
     firebaseTicketHydratedRef.current = false;
+    setTickets([]);
+    let active = true;
     if (!event.eventId) {
       setTickets([]);
       return;
@@ -442,13 +465,14 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeTickets(event.eventId, remoteTickets => {
+        if (!active) return;
         firebaseTicketHydratedRef.current = true;
         setTickets(remoteTickets);
       }, reason => console.error("Firebase ticket subscription failed", reason));
     } catch (reason) {
       console.error("Firebase ticket subscription failed", reason);
     }
-    return () => unsubscribe?.();
+    return () => { active = false; unsubscribe?.(); };
   }, [event.eventId]);
   useEffect(() => {
     if (!event.eventId) {
@@ -470,18 +494,20 @@ export default function App() {
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let active = true;
+    setReceptionRecords([]);
     if (!event.eventId) {
       setReceptionRecords([]);
       return;
     }
     try {
       unsubscribe = subscribeReceptionRecords(event.eventId, records => {
-        setReceptionRecords(records as ReceptionRecord[]);
+        if (active) setReceptionRecords(records as ReceptionRecord[]);
       }, reason => console.error("Firebase reception record subscription failed", reason));
     } catch (reason) {
       console.error("Firebase reception record subscription failed", reason);
     }
-    return () => unsubscribe?.();
+    return () => { active = false; unsubscribe?.(); };
   }, [event.eventId]);
 
   useEffect(() => {
@@ -517,9 +543,6 @@ export default function App() {
   }, [page, selectedAnalysisEventId, event.eventId]);
 
   useEffect(() => {
-    void deleteFirebaseEvent("DEMO-2027").catch(reason => {
-      console.error("Legacy demo event cleanup failed", reason);
-    });
     setEventHistory(current => current.filter(item => item.eventId));
     setAnalysisHistory(current => current.filter(item => item.eventId));
     try {
@@ -536,35 +559,51 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("qr-ticket-managed-terminals-v2", JSON.stringify(terminals));
+    try { localStorage.setItem("qr-ticket-managed-terminals-v2", JSON.stringify(terminals)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [terminals]);
 
   useEffect(() => {
-    localStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory));
+    try { localStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [analysisHistory]);
   useEffect(() => {
-    localStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings));
-    void saveAppSettings(firebaseDeviceId, appSettings).catch(reason => console.error("Firebase app settings save failed", reason));
-  }, [appSettings, firebaseDeviceId]);
-
-  useEffect(() => {
-    void loadAppSettings(firebaseDeviceId).then(remote => {
-      if (remote) setAppSettings(current => ({ ...current, ...remote } as AppSettings));
-    }).catch(reason => console.error("Firebase app settings load failed", reason));
-  }, [firebaseDeviceId]);
-
-  useEffect(() => {
-    if (!event.eventId) {
-      setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
-      setMembers([]);
-      setAnalysisHistory([]);
-      return;
+    try { localStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
+    if (appSettingsHydrated === firebaseDeviceId && ownManagementTerminalApproved) {
+      void saveAppSettings(firebaseDeviceId, appSettings).catch(reason => console.error("Firebase app settings save failed", reason));
     }
+  }, [appSettings, firebaseDeviceId, appSettingsHydrated, terminalDataHydrated, terminals.some(terminal => terminal.terminalId === firebaseDeviceId && terminal.approved && terminal.managementApproved)]);
+
+  useEffect(() => {
+    let active = true;
+    setAppSettingsHydrated("");
+    if (!terminalDataHydrated || !terminals.some(terminal => terminal.terminalId === firebaseDeviceId && terminal.approved && terminal.managementApproved)) return;
+    void loadAppSettings(firebaseDeviceId).then(remote => {
+      if (!active) return;
+      if (remote && !appSettingsEdited.current) setAppSettings(current => normalizeAppSettings({ ...current, ...remote }));
+      setAppSettingsHydrated(firebaseDeviceId);
+    }).catch(reason => console.error("Firebase app settings load failed", reason));
+    return () => { active = false; };
+  }, [firebaseDeviceId, terminalDataHydrated, terminals.some(terminal => terminal.terminalId === firebaseDeviceId && terminal.approved && terminal.managementApproved)]);
+
+  useEffect(() => {
+    let active = true;
+    setEventSettingsReady("");
+    setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
+    setMembers([]);
+    setAnalysisHistory([]);
+    setSelectedMemberIds([]);
+    setTicketQrModalTicket(null);
+    setTicketDesignModalOpen(false);
+    setTicketCreateModalOpen(false);
+    if (!event.eventId) return;
     void loadReceptionSettings(event.eventId).then(remote => {
-      if (remote) setSettings(remote);
+      if (active) {
+        if (remote) setSettings(remote);
+        setEventSettingsReady(event.eventId);
+      }
     }).catch(reason => console.error("Firebase reception settings load failed", reason));
-    void loadMembers(event.eventId).then(remote => setMembers(remote)).catch(reason => console.error("Firebase member load failed", reason));
-    void loadAnalysis(event.eventId).then(remote => setAnalysisHistory(remote)).catch(reason => console.error("Firebase analysis load failed", reason));
+    void loadMembers(event.eventId).then(remote => { if (active) setMembers(remote); }).catch(reason => console.error("Firebase member load failed", reason));
+    void loadAnalysis(event.eventId).then(remote => { if (active) setAnalysisHistory(remote); }).catch(reason => console.error("Firebase analysis load failed", reason));
+    return () => { active = false; };
   }, [event.eventId]);
 
   useEffect(() => {
@@ -651,24 +690,19 @@ export default function App() {
 
 
   useEffect(() => {
-    if (eventHistory[0]?.eventId !== event.eventId) return;
+    if (!(event as Event & {receptionTarget?:boolean}).receptionTarget) return;
 
     const finishEvent = async () => {
-      const receptionTerminals = terminals.filter(
-        terminal => terminal.role === "reception" || terminal.role === "both",
-      );
-      const allReceptionDataSynced = receptionTerminals.every(
-        terminal => terminal.syncPendingCount === 0,
-      );
-
-      if (!allReceptionDataSynced) {
-        setTerminalNotice("受付データを回収しています。すべての受付端末の同期が完了するまで終了処理中のまま待機します。");
+      if (finalizationRunning.current || !terminalDataHydrated || !firebaseTicketHydratedRef.current) return;
+      if (!receptionDataCollected(terminals, event.eventId)) {
+        setTerminalNotice("受付データの回収待ちです。受付端末をオンラインに戻して停止し、未送信0件を確認してください。古い通信情報では終了しません。");
         return;
       }
 
-      saveAnalysisSnapshot(event);
+      finalizationRunning.current = true;
       const released = terminals.map(terminal => {
         if (terminal.role !== "reception" && terminal.role !== "both") return terminal;
+        if (terminal.terminalId !== firebaseDeviceId && (terminal.admin || terminal.subAdmin)) return terminal;
         const managementApproved = terminal.role === "both"
           ? Boolean(terminal.managementApproved ?? terminal.approved)
           : false;
@@ -687,7 +721,7 @@ export default function App() {
       try {
         await Promise.all(terminals
           .filter(terminal =>
-            terminal.terminalId !== firebaseDeviceId &&
+            terminal.terminalId !== firebaseDeviceId && !terminal.admin && !terminal.subAdmin &&
             (terminal.role === "reception" || terminal.role === "both") &&
             terminal.approved &&
             (terminal.receptionApproved === true || terminal.receptionApproved === undefined)
@@ -700,20 +734,22 @@ export default function App() {
         )) {
           await releaseOwnReceptionOnServer();
         }
+        saveAnalysisSnapshot(event);
         setTerminals(released);
         setSelectedTerminalId(null);
         setTerminalNotice("受付データの回収が完了しました。受付機能の認証を解除しました。");
         const finished = { ...event, eventStatus: "finished" as const };
+        await saveEventStatus(finished.eventId, finished.eventStatus);
+        if (currentEventId.current !== finished.eventId) return;
         setEvent(finished);
         setEventHistory(current =>
           current.map(item => item.eventId === finished.eventId ? finished : item),
         );
         setSelectedHistoryEventId(finished.eventId);
-        await saveEventMetadata(finished);
       } catch (reason) {
         console.error("Terminal release after event finalization failed", reason);
         setError("イベント終了時の端末認証解除に失敗しました。端末管理を確認してください。");
-      }
+      } finally { finalizationRunning.current = false; }
     };
 
     const syncAutomaticStatus = () => {
@@ -722,39 +758,12 @@ export default function App() {
       const next = getAutomaticEventStatus(event);
 
       if (next === "finalizing") {
-        if (event.eventStatus !== "finalizing") {
-          const updated = { ...event, eventStatus: "finalizing" as const };
-          setEvent(updated);
-          setEventHistory(current =>
-            current.map(item => item.eventId === updated.eventId ? updated : item),
-          );
-          setSelectedHistoryEventId(updated.eventId);
-          setTerminalNotice("終了時刻になりました。受付端末からデータを回収しています。");
-          void saveEventMetadata(updated).catch(reason => {
-            console.error(reason);
-            setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
-          });
-        }
+        setTerminalNotice("終了時刻になりました。受付端末からデータを回収しています。");
+        void changeEventStatus("finalizing");
         return;
       }
-
-      if (event.eventStatus === "finalizing") {
-        void finishEvent();
-        return;
-      }
-
-      if (!next || next === event.eventStatus) return;
-
-      const updated = { ...event, eventStatus: next };
-      setEvent(updated);
-      setEventHistory(current =>
-        current.map(item => item.eventId === updated.eventId ? updated : item),
-      );
-      setSelectedHistoryEventId(updated.eventId);
-      void saveEventMetadata(updated).catch(reason => {
-        console.error(reason);
-        setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
-      });
+      if (event.eventStatus === "finalizing") { void finishEvent(); return; }
+      if (next && next !== event.eventStatus) void changeEventStatus(next);
     };
 
     syncAutomaticStatus();
@@ -775,6 +784,7 @@ export default function App() {
 
   const saveEvent = async () => {
     if (publishing) return;
+    if (eventSettingsReady !== event.eventId) { setError("受付設定を読み込んでいます。読み込み完了後にもう一度保存してください。"); return; }
     if (event.eventStatus === "finished") {
       setError("過去のイベントは履歴として保存されます。Firebaseへの再公開はできません。");
       return;
@@ -784,7 +794,7 @@ export default function App() {
       setError("先にイベントを作成してください。");
       return;
     }
-    if (!eventDate || !startTime || !endTime) {
+    if (!normalizedName || !eventDate || !startTime || !endTime) {
       setError("開催日・開始時刻・終了時刻を入力してください。");
       return;
     }
@@ -806,15 +816,13 @@ export default function App() {
     };
 
     setPublishing(true);
-    setEvent(updatedEvent);
-    setEventHistory(current => current.map(item => item.eventId === event.eventId ? updatedEvent : item));
-    setSelectedHistoryEventId(updatedEvent.eventId);
-    setSavedEventName(normalizedName);
-    setTickets(preparedTickets);
     setError("");
 
     try {
       const result = await publishEventBundle(updatedEvent, settings, preparedTickets);
+      if (currentEventId.current !== result.event.eventId) return;
+      setSavedEventName(normalizedName);
+      setSelectedHistoryEventId(result.event.eventId);
       setEvent(result.event);
       setEventHistory(current => current.map(item => item.eventId === result.event.eventId ? result.event : item));
       setBundle(result);
@@ -833,7 +841,7 @@ export default function App() {
   };
 
   const openNewEventModal = () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateValue();
     setNewEventName("新しいイベント");
     setNewEventDate(today);
     setNewStartTime("10:00");
@@ -846,7 +854,9 @@ export default function App() {
     setNewEventModalOpen(false);
   };
 
-  const createNewEvent = () => {
+  const eventCreationRunning = useRef(false);
+  const createNewEvent = async () => {
+    if (eventCreationRunning.current) return;
     const normalizedName = newEventName.trim();
     if (!normalizedName || !newEventDate || !newStartTime || !newEndTime) {
       setError("イベント名・開催日・開始時刻・終了時刻を入力してください。");
@@ -867,7 +877,11 @@ export default function App() {
       dataVersion: 1,
     };
 
-    saveAnalysisSnapshot(event);
+    eventCreationRunning.current = true;
+    try { await saveEventMetadata(next); }
+    catch (reason) { console.error(reason); setError("新しいイベントをFirebaseへ保存できませんでした。"); return; }
+    finally { eventCreationRunning.current = false; }
+    if (event.eventId) saveAnalysisSnapshot(event);
     setEvent(next);
     setEventHistory(current => [next, ...current.filter(item => item.eventId !== next.eventId)]);
     setSelectedHistoryEventId(next.eventId);
@@ -881,23 +895,30 @@ export default function App() {
     setError("");
     setNewEventModalOpen(false);
     setPage("イベント管理");
-    void saveEventMetadata(next).catch(reason => {
-      console.error(reason);
-      setError("新しいイベントをFirebaseへ保存できませんでした。");
-    });
+
   };
 
-  const changeEventStatus = (status: Event["eventStatus"]) => {
-    if (status === "finished") saveAnalysisSnapshot(event);
-    const updated = { ...event, eventStatus: status };
-    setEvent(updated);
-    setEventHistory(current => current.map(item => item.eventId === updated.eventId ? updated : item));
-    setSelectedHistoryEventId(updated.eventId);
+  const statusWriteRunning = useRef(false);
+  const changeEventStatus = async (status: Event["eventStatus"]) => {
+    if (!event.eventId || event.eventStatus === "finished" || statusWriteRunning.current) return;
+    if (status === "finished" && !receptionDataCollected(terminals, event.eventId)) {
+      setError("未回収の受付データがあります。受付端末をオンラインに戻して停止し、同期してから終了してください。");
+      return;
+    }
+    const updated = {...event,eventStatus:status};
+    statusWriteRunning.current = true;
     setError("");
-    void saveEventMetadata(updated).catch(reason => {
+    try {
+      await saveEventStatus(updated.eventId,status);
+      if(currentEventId.current!==updated.eventId)return;
+      if(status==="finished")saveAnalysisSnapshot(event);
+      setEvent(updated);
+      setEventHistory(current=>current.map(item=>item.eventId===updated.eventId?updated:item));
+      setSelectedHistoryEventId(updated.eventId);
+    }catch(reason){
       console.error(reason);
       setError("イベント状態をFirebaseへ保存できませんでした。Firestoreの権限を確認してください。");
-    });
+    }finally{statusWriteRunning.current=false;}
   };
 
   const selectHistoryEvent = (selected: Event) => {
@@ -909,8 +930,10 @@ export default function App() {
     setSavedEventName(selected.eventName);
     setSelectedHistoryEventId(selected.eventId);
     setSelectedAnalysisEventId(selected.eventId);
-    setBundle(null);
-    setTickets([]);
+    if (selected.eventId !== currentEventId.current) {
+      setBundle(null);
+      setTickets([]);
+    }
     setError("");
   };
 
@@ -984,22 +1007,25 @@ export default function App() {
         const number = Number(ticket.basicInfo.ticketNumber);
         return Number.isFinite(number) ? Math.max(max, number) : max;
       }, 0);
-      const startNumber = Math.max(1, existingMaxNumber + 1);
+      const existingMaxId = savedTickets.reduce((maximum,ticket)=>{
+        const suffix=ticket.ticketId.startsWith(prefix)?ticket.ticketId.slice(prefix.length):"";
+        return /^\d+$/.test(suffix)?Math.max(maximum,Number(suffix)):maximum;
+      },0);
+      const startNumber = Math.max(1, existingMaxNumber + 1, existingMaxId + 1);
+      if(!Number.isSafeInteger(startNumber+count-1))throw new Error("TICKET_NUMBER_OVERFLOW");
       setTicketStartNumber(startNumber);
 
       const generated = createTickets(event.eventId, count, startNumber, prefix);
-      const mergedById = new Map(savedTickets.map(ticket => [ticket.ticketId, ticket]));
-      for (const ticket of generated) mergedById.set(ticket.ticketId, ticket);
-      const merged = [...mergedById.values()];
 
       // 保存と件数同期が成功してから画面を更新し、失敗時に成功したように見せない。
-      await saveTickets(event.eventId, merged);
-      setTickets(merged);
+      await appendTickets(event.eventId, generated, true);
+      if (currentEventId.current !== event.eventId) return;
+      // Subscription owns the current inventory, including concurrent reception changes.
       setTicketStatusFilter("all");
       setTicketCreateModalOpen(false);
     } catch (reason) {
       console.error("Ticket generation/save failed", reason);
-      setError("チケットをFirebaseへ保存できませんでした。接続・Firestoreの権限を確認してください。入力内容は保存されていません。");
+      setError("チケットをFirebaseへ保存できませんでした。接続・権限・他端末の発行状況を確認してください。一部だけ発行済みの場合があるため、一覧の枚数を確認してから再試行してください。");
     } finally {
       setTicketGenerating(false);
     }
@@ -1089,12 +1115,14 @@ export default function App() {
   }) : "";
 
   const updateAppSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    appSettingsEdited.current = true;
     setAppSettings(current => ({ ...current, [key]: value }));
     setSettingsNotice("設定を保存しました。");
     window.setTimeout(() => setSettingsNotice(""), 1800);
   };
 
   const resetAppSettings = () => {
+    appSettingsEdited.current = true;
     setAppSettings(defaultAppSettings);
     setSettingsNotice("設定を初期状態に戻しました。");
   };
@@ -1102,6 +1130,7 @@ export default function App() {
   const exportBackup = () => {
     const backup = {
       version: 1,
+      eventId: event.eventId,
       exportedAt: new Date().toISOString(),
       appSettings,
       receptionSettings: settings,
@@ -1128,21 +1157,39 @@ export default function App() {
       const file = input.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
         try {
-          const parsed = JSON.parse(String(reader.result));
-          if (!parsed || typeof parsed !== "object") throw new Error("invalid");
-          if (parsed.appSettings) setAppSettings({ ...defaultAppSettings, ...parsed.appSettings });
-          if (parsed.receptionSettings) setSettings({ ...settings, ...parsed.receptionSettings });
-          if (Array.isArray(parsed.eventHistory) && parsed.eventHistory.length) setEventHistory(parsed.eventHistory);
-          if (Array.isArray(parsed.analysisHistory)) setAnalysisHistory(parsed.analysisHistory);
-          if (Array.isArray(parsed.tickets)) setTickets(parsed.tickets);
-          if (Array.isArray(parsed.members)) setMembers(parsed.members);
-          setSettingsNotice("バックアップを復元しました。");
-        } catch {
-          setError("バックアップファイルを読み込めませんでした。");
+          const parsed = parseManagementBackup(JSON.parse(String(reader.result)));
+          if (!window.confirm("バックアップから不足するイベント・チケット・部員をFirebaseへ復元します。既存のデータと受付状態は上書きしません。続行しますか？")) return;
+          setSettingsNotice("バックアップを復元しています…");
+          for (const item of parsed.eventHistory) {
+            if (!eventHistory.some(existing => existing.eventId === item.eventId)) await saveEventMetadata(item, true);
+            const existing = new Set((await loadEventTickets(item.eventId)).map(ticket => ticket.ticketId));
+            const missing = parsed.tickets.filter(ticket => ticket.eventId === item.eventId && !existing.has(ticket.ticketId));
+            if (missing.length) await appendTickets(item.eventId, missing);
+            const analyses = await loadAnalysis(item.eventId);
+            const snapshot = parsed.analysisHistory.find(record=>record.eventId===item.eventId);
+            if(snapshot && !analyses.length)await saveAnalysis(snapshot);
+          }
+          if (parsed.eventId) {
+            const existing = new Set((await loadMembers(parsed.eventId)).map(member => member.memberId));
+            for (const member of parsed.members) if (!existing.has(member.memberId)) await saveMember(parsed.eventId, member);
+            if (parsed.receptionSettings && !await loadReceptionSettings(parsed.eventId)) await saveReceptionSettings(parsed.eventId, parsed.receptionSettings);
+          }
+          if (parsed.appSettings) {
+            const restored = {...defaultAppSettings,...parsed.appSettings} as AppSettings;
+            await saveAppSettings(firebaseDeviceId, restored);
+            appSettingsEdited.current = true;
+            setAppSettings(restored);
+          }
+          setSettingsNotice("不足するデータをFirebaseへ復元しました。既存のデータと受付状態は保持しました。");
+        } catch (reason) {
+          console.error("Backup restore failed",reason);
+          setSettingsNotice("");
+          setError("バックアップを復元できませんでした。形式・通信・権限を確認してください。途中まで保存された場合も再試行できます。");
         }
       };
+      reader.onerror = () => setError("バックアップファイルを読み込めませんでした。");
       reader.readAsText(file);
     };
     input.click();
@@ -1280,7 +1327,11 @@ export default function App() {
     }
   };
 
+  const terminalNameSequence = useRef(0);
+  const terminalNameSave = useRef(Promise.resolve());
   const updateOwnTerminalName = (name: string) => {
+    if(name.length>80){setTerminalNotice("端末名は80文字以内にしてください。");return;}
+    const sequence=++terminalNameSequence.current;
     updateAppSetting("deviceName", name);
 
     const currentTerminal = terminals.find(terminal =>
@@ -1301,9 +1352,12 @@ export default function App() {
         terminal.terminalId === firebaseDeviceId ? updatedTerminal : terminal
       )
     );
-    void saveTerminal(updatedTerminal).catch(reason => {
-      console.error("Firebase terminal name update failed", reason);
-      setTerminalNotice("端末名をFirebaseへ保存できませんでした。");
+    terminalNameSave.current=terminalNameSave.current.then(async()=>{
+      if(sequence!==terminalNameSequence.current)return;
+      await saveTerminal(updatedTerminal);
+    }).catch(reason=>{
+      console.error("Firebase terminal name update failed",reason);
+      if(sequence===terminalNameSequence.current)setTerminalNotice("端末名をFirebaseへ保存できませんでした。");
     });
   };
 
@@ -1404,7 +1458,12 @@ export default function App() {
       setTerminalNotice("副管理者の設定をFirebaseへ保存できませんでした。");
     }
   };
+  const registrationRunning=useRef(false);
   const registerOwnTerminal = async () => {
+    if(registrationRunning.current)return;
+    const name=appSettings.deviceName.trim();
+    if(!name || name.length>80){setTerminalNotice("端末名を1〜80文字で入力してください。");return;}
+    registrationRunning.current=true;
     try {
       const current = await getOwnTerminalStatus();
       if (current.approved && current.terminalId === firebaseDeviceId) {
@@ -1449,11 +1508,12 @@ export default function App() {
       console.error("Firebase terminal registration failed", reason);
       const code = reason instanceof Error ? reason.message : String(reason);
       setTerminalNotice("端末登録に失敗しました（" + code + "）。通信状態とサーバー認証を確認してください。");
-    }
+    } finally { registrationRunning.current=false; }
   };
 
-  const refreshTerminalState = () => {
-    setTerminalNotice("端末状態を確認しました。未接続の端末は「見つかりません」と表示します。");
+  const refreshTerminalState = async () => {
+    try { const remote=await loadTerminals();setTerminals(remote);setTerminalNotice("Firebaseから端末状態を取得しました。"); }
+    catch(reason){console.error(reason);setTerminalNotice("端末状態を取得できませんでした。通信状態を確認してください。");}
   };
 
   useEffect(() => {
@@ -1824,7 +1884,7 @@ export default function App() {
             <label>開催日<input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} /></label>
             <label>開始時刻<input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></label>
             <label>終了時刻<input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></label>
-            <label>イベントID<input value={event.eventId} onChange={e => setEvent(current => ({ ...current, eventId: e.target.value }))} /></label>
+            <label>イベントID<input value={event.eventId} readOnly /></label>
             <label>データバージョン<input value={event.dataVersion} disabled /></label>
           </div>
           <button className="primary-action event-save-button" disabled={publishing} onClick={() => void saveEvent()}>
@@ -1953,6 +2013,8 @@ export default function App() {
       </div>}
 
       {ticketDesignModalOpen && <TicketDesigner
+        key={event.eventId}
+        eventId={event.eventId}
         eventName={event.eventName}
         tickets={tickets.map(ticket => ({
           id: ticket.ticketId,
@@ -1976,6 +2038,7 @@ export default function App() {
             <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>
           </div>
           <TicketQrPreview
+            eventId={event.eventId}
             eventName={event.eventName}
             ticketNumber={String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(6, "0")}
             qrValue={ticketQrValue(event.eventId, ticketQrModalTicket)}
@@ -2427,9 +2490,7 @@ export default function App() {
               record.terminalId ?? "",
             ]),
         ];
-        const csv = "\uFEFF" + rows.map(row => row.map(value =>
-          '"' + String(value ?? "").replace(/"/g, '""') + '"'
-        ).join(",")).join("\r\n");
+        const csv = "\uFEFF" + rows.map(row => row.map(csvCell).join(",")).join("\r\n");
         const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
         const anchor = document.createElement("a");
         anchor.href = url;
@@ -2568,7 +2629,7 @@ export default function App() {
       <section className="settings-section">
         <div className="settings-section-heading"><small>DEVICE</small><h3>端末設定</h3><p>この端末の識別情報を管理します。</p></div>
         <div className="settings-card">
-          <label className="settings-input-row"><div><b>端末名</b><small>管理画面で表示する端末名</small></div><input value={appSettings.deviceName} onChange={e => updateAppSetting("deviceName", e.target.value)} /></label>
+          <label className="settings-input-row"><div><b>端末名</b><small>管理画面で表示する端末名</small></div><input value={appSettings.deviceName} onChange={e => updateOwnTerminalName(e.target.value)} /></label>
           <div className="settings-info-grid">
             <div><span>端末種別</span><strong>Web / iPad</strong></div>
             <div><span>イベント</span><strong>{event.eventName}</strong></div>

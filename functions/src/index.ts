@@ -1425,19 +1425,14 @@ export const deleteManagedEvent = onCall(async (call) => {
   }
   const eventRef = db.doc("events/" + eventId);
   const eventSnap = await eventRef.get();
-  if (!eventSnap.exists) {
-    return { eventId, deleted: false };
-  }
-
-  // Published bundles live in a separate top-level collection, outside the
-  // event's recursive-delete tree. Remove the exact bundle token as well so
-  // deleted events do not leave stale ticket payloads in Firestore.
-  const authToken = eventSnap.get("authToken");
-  await db.recursiveDelete(eventRef);
-  if (typeof authToken === "string" && authToken.length > 0 && !authToken.includes("/")) {
-    await db.doc("eventBundles/" + authToken).delete();
-  }
-  return { eventId, deleted: true };
+  const bundles=await db.collection("eventBundles").where("event.eventId","==",eventId).get();
+  const bundleRefs=new Map(bundles.docs.map(item=>[item.id,item.ref]));
+  const authToken=eventSnap.get("authToken");
+  if(typeof authToken==="string" && authToken.length>0 && !authToken.includes("/"))bundleRefs.set(authToken,db.doc("eventBundles/"+authToken));
+  // Remove every historical token before the parent, so failures remain retryable.
+  for(const ref of bundleRefs.values())await ref.delete();
+  if(eventSnap.exists)await db.recursiveDelete(eventRef);
+  return {eventId,deleted:eventSnap.exists || bundleRefs.size>0};
 });
 
 
@@ -1480,10 +1475,7 @@ export const resetAllProductionData = onCall(async (call) => {
     "terminalHandoffRequests", "terminalHandoffRateLimits",
   ];
   for (const name of collections) {
-    const snapshot = await db.collection(name).get();
-    for (const document of snapshot.docs) {
-      await db.recursiveDelete(document.ref);
-    }
+    await db.recursiveDelete(db.collection(name));
   }
   return { success: true, deletedCollections: collections, authAccountsPreserved: true };
 });

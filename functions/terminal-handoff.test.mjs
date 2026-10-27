@@ -125,3 +125,43 @@ test("event deletion also removes the separately stored published bundle", async
   assert.equal((await db.doc("events/event-to-delete/analysis/analysis-private").get()).exists, false);
   assert.equal((await db.doc("eventBundles/published-bundle-token").get()).exists, false);
 });
+
+test('every exported callable rejects an unauthenticated request before making changes',async()=>{
+  const names=Object.keys(functions).filter(name=>typeof functions[name]?.run==='function');
+  assert.ok(names.length>=20);
+  for(const name of names)await assert.rejects(call(name,null,{confirm:'RESET_ALL_PRODUCTION_DATA'}),error=>error.code==='unauthenticated',name);
+});
+
+test('an ordinary reception installation cannot reset production or delete events through callables',async()=>{
+  await seedManager();await seedReceptionTerminal();
+  await db.doc('events/protected-event').set({eventId:'protected-event'});
+  await assert.rejects(call('resetAllProductionData','trusted-owner-uid',{confirm:'RESET_ALL_PRODUCTION_DATA'}));
+  await assert.rejects(call('deleteManagedEvent','trusted-owner-uid',{eventId:'protected-event'}));
+  assert.equal((await db.doc('events/protected-event').get()).exists,true);
+  assert.equal((await db.doc('terminals/T-MANAGEMENT-0001').get()).exists,true);
+});
+
+test('event deletion removes historical bundle tokens and preserves other events',async()=>{
+  await seedManager();
+  await db.doc('events/republished-event').set({eventId:'republished-event',authToken:'latest-token'});
+  for(const token of ['old-token','latest-token'])await db.doc('eventBundles/'+token).set({authToken:token,event:{eventId:'republished-event'}});
+  await db.doc('eventBundles/other-token').set({event:{eventId:'other-event'}});
+  await call('deleteManagedEvent','manager-owner-uid',{eventId:'republished-event'});
+  assert.equal((await db.doc('eventBundles/old-token').get()).exists,false);
+  assert.equal((await db.doc('eventBundles/latest-token').get()).exists,false);
+  assert.equal((await db.doc('eventBundles/other-token').get()).exists,true);
+});
+
+test('confirmed administrator reset removes all app collections including orphaned nested data',async()=>{
+  await seedManager();
+  await db.doc('events/orphan/tickets/orphan-ticket').set({ticketId:'orphan-ticket'});
+  await db.doc('devices/T-OLD-DEVICE').set({volume:50});
+  await db.doc('receptionErrors/test-error').set({errorId:'test-error'});
+  await assert.rejects(call('resetAllProductionData','manager-owner-uid',{confirm:'WRONG'}));
+  assert.equal((await db.doc('terminals/T-MANAGEMENT-0001').get()).exists,true);
+  const result=await call('resetAllProductionData','manager-owner-uid',{confirm:'RESET_ALL_PRODUCTION_DATA'});
+  assert.equal(result.success,true);assert.equal(result.authAccountsPreserved,true);
+  assert.equal((await db.doc('events/orphan/tickets/orphan-ticket').get()).exists,false);
+  assert.equal((await db.doc('terminals/T-MANAGEMENT-0001').get()).exists,false);
+  assert.equal((await db.doc('devices/T-OLD-DEVICE').get()).exists,false);
+});

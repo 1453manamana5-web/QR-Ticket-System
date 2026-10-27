@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
-import {prepareReceptionAudio,playReceptionAudio} from "./receptionAudio";
+import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
@@ -81,6 +81,7 @@ export default function App(){
   const [testResultKind,setTestResultKind]=useState<"entry"|"exit"|"error">("entry");
   const [remoteStopped,setRemoteStopped]=useState(false);
   const [scannerKey,setScannerKey]=useState(0);
+  const [cameraFailed,setCameraFailed]=useState(false);
   const [online,setOnline]=useState(()=>navigator.onLine);
   const [pendingSyncCount,setPendingSyncCount]=useState(0);
   const [networkMbps,setNetworkMbps]=useState<number|null>(null);
@@ -109,7 +110,7 @@ export default function App(){
     }catch(reason){
       console.error("同期キューの読み込みに失敗しました",reason);
     }finally{
-      await getPendingSyncItems().then(items=>setPendingSyncCount(items.length)).catch(()=>undefined);
+      await Promise.all([getPendingSyncItems(),getPendingReceptionErrorLogs()]).then(([items,errors])=>setPendingSyncCount(items.length+errors.length)).catch(()=>undefined);
     }
   },[]);
 
@@ -456,7 +457,7 @@ export default function App(){
     }catch(reason){
       console.error("端末リモート操作の購読に失敗しました",reason);
     }
-    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen==="ready"?"stopped":mode).then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
+    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen!=="reception"?"stopped":mode,undefined,localEvent.event.eventId).then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
     heartbeat();
     const interval=window.setInterval(heartbeat,10000);
     return()=>{unsubscribe?.();window.clearInterval(interval);};
@@ -465,8 +466,8 @@ export default function App(){
   const submitReceptionRegistration = async () => {
     if(busy)return;
     const name=terminalRegistrationName.trim();
-    if(!name){
-      setError("端末名を入力してください。");
+    if(!name||name.length>80){
+      setError("端末名を1〜80文字で入力してください。");
       return;
     }
     setBusy(true);
@@ -601,7 +602,8 @@ export default function App(){
         setResult({kind:"error",title:"別のイベントのチケットです",detail:"現在の受付イベントのチケットを読み取ってください。"});
         return;
       }
-      let ticket=await getTicket(ticketId);
+      const expectedLocalTicket=await getTicket(ticketId);
+      let ticket=expectedLocalTicket;
       if(navigator.onLine){
         void syncPendingRecords();
         const pending=await getPendingSyncItems();
@@ -653,7 +655,7 @@ export default function App(){
         terminalId:localEvent.terminalId
       };
 
-      await saveReceptionTransaction(updatedTicket,record);
+      await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket);
       void syncPendingRecords();
       setResult({
         kind:"success",
@@ -963,7 +965,7 @@ export default function App(){
                 <h2>受付準備完了</h2>
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
-                <button type="button" className="primary" onClick={()=>{setResult(null);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+                <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
                 <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>
@@ -1035,7 +1037,7 @@ export default function App(){
                   <strong>QRコード読み取り</strong>
                 </span>
               </div>
-  
+              <button type="button" className="secondary" disabled={busy} onClick={()=>{if(scanProcessingRef.current)return;receptionAllowedRef.current=false;setResult(null);setScreen("ready");void syncPendingRecords();}}>受付を停止</button>
             </div>
             <div className="entry-scanner-wrapper">
               <div className="camera-qr-scanner">
@@ -1044,10 +1046,12 @@ export default function App(){
                   readerId="ticket-reader"
                   onResult={handleTicketScan}
                   onError={message=>{
+                    setCameraFailed(true);
                     setResult({kind:"error",title:"カメラを起動できません",detail:message});
                     if(localEvent?.event.eventId)void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"camera_failed");
                   }}
                 />}
+                {cameraFailed&&!remoteStopped&&<button type="button" className="secondary" onClick={()=>{setCameraFailed(false);setResult(null);setScannerKey(current=>current+1);}}>カメラを再起動</button>}
               </div>
             </div>
           </div>
@@ -1118,11 +1122,16 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
   return null;
 }
 
+let speechVersion=0;
 function speakReception(type:ReceptionType){
   if(!("speechSynthesis" in window))return;
 
   const synth=window.speechSynthesis;
   synth.cancel();
+  const version=++speechVersion;
+  const preferences=getReceptionAudioSettings();
+  if(!preferences.voiceGuidance||preferences.volume===0)return;
+  let spoken=false;
 
   const message=type==="exit"
     ?"ご来場ありがとうございました。"
@@ -1132,9 +1141,11 @@ function speakReception(type:ReceptionType){
   utterance.lang="ja-JP";
   utterance.rate=0.9;
   utterance.pitch=0.96;
-  utterance.volume=1.0;
+  utterance.volume=preferences.volume;
 
   const speakWithJapaneseVoice=()=>{
+    if(spoken||version!==speechVersion)return;
+    spoken=true;
     const voices=synth.getVoices();
     const japaneseVoice=voices.find(voice=>voice.lang.toLowerCase()==="ja-jp")
       ??voices.find(voice=>voice.lang.toLowerCase().startsWith("ja"));
@@ -1149,7 +1160,7 @@ function speakReception(type:ReceptionType){
     synth.addEventListener("voiceschanged",speakWithJapaneseVoice,{once:true});
     window.setTimeout(()=>{
       synth.removeEventListener("voiceschanged",speakWithJapaneseVoice);
-      if(!utterance.voice)synth.speak(utterance);
+      speakWithJapaneseVoice();
     },500);
   }
 }

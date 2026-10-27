@@ -3888,3 +3888,7 @@ body {
   .entry-reception-page .entry-ticket-result,
   .entry-reception-page .exit-ticket-result { animation: none; }
 }
+
+/* Keep the safe-stop control usable on narrow iPad/Safari viewports. */
+.entry-reception-page .entry-scanner-card-header { display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap; }
+.entry-reception-page .entry-scanner-card-header > button { flex:0 0 auto; }

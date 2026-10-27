@@ -23,6 +23,7 @@ export type TicketDesignerTicket = {
 type TicketDesignerProps = {
   tickets: TicketDesignerTicket[];
   eventName: string;
+  eventId?: string;
   initialTicketNumber?: string;
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
@@ -117,8 +118,10 @@ function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesig
 }
 
 function createDesignStorageKey(
-  eventName: string
+  eventName: string,
+  eventId?: string
 ) {
+  if (eventId) return `qr-management-ticket-design-id-${encodeURIComponent(eventId)}`;
   const safeEventName =
     eventName.trim() === ""
       ? "event-not-set"
@@ -130,15 +133,16 @@ function createDesignStorageKey(
 }
 
 function loadDesignSettings(
-  eventName: string
+  eventName: string,
+  eventId?: string
 ): TicketDesignSettings {
   try {
     const savedDesign =
       localStorage.getItem(
         createDesignStorageKey(
-          eventName
+          eventName, eventId
         )
-      );
+      ) ?? (eventId ? localStorage.getItem(createDesignStorageKey(eventName)) : null);
 
     if (savedDesign === null) {
       return defaultSettings;
@@ -149,10 +153,19 @@ function loadDesignSettings(
         savedDesign
       ) as Partial<TicketDesignSettings>;
 
-    return {
-      ...defaultSettings,
-      ...parsedDesign,
-    };
+    if (!parsedDesign || typeof parsedDesign !== "object" || Array.isArray(parsedDesign)) return {...defaultSettings};
+    const result = {...defaultSettings, ...parsedDesign};
+    for (const key of Object.keys(defaultSettings) as Array<keyof typeof defaultSettings>) {
+      if (typeof defaultSettings[key] === "number" && (typeof result[key] !== "number" || !Number.isFinite(result[key]))) {
+        (result as Record<string,unknown>)[key] = defaultSettings[key];
+      }
+    }
+    result.cardsPerRow = Math.round(Math.max(1,Math.min(4,result.cardsPerRow)));
+    if (typeof result.backgroundImage !== "string") result.backgroundImage = "";
+    if (typeof result.title !== "string") result.title = "";
+    result.images = Array.isArray(result.images) ? result.images.filter(image => image && typeof image.id === "string" && typeof image.src === "string" && typeof image.name === "string" && [image.x,image.y,image.width].every(Number.isFinite)) : [];
+    result.layerOrder = Array.isArray(result.layerOrder) ? result.layerOrder.filter(id => typeof id === "string") : undefined;
+    return result;
   } catch (error) {
     console.error(
       "チケットデザインの読み込みに失敗しました。",
@@ -187,6 +200,7 @@ function FloatingPanel({title,className,children,onClose}:{title:string;classNam
 function TicketDesigner({
   tickets,
   eventName,
+  eventId,
   initialTicketNumber,
   qrValue,
   onClose,
@@ -229,10 +243,10 @@ function TicketDesigner({
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
-      () => loadDesignSettings(eventName)
+      () => loadDesignSettings(eventName, eventId)
     );
   const [showEditor, setShowEditor] = useState(
-    () => {const saved=loadDesignSettings(eventName);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
+    () => {const saved=loadDesignSettings(eventName, eventId);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
   );
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
@@ -483,6 +497,8 @@ function TicketDesigner({
         return;
       }
 
+      if (detectionId.current !== id) return;
+      checkpoint();
       const image = reader.result;
       setShowEditor(true);
 
@@ -577,7 +593,7 @@ function TicketDesigner({
     try {
       localStorage.setItem(
         createDesignStorageKey(
-          eventName
+          eventName, eventId
         ),
         JSON.stringify(settings)
       );
@@ -611,11 +627,7 @@ function TicketDesigner({
     ++detectionId.current;
 
     try {
-      localStorage.removeItem(
-        createDesignStorageKey(
-          eventName
-        )
-      );
+      localStorage.setItem(createDesignStorageKey(eventName, eventId), JSON.stringify(defaultSettings));
     } catch (error) {
       console.error(
         "保存済みデザインの削除に失敗しました。",
@@ -1549,8 +1561,8 @@ function TicketDesigner({
 
 
 
-export function TicketQrPreview({ eventName, ticketNumber, qrValue }: { eventName: string; ticketNumber: string; qrValue: string }) {
-  const settings = loadDesignSettings(eventName);
+export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string }) {
+  const settings = loadDesignSettings(eventName, eventId);
   const ratio = (() => {
     switch (settings.cardRatio) {
       case "4:3": return "4 / 3";

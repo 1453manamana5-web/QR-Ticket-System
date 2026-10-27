@@ -6,7 +6,7 @@ import type {
 } from "@qr-ticket-system/shared";
 
 const DB_NAME = "qr-ticket-reception";
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 const STORES = {
   event: "event",
@@ -59,6 +59,9 @@ function openDatabase(): Promise<IDBDatabase> {
         store.createIndex("status", "status", {unique: false});
       }
 
+      const queueStore = transaction!.objectStore(STORES.syncQueue);
+      if (!queueStore.indexNames.contains("sequence")) queueStore.createIndex("sequence", "sequence", {unique:false});
+
       if (!database.objectStoreNames.contains(STORES.receptionErrors)) {
         const store = database.createObjectStore(STORES.receptionErrors, {keyPath: "errorId"});
         store.createIndex("eventId", "eventId", {unique: false});
@@ -67,7 +70,11 @@ function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
     request.onerror = () =>
       reject(request.error ?? new Error("ローカルデータベースを開けませんでした"));
   });
@@ -76,15 +83,18 @@ function openDatabase(): Promise<IDBDatabase> {
 export async function saveLocalEvent(data: LocalEventData): Promise<void> {
   const database = await openDatabase();
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORES.event, "readwrite");
-    transaction.objectStore(STORES.event).put(data);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("イベントデータを保存できませんでした"));
-  });
-
-  database.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.event, "readwrite");
+      transaction.objectStore(STORES.event).put(data);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("イベントデータを保存できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("端末内保存が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function loadLocalEvent(): Promise<LocalEventData | null> {
@@ -109,7 +119,8 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
   const eventId = event.event.eventId;
   const ticketIds = new Set<string>();
 
-  if (!eventId) {
+  if (!eventId || !event.terminalId || !event.settings ||
+      ![event.settings.entryEnabled,event.settings.exitEnabled,event.settings.reentryEnabled].every(value => typeof value === "boolean")) {
     throw new Error("イベントIDがありません");
   }
   if (event.ticketCount !== tickets.length) {
@@ -117,7 +128,8 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
   }
 
   for (const ticket of tickets) {
-    if (!ticket.ticketId || ticket.eventId !== eventId) {
+    if (!ticket.ticketId || ticket.eventId !== eventId || typeof ticket.valid !== "boolean" ||
+        !["unused","inside","exited"].includes(ticket.currentStatus) || !ticket.basicInfo || typeof ticket.basicInfo !== "object") {
       throw new Error("イベントIDまたはチケットIDが不正なデータを検出しました");
     }
     if (ticketIds.has(ticket.ticketId)) {
@@ -146,7 +158,6 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       const ticketStore = transaction.objectStore(STORES.tickets);
 
       // Refresh inventory without rolling back locally accepted, unsent scans.
-      const previousTickets = ticketStore.getAll();
       const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
       queueRequest.onsuccess = () => {
         const pendingQueue = (queueRequest.result as SyncQueueItem[]).filter(item => item.status !== "synced");
@@ -156,17 +167,14 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
         const pendingRecords = new Map<string, {record: ReceptionRecord; sequence?: number}>();
         let remaining = pendingIds.size;
         const storeInventory = () => {
-          const previous = new Map((previousTickets.result as Ticket[])
-            .filter(ticket => ticket.eventId === eventId).map(ticket => [ticket.ticketId, ticket]));
           eventStore.clear();
           ticketStore.clear();
           eventStore.put(readyEvent);
           for (const ticket of tickets) {
-            const local = previous.get(ticket.ticketId);
             const pending = pendingRecords.get(ticket.ticketId)?.record;
             ticketStore.put(pending
-              ? {...ticket, currentStatus: local?.currentStatus ?? (pending.type === "exit" ? "exited" : "inside"),
-                updatedAt: local?.updatedAt ?? pending.timestamp}
+              ? {...ticket, currentStatus: pending.type === "exit" ? "exited" : "inside",
+                updatedAt: pending.timestamp}
               : ticket);
           }
         };
@@ -258,21 +266,24 @@ export async function countTickets(eventId: string): Promise<number> {
 export async function replaceTickets(tickets: Ticket[]): Promise<void> {
   const database = await openDatabase();
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORES.tickets, "readwrite");
-    const store = transaction.objectStore(STORES.tickets);
-    store.clear();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.tickets, "readwrite");
+      const store = transaction.objectStore(STORES.tickets);
+      store.clear();
 
-    for (const ticket of tickets) {
-      store.put(ticket);
-    }
+      for (const ticket of tickets) {
+        store.put(ticket);
+      }
 
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("チケットデータを保存できませんでした"));
-  });
-
-  database.close();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("チケットデータを保存できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("端末内保存が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function getTicket(ticketId: string): Promise<Ticket | null> {
@@ -295,26 +306,44 @@ export async function getTicket(ticketId: string): Promise<Ticket | null> {
 
 export async function saveReceptionTransaction(
   ticket: Ticket,
-  record: ReceptionRecord
+  record: ReceptionRecord,
+  expectedLocalTicket?: Ticket | null
 ): Promise<void> {
   const database = await openDatabase();
 
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(
-        [STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
+        [STORES.event, STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
         "readwrite"
       );
 
-      transaction.objectStore(STORES.tickets).put(ticket);
-      transaction.objectStore(STORES.receptionRecords).put(record);
-
-      const queueStore = transaction.objectStore(STORES.syncQueue);
-      const existing = queueStore.getAll();
-      existing.onsuccess = () => {
-        const sequence = (existing.result as SyncQueueItem[])
-          .reduce((maximum, item) => Math.max(maximum, item.sequence ?? 0), 0) + 1;
-        queueStore.put({recordId: record.recordId, status: "pending", retryCount: 0, sequence} satisfies SyncQueueItem);
+      const ticketStore=transaction.objectStore(STORES.tickets);
+      const currentTicket=ticketStore.get(ticket.ticketId);
+      const eventRequest=transaction.objectStore(STORES.event).get(record.eventId);
+      currentTicket.onsuccess=()=>{
+        const current=currentTicket.result as Ticket | undefined;
+        if(expectedLocalTicket!==undefined){
+          const same=expectedLocalTicket===null?!current:Boolean(current)&&["ticketId","eventId","currentStatus","valid","updatedAt"].every(key=>current![key as keyof Ticket]===expectedLocalTicket[key as keyof Ticket]);
+          if(!same){reject(new Error("LOCAL_TICKET_CHANGED"));transaction.abort();return;}
+        }
+      };
+      eventRequest.onsuccess=()=>{
+        const saved=eventRequest.result as LocalEventData | undefined;
+        if(expectedLocalTicket!==undefined && (!saved?.dataReady || saved.event.eventId!==record.eventId)){
+          reject(new Error("LOCAL_EVENT_CHANGED"));transaction.abort();return;
+        }
+        if(!currentTicket.result && saved){
+          transaction.objectStore(STORES.event).put({...saved,ticketCount:saved.ticketCount+1});
+        }
+        ticketStore.put(ticket);
+        transaction.objectStore(STORES.receptionRecords).put(record);
+        const queueStore=transaction.objectStore(STORES.syncQueue);
+        const existing=queueStore.index("sequence").openCursor(null,"prev");
+        existing.onsuccess=()=>{
+          const sequence=((existing.result?.value as SyncQueueItem | undefined)?.sequence??0)+1;
+          queueStore.put({recordId:record.recordId,status:"pending",retryCount:0,sequence} satisfies SyncQueueItem);
+        };
       };
 
       transaction.oncomplete = () => resolve();
@@ -347,19 +376,22 @@ export async function getPendingSyncItems(): Promise<SyncQueueItem[]> {
   try {
     return await new Promise<SyncQueueItem[]>((resolve, reject) => {
       const tx = database.transaction([STORES.syncQueue, STORES.receptionRecords], "readonly");
-      const queue = tx.objectStore(STORES.syncQueue).getAll();
       const timestamps = new Map<string, number>();
-      let pending: SyncQueueItem[] = [];
-      queue.onsuccess = () => {
-        pending = (queue.result as SyncQueueItem[]).filter(item => item.status !== "synced");
-        for (const item of pending) {
-          const record = tx.objectStore(STORES.receptionRecords).get(item.recordId);
-          record.onsuccess = () => {
-            const parsed = Date.parse((record.result as ReceptionRecord | undefined)?.timestamp ?? "");
-            timestamps.set(item.recordId, Number.isFinite(parsed) ? parsed : 0);
-          };
-        }
-      };
+      const pending: SyncQueueItem[] = [];
+      const statusIndex = tx.objectStore(STORES.syncQueue).index("status");
+      for (const status of ["pending","failed","syncing"]) {
+        const queue = statusIndex.getAll(status);
+        queue.onsuccess = () => {
+          for (const item of queue.result as SyncQueueItem[]) {
+            pending.push(item);
+            const record = tx.objectStore(STORES.receptionRecords).get(item.recordId);
+            record.onsuccess = () => {
+              const parsed = Date.parse((record.result as ReceptionRecord | undefined)?.timestamp ?? "");
+              timestamps.set(item.recordId, Number.isFinite(parsed) ? parsed : 0);
+            };
+          }
+        };
+      }
       tx.oncomplete = () => resolve(pending.sort((a, b) => {
         if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
         // Queues captured by older app versions have no insertion sequence.
@@ -383,21 +415,24 @@ export async function markSyncStatus(
 ): Promise<void> {
   const database = await openDatabase();
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORES.syncQueue, "readwrite");
-    const store = transaction.objectStore(STORES.syncQueue);
-    const request = store.get(recordId);
-    request.onsuccess = () => {
-      const previous = request.result as SyncQueueItem | undefined;
-      if (previous) store.put({...previous, status, retryCount, lastAttemptAt: new Date().toISOString()});
-    };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.syncQueue, "readwrite");
+      const store = transaction.objectStore(STORES.syncQueue);
+      const request = store.get(recordId);
+      request.onsuccess = () => {
+        const previous = request.result as SyncQueueItem | undefined;
+        if (previous) store.put({...previous, status, retryCount, lastAttemptAt: new Date().toISOString()});
+      };
 
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("同期状態を保存できませんでした"));
-  });
-
-  database.close();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("同期状態を保存できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("端末内保存が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 
@@ -480,19 +515,21 @@ export async function clearLocalEvent(): Promise<void> {
   // Event replacement must never erase unsent records or error logs.
   const storesToClear = [STORES.event, STORES.tickets];
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(storesToClear, "readwrite");
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(storesToClear, "readwrite");
 
-    for (const storeName of storesToClear) {
-      transaction.objectStore(storeName).clear();
-    }
+      for (const storeName of storesToClear) {
+        transaction.objectStore(storeName).clear();
+      }
 
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("ローカルデータを削除できませんでした"));
-    transaction.onabort = () =>
-      reject(transaction.error ?? new Error("ローカルデータの削除が中断されました"));
-  });
-
-  database.close();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("ローカルデータを削除できませんでした"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("ローカルデータの削除が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
 }

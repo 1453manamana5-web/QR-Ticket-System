@@ -1,5 +1,6 @@
-import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, setDoc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, setDoc, updateDoc, runTransaction } from "firebase/firestore";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
+import {receptionDataCollected, type ReceptionTerminalState} from "./operationSafety";
 import { getFirebaseDb } from "./firebaseClient";
 
 export type PublishedEventBundle = {
@@ -33,12 +34,21 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
   return { ...data, tickets, ticketCount: tickets.length } as PublishedEventBundle;
 }
 
-export async function saveEventMetadata(event: Event): Promise<void> {
+export async function saveEventMetadata(event: Event, onlyIfMissing = false): Promise<void> {
   const db = getFirebaseDb();
-  await setDoc(doc(db, "events", event.eventId), {
-    ...event,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  const ref = doc(db,"events",event.eventId);
+  await runTransaction(db,async tx=>{
+    const existing=await tx.get(ref);
+    if(existing.exists()){
+      if(onlyIfMissing)return;
+      throw new Error("EVENT_ALREADY_EXISTS");
+    }
+    tx.set(ref,{...event,updatedAt:new Date().toISOString()});
+  });
+}
+
+export async function saveEventStatus(eventId: string, status: Event["eventStatus"]): Promise<void> {
+  await updateDoc(doc(getFirebaseDb(),"events",eventId),{eventStatus:status,updatedAt:new Date().toISOString(),...(status==="finished"?{receptionTarget:false}:{})});
 }
 
 export function createAuthToken(): string {
@@ -50,73 +60,38 @@ export function createAuthToken(): string {
 export async function publishEventBundle(
   event: Event,
   settings: ReceptionSettings,
-  tickets: Ticket[],
+  _tickets: Ticket[],
 ): Promise<PublishedEventBundle> {
+  if (event.eventStatus === "finished") throw new Error("EVENT_FINISHED");
   const db = getFirebaseDb();
   const authToken = createAuthToken();
-  // React stateが未読込の瞬間に公開操作されても、Firestoreに保存済みのチケットを空配信しない。
-  // 明示的なチケット一覧が空の場合だけ、Firestoreの保存済み一覧を復元元として使う。
+  // Firestore is authoritative even when a stale UI still contains deleted tickets.
   const savedTicketsSnapshot = await getDocsFromServer(collection(db, "events", event.eventId, "tickets"));
-  let publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
-  // 未保存の旧形式データしかない場合に限り、呼び出し元のチケットを移行元として保存する。
-  if (publishedTickets.length === 0 && tickets.length > 0) {
-    publishedTickets = tickets;
-    for (let start = 0; start < publishedTickets.length; start += 450) {
-      const batch = writeBatch(db);
-      for (const ticket of publishedTickets.slice(start, start + 450)) {
-        batch.set(doc(db, "events", event.eventId, "tickets", ticket.ticketId), ticket, { merge: true });
-      }
-      await batch.commit();
-    }
-  }
-  const existingEvents = await getDocsFromServer(collection(db, "events"));
-  const previousTargets = existingEvents.docs
-    .filter(item => item.id !== event.eventId && item.data().receptionTarget === true);
-  if (previousTargets.length > 448) throw new Error("TOO_MANY_RECEPTION_TARGETS");
-  const storedEvent = existingEvents.docs.find(item => item.id === event.eventId)?.data();
-  const savedVersion = Number.isSafeInteger(storedEvent?.dataVersion) ? Number(storedEvent?.dataVersion) : 1;
-  const publishedEvent: Event = {
-    ...event,
-    dataVersion: Math.max(1, event.dataVersion, savedVersion) + (storedEvent?.authToken ? 1 : 0),
-    eventStatus: event.eventStatus === "finished" ? "finished" : "ready",
-  };
-  const bundle: PublishedEventBundle = {
-    event: publishedEvent,
-    settings,
-    tickets: publishedTickets,
-    ticketCount: publishedTickets.length,
-    authToken,
-    publishedAt: new Date().toISOString(),
-  };
-
-  // 管理端末と受付端末の両方で、上でサーバーから確認した同じチケット群を参照する。
-
-  // 公開バンドル・対象イベント・旧対象の解除を同じバッチで切り替える。
-  // merge:true にして、同時に保存される他のイベント管理情報を消さない。
-  // Firestore文書のサイズ上限を避けるため、バンドルには一覧を埋め込まず件数だけを保存する。
-  // チケット本体は上で events/{eventId}/tickets に保存済み。
-  const publishBatch = writeBatch(db);
-  for (const previous of previousTargets) {
-    publishBatch.update(previous.ref, { receptionTarget: false, updatedAt: bundle.publishedAt });
-  }
-  publishBatch.set(doc(db, "eventBundles", authToken), {
-    event: publishedEvent,
-    settings,
-    ticketCount: publishedTickets.length,
-    authToken,
-    publishedAt: bundle.publishedAt,
+  const publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
+  // A stale UI/backup must never resurrect tickets deliberately removed on the server.
+  const existingEvents = await getDocsFromServer(collection(db,"events"));
+  const terminalList = await getDocsFromServer(collection(db,"terminals"));
+  const eventRef=doc(db,"events",event.eventId);
+  const eventRefs=new Map(existingEvents.docs.map(item=>[item.id,item.ref]));
+  eventRefs.set(event.eventId,eventRef);
+  const bundle = await runTransaction(db,async tx=>{
+    const events = await Promise.all([...eventRefs.values()].map(ref=>tx.get(ref)));
+    const terminals = await Promise.all(terminalList.docs.map(item=>tx.get(item.ref)));
+    const previousTargets=events.filter(item=>item.exists()&&item.id!==event.eventId&&item.data().receptionTarget===true);
+    if(previousTargets.length>448)throw new Error("TOO_MANY_RECEPTION_TARGETS");
+    const terminalData=terminals.filter(item=>item.exists()).map(item=>({...item.data(),terminalId:item.id}) as ReceptionTerminalState);
+    if(previousTargets.some(previous=>!receptionDataCollected(terminalData,previous.id)))throw new Error("RECEPTION_DATA_NOT_COLLECTED");
+    const storedEvent=events.find(item=>item.id===event.eventId)?.data();
+    if(storedEvent?.eventStatus==="finished")throw new Error("EVENT_FINISHED");
+    const savedVersion=Number.isSafeInteger(storedEvent?.dataVersion)?Number(storedEvent?.dataVersion):1;
+    const publishedEvent:Event={eventId:event.eventId,eventName:event.eventName,eventDate:event.eventDate,startTime:event.startTime,endTime:event.endTime,dataVersion:Math.max(1,event.dataVersion,savedVersion)+(storedEvent?.authToken?1:0),eventStatus:event.eventStatus==="active"||event.eventStatus==="finalizing"?event.eventStatus:"ready"};
+    const ticketCount=Number.isSafeInteger(storedEvent?.ticketCount)?Number(storedEvent?.ticketCount):publishedTickets.length;
+    const result:PublishedEventBundle={event:publishedEvent,settings,tickets:publishedTickets,ticketCount,authToken,publishedAt:new Date().toISOString()};
+    for(const previous of previousTargets)tx.update(previous.ref,{receptionTarget:false,updatedAt:result.publishedAt});
+    tx.set(doc(db,"eventBundles",authToken),{event:publishedEvent,settings,ticketCount,authToken,publishedAt:result.publishedAt});
+    tx.set(eventRef,{...publishedEvent,authToken,receptionTarget:true,ticketCount,updatedAt:result.publishedAt},{merge:true});
+    return result;
   });
-
-  const eventRef = doc(db, "events", event.eventId);
-  publishBatch.set(eventRef, {
-    ...publishedEvent,
-    authToken,
-    receptionTarget: publishedEvent.eventStatus !== "finished",
-    ticketCount: publishedTickets.length,
-    updatedAt: bundle.publishedAt,
-  }, { merge: true });
-
-  await publishBatch.commit();
 
   // 成功表示だけ先行しないよう、サーバー側に公開情報が残ったことを確認する。
   const savedEvent = await getDocFromServer(eventRef);
