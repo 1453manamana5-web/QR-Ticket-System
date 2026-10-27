@@ -64,9 +64,9 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
           echo "GCLOUD_PROJECT=qr-ticket-system-5ba69" >> "$GITHUB_ENV"
 
-      - name: Verify selected Firebase project
+      - name: Validate credential and pin target project
         run: |
-          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id) throw new Error('Service account JSON has no project_id'); if (p.project_id !== 'qr-ticket-system-5ba69') throw new Error('Service account project_id does not match the intended production project'); console.log('Service account project ID matches intended target.');"
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')); if (!p.project_id || !p.client_email || !p.private_key) throw new Error('Service account JSON is incomplete'); if (process.env.GCLOUD_PROJECT !== 'qr-ticket-system-5ba69') throw new Error('Deployment target mismatch'); console.log('Credential validated; deployment target pinned to qr-ticket-system-5ba69. Cross-project access remains subject to Google IAM.');"
 
       - name: Deploy Firestore rules and Functions
         run: npx firebase-tools deploy --only firestore:rules,functions --project qr-ticket-system-5ba69 --non-interactive
