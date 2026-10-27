@@ -661,7 +661,7 @@ function TicketDesigner({
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${eventName || "チケット"} - 印刷</title>
+<title>チケット - 印刷</title>
 <style>
   @page { size: auto; margin: 8mm; }
   * { box-sizing: border-box; }
@@ -752,6 +752,7 @@ function TicketDesigner({
 </head>
 <body></body>
 </html>`);
+      printWindow.document.title = `${eventName || "チケット"} - 印刷`;
       printWindow.document.body.appendChild(sheet);
       printWindow.document.close();
 
