@@ -1,3 +1,5 @@
+> **Spark-only production (2026-10-28):** This directory is reference code and trusted administrator migration tooling, not the deployed application backend. Neither browser app calls Functions. Default firebase.json has no Functions deploy target and the Functions deployment workflow has been removed. Do not deploy this package for the free production app. See [Spark operations](../docs/spark-operation.md).
+
 # Terminal authorization and handoff backend
 
 This package provides authenticated callable Functions and trusted migration utilities for terminal approval and reception writes.

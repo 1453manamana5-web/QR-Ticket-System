@@ -59,28 +59,7 @@ for (const app of ["management-app", "reception-app"]) {
     assert.equal(attempts, 2);
   });
 
-  test(app + ": callable waits for authentication and uses the same Firebase app", async () => {
-    let resolveAuth;
-    const ready = new Promise(resolve => { resolveAuth = resolve; });
-    const firebaseApp = {};
-    const calls = [];
-    const backend = loadModule("./" + app + "/src/firebaseFunctions.ts", {
-      "./firebaseClient": { ensureFirebaseAuth: () => ready, getFirebaseApp: () => firebaseApp },
-      "firebase/functions": {
-        getFunctions: app => { assert.equal(app, firebaseApp); return "functions"; },
-        httpsCallable: (instance, name) => async input => {
-          calls.push({ instance, name, input });
-          return { data: "ok" };
-        },
-      },
-    });
-    const result = backend.callBackend("operation", { value: 1 });
-    assert.equal(calls.length, 0);
-    resolveAuth();
-    assert.equal(await result, "ok");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].name, "operation");
-  });
+
 }
 
 test("reception registration atomically creates the application and pending terminal", async () => {
