@@ -34,7 +34,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
   const window={matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
-  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
+  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
   let renderer;await act(async()=>{renderer=create(React.createElement(exported.default));});
   const flush=async()=>{await act(async()=>{for(let i=0;i<8;i++)await tick();});};await flush();
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
@@ -238,4 +238,42 @@ test('normal mode and reduced-motion preference do not show experimental soap bu
     try{await h.nav('イベント管理');assert.equal(h.renderer.root.findAllByProps({className:'sidebar-soap-bubble'}).length,0);if(motion)assert.equal(h.renderer.root.findByType('main').props.style,undefined);}
     finally{await h.close();}
   }
+});
+
+const occupancyModule=load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')});
+const occupancyRecord=(recordId,type,minute)=>({recordId,type,timestamp:`2026-10-28T01:${String(minute).padStart(2,'0')}:00Z`,ticketId:'ticket',terminalId:'gate',eventId:'event-a'});
+test('occupancy uses chronological entry, exit and reentry records without negative debt or truncation',()=>{
+  const records=[occupancyRecord('late','exit',3),occupancyRecord('entry','entry',1),occupancyRecord('reentry','reentry',4),occupancyRecord('early-exit','exit',0),occupancyRecord('entry2','entry',2),{...occupancyRecord('bad','entry',5),timestamp:'bad'}];
+  const before=records.map(item=>item.recordId);
+  assert.deepEqual(occupancyModule.buildOccupancyPoints(records).map(point=>point.value),[0,1,2,1,2]);
+  assert.deepEqual(records.map(item=>item.recordId),before);
+  assert.equal(occupancyModule.buildOccupancyPoints(Array.from({length:40},(_,i)=>occupancyRecord(String(i),'entry',i))).length,40);
+});
+test('occupancy renders a visible line with numeric axes and touch/keyboard inspection',async()=>{
+  const records=[occupancyRecord('a','entry',0),occupancyRecord('b','entry',1),occupancyRecord('c','exit',2)];
+  let renderer;await act(async()=>{renderer=create(React.createElement(occupancyModule.default,{records}));});
+  try{
+    const polyline=renderer.root.findByType('polyline');assert.equal(polyline.props.points.split(' ').length,3);
+    assert.ok(!/NaN|Infinity/.test(polyline.props.points));
+    assert.ok(renderer.root.findAllByType('text').some(node=>node.children.join('')==='人数（人）'));
+    const slider=renderer.root.findByProps({'aria-label':'会場内人数を確認する時刻'});
+    await act(async()=>slider.props.onChange({target:{value:'1'}}));
+    assert.equal(renderer.root.findByType('output').findByType('strong').children.join(''),'2人');
+    const svg=renderer.root.findByType('svg');
+    await act(async()=>svg.props.onPointerDown({clientX:52,currentTarget:{getBoundingClientRect:()=>({left:0,width:680})}}));
+    assert.equal(renderer.root.findByProps({'aria-label':'会場内人数を確認する時刻'}).props.value,0);
+    await act(async()=>renderer.update(React.createElement(occupancyModule.default,{records:[records[0]]})));
+    assert.ok(!/NaN|Infinity/.test(renderer.root.findByType('polyline').props.points));
+    assert.equal(renderer.root.findByType('input').props.disabled,true);
+    await act(async()=>renderer.update(React.createElement(occupancyModule.default,{records:[]})));
+    assert.equal(renderer.root.findAllByType('svg').length,0);
+    assert.match(JSON.stringify(renderer.toJSON()),/まだ推移データがありません/);
+  }finally{await act(async()=>renderer.unmount());}
+});
+test('analysis page includes the occupancy line chart from current reception subscriptions',async()=>{
+  const h=await harness();try{
+    await act(async()=>h.recordCallbacks.get('event-a')([occupancyRecord('a','entry',0),occupancyRecord('b','exit',1)]));await h.flush();
+    await h.nav('分析');assert.equal(h.renderer.root.findAllByType('polyline').length,1);
+    assert.ok(h.renderer.root.findAllByType('svg').some(node=>String(node.props['aria-label']).includes('会場内人数の折れ線グラフ')));
+  }finally{await h.close();}
 });

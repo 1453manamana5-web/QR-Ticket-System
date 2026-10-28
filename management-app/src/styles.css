@@ -4978,3 +4978,18 @@ body:has(.ticket-screen),
   .sidebar-soap-bubble{display:none;animation:none;}
   .app-shell.liquid-glass-enabled .management-main.soap-page-opening{animation:none!important;clip-path:none;transform:none;opacity:1;filter:none;}
 }
+
+.analysis-occupancy-card{grid-column:1/-1;min-width:0;}
+.venue-occupancy-summary{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#52627a;margin:12px 0;}
+.venue-occupancy-summary strong{font-size:18px;color:#1c6bca;}
+.venue-occupancy-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.venue-occupancy-svg{display:block;width:100%;height:auto;min-width:400px;}
+.venue-occupancy-svg text{fill:#52627a;font-size:12px;font-family:inherit;}
+.venue-grid{stroke:#dce4ee;stroke-width:1;}
+.venue-occupancy-line{stroke:#1e78db;stroke-width:3;stroke-linejoin:round;stroke-linecap:round;}
+.venue-selection-guide{stroke:#91bce8;stroke-width:1;stroke-dasharray:4 4;pointer-events:none;}
+.venue-occupancy-point{fill:#1e78db;stroke:white;stroke-width:2;pointer-events:none;}
+.venue-occupancy-inspection{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:4px;}
+.venue-occupancy-inspection output{font-size:14px;color:#243a55;min-width:135px;}
+.venue-occupancy-inspection label{display:flex;align-items:center;gap:12px;flex:1;min-width:200px;font-size:12px;color:#52627a;}
+.venue-occupancy-inspection input{flex:1;min-width:80px;min-height:40px;accent-color:#1e78db;}
