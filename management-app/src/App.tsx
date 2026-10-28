@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import VenueOccupancyChart from "./VenueOccupancyChart";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, saveEventStatus, type PublishedEventBundle } from "./eventPublisher";
@@ -2593,31 +2594,9 @@ export default function App() {
             <div className="analysis-total-box"><span>利用済み</span><strong>{analyzedTotal}枚</strong><small>全チケットの {utilization}%</small></div>
           </section>
 
-          <section className="analysis-card analysis-chart-card">
+          <section className="analysis-card analysis-chart-card analysis-occupancy-card">
             <div className="analysis-card-heading"><div><small>VENUE CAPACITY</small><h3>会場内人数の推移</h3></div><span>現在 {inside}人</span></div>
-            {(() => {
-              const timeline = analysisReceptionRecords
-                .filter(record => (record.type === "entry" || record.type === "exit" || record.type === "reentry") && typeof record.timestamp === "string" && Number.isFinite(Date.parse(record.timestamp)))
-                .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-              if (!timeline.length) return <div className="analysis-capacity-empty"><div><strong>まだ推移データがありません</strong><span>入退場記録が蓄積されると、会場内人数の変化を確認できます。</span></div></div>;
-              let current = 0;
-              const points = timeline.map(record => {
-                current += record.type === "entry" || record.type === "reentry" ? 1 : -1;
-                return { timestamp: record.timestamp, value: Math.max(0, current) };
-              });
-              const max = Math.max(1, ...points.map(point => point.value));
-              return <div className="analysis-capacity-chart">
-                <div className="analysis-capacity-current"><span>現在</span><strong>{current}人</strong></div>
-                <div className="analysis-capacity-bars">
-                  {points.slice(-24).map((point, index) => (
-                    <div className="analysis-capacity-bar-column" key={point.timestamp + index}>
-                      <div className="analysis-capacity-bar-track"><div className="analysis-capacity-bar" style={{ height: `${(point.value / max) * 100}%` }} /></div>
-                      <span>{new Date(point.timestamp).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>;
-            })()}
+            <VenueOccupancyChart key={selectedEventId} records={analysisReceptionRecords}/>
           </section>
 
           <section className="analysis-card">
