@@ -34,7 +34,7 @@ async function harness(overrides={}, {quota=false,fileText}={}) {
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
   const window={setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
-  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'./firebaseFunctions':{callBackend:async()=>{}},'qrcode.react':{QRCodeSVG:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
+  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
   let renderer;await act(async()=>{renderer=create(React.createElement(exported.default));});
   const flush=async()=>{await act(async()=>{for(let i=0;i<8;i++)await tick();});};await flush();
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
@@ -159,5 +159,21 @@ test('management subscriptions begin after approval, stop on revocation and reco
     await h.nav('チケット管理');
     await act(async()=>h.renderer.root.findByProps({className:'ticket-home-card ticket-list-launch'}).props.onClick());await h.flush();
     assert.equal(h.renderer.root.findAll(node=>node.props.className==='ticket-screen-row').length,1);
+  }finally{await h.close();}
+});
+
+
+test('Spark settings reset retains event, tickets and terminal approval without a backend call',async()=>{
+  const h=await harness();try{
+    await h.nav('設定');
+    assert.doesNotMatch(h.text(),/すべてのデータを初期化|本番データ全消去/);
+    await h.click('設定を初期状態に戻す');
+    assert.equal(h.savedSettings.at(-1).volume,70);
+    assert.deepEqual(h.deleted,[]);
+    assert.equal(h.storage.get('qr-ticket-terminal-id'),manager.terminalId);
+    await h.nav('イベント管理');assert.match(h.text(),/event-a/);
+    await h.nav('チケット管理');
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-home-card ticket-list-launch'}).props.onClick());await h.flush();
+    assert.match(h.text(),/TKT000001/);
   }finally{await h.close();}
 });

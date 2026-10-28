@@ -1,3 +1,5 @@
+> **2026-10-28更新:** 無料Spark運用に変更。ブラウザからのFunctions呼出し・全データ初期化ボタン・Functions公開ワークフローを撤去済み。以下は過去の調査記録です。現行構成は [spark-operation.md](spark-operation.md) を参照。
+
 # Firebase構成の調査と復旧（2026-10-25）
 
 > 2026-10-27確認: main `1840f841` の[Rulesデプロイ run 40174644626](https://github.com/1453manamana5-web/QR-Ticket-System/actions/runs/40174644626)は成功し、`qr-ticket-system-5ba69` のRelease/Ruleset検証ログも確認できた。以下の403は過去の障害。今回の受付修正と確認範囲は [firebase-reception-check-20261027.md](firebase-reception-check-20261027.md) を参照。
