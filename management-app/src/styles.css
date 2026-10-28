@@ -4939,3 +4939,42 @@ body:has(.ticket-screen),
   .sidebar-resize-handle{display:grid;place-items:center;position:absolute;right:12px;top:12px;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:rgba(255,255,255,.12);color:#fff;}
   .sidebar-resize-handle span{width:3px;height:16px;border-radius:4px;background:currentColor;}
 }
+
+/* Experimental navigation grows from the selected item like a soap bubble. */
+.app-shell.liquid-glass-enabled .management-main.soap-page-opening{
+  animation-duration:780ms;
+  animation-timing-function:cubic-bezier(.18,.78,.24,1);
+  will-change:clip-path,transform,opacity;
+  filter:none;
+}
+.sidebar-soap-bubble{
+  position:fixed;pointer-events:none;z-index:12;border-radius:50%;opacity:0;
+  border:2px solid rgba(255,255,255,.72);
+  background:radial-gradient(ellipse at 28% 18%,rgba(255,255,255,.88),transparent 28%),
+    radial-gradient(ellipse at 80% 72%,rgba(231,184,255,.22),transparent 48%),
+    linear-gradient(135deg,rgba(181,230,255,.3),rgba(255,255,255,.14) 48%,rgba(237,208,255,.25));
+  box-shadow:inset 0 0 22px rgba(255,255,255,.7),0 0 18px rgba(161,209,255,.22);
+  transform-origin:center;animation:sidebar-soap-shell 780ms cubic-bezier(.18,.78,.24,1) both;
+}
+@keyframes sidebar-soap-shell{
+  0%{opacity:.9;transform:translate(-50%,-50%) scale(.035,.06);border-radius:50%;}
+  22%{opacity:.85;transform:translate(calc(-50% + var(--bubble-dx)*.12),calc(-50% + var(--bubble-dy)*.12)) scale(.24,.34);border-radius:48% 52% 56% 44%;}
+  58%{opacity:.45;transform:translate(calc(-50% + var(--bubble-dx)*.82),calc(-50% + var(--bubble-dy)*.82)) scale(.91,1.035);border-radius:38% 45% 35% 44%;}
+  100%{opacity:0;transform:translate(calc(-50% + var(--bubble-dx)),calc(-50% + var(--bubble-dy))) scale(1);border-radius:28px;}
+}
+@keyframes sidebar-soap-open-a{
+  0%{clip-path:circle(0px at var(--page-origin-x) var(--page-origin-y));opacity:.35;transform:scale(.985);filter:none;}
+  32%{clip-path:circle(calc(var(--page-bubble-radius)*.30) at var(--page-origin-x) var(--page-origin-y));opacity:.9;transform:scale(.99);}
+  72%{clip-path:circle(var(--page-bubble-radius) at var(--page-origin-x) var(--page-origin-y));opacity:1;transform:scale(1.006,.997);}
+  100%{clip-path:circle(var(--page-bubble-radius) at var(--page-origin-x) var(--page-origin-y));opacity:1;transform:scale(1);filter:none;}
+}
+@keyframes sidebar-soap-open-b{
+  0%{clip-path:circle(0px at var(--page-origin-x) var(--page-origin-y));opacity:.35;transform:scale(.985);filter:none;}
+  32%{clip-path:circle(calc(var(--page-bubble-radius)*.30) at var(--page-origin-x) var(--page-origin-y));opacity:.9;transform:scale(.99);}
+  72%{clip-path:circle(var(--page-bubble-radius) at var(--page-origin-x) var(--page-origin-y));opacity:1;transform:scale(1.006,.997);}
+  100%{clip-path:circle(var(--page-bubble-radius) at var(--page-origin-x) var(--page-origin-y));opacity:1;transform:scale(1);filter:none;}
+}
+@media(prefers-reduced-motion:reduce){
+  .sidebar-soap-bubble{display:none;animation:none;}
+  .app-shell.liquid-glass-enabled .management-main.soap-page-opening{animation:none!important;clip-path:none;transform:none;opacity:1;filter:none;}
+}

@@ -15,7 +15,7 @@ const safety=load('management-app/src/operationSafety.ts');
 const event=(id='event-a')=>({eventId:id,eventName:id,eventDate:'2099-10-27',startTime:'09:00',endTime:'17:00',eventStatus:'preparing',dataVersion:1});
 const ticket=(eventId='event-a')=>({eventId,ticketId:'TKT000001',basicInfo:{ticketNumber:1},currentStatus:'unused',valid:true,updatedAt:'2026-10-27T00:00:00.000Z'});
 const manager={terminalId:'T-TEST-MANAGER',name:'Manager',type:'Web / iPad',role:'management',approved:true,managementApproved:true,receptionApproved:false,status:'online',lastSeen:null,networkMbps:null,battery:null,admin:true};
-async function harness(overrides={}, {quota=false,fileText}={}) {
+async function harness(overrides={}, {quota=false,fileText,geometry,motion=false}={}) {
   const storage=new Map([['qr-ticket-terminal-id',manager.terminalId],['qr-ticket-device-id',manager.terminalId]]);
   let eventsCallback;const ticketCallbacks=new Map(),recordCallbacks=new Map(),savedSettings=[],deleted=[];
   const intervals=new Map();let next=0;
@@ -33,8 +33,8 @@ async function harness(overrides={}, {quota=false,fileText}={}) {
     ...overrides,
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
-  const window={setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
-  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
+  const window={matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
+  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
   let renderer;await act(async()=>{renderer=create(React.createElement(exported.default));});
   const flush=async()=>{await act(async()=>{for(let i=0;i<8;i++)await tick();});};await flush();
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
@@ -208,4 +208,34 @@ test('sidebar tracks the pointer before release, settles, and cancellation prese
     await act(async()=>h.renderer.root.findByProps({'data-sidebar-handle':true}).props.onClick({detail:0}));
     assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'false');
   }finally{await h.close();}
+});
+
+
+function bubbleGeometry(){
+  return {main:{getBoundingClientRect:()=>({left:252,top:0,width:780,height:768})},items:['イベント管理','分析','設定'].map((navLabel,index)=>({dataset:{navLabel},getBoundingClientRect:()=>({left:24,top:160+index*70,width:200,height:52})}))};
+}
+test('experimental navigation bubble starts at the selected item and restarts on rapid switches',async()=>{
+  const h=await harness({loadAppSettings:async()=>({volume:25,aiLabEnabled:true})},{geometry:bubbleGeometry()});
+  try{
+    await h.nav('イベント管理');
+    let bubble=h.renderer.root.findByProps({className:'sidebar-soap-bubble'});
+    assert.equal(bubble.props.style.left,124);assert.equal(bubble.props.style.top,186);
+    let main=h.renderer.root.findByType('main');
+    assert.equal(main.props.style['--page-origin-x'],'-128px');
+    assert.ok(main.props.className.includes('soap-page-opening'));
+    const first=main.props.style.animationName;
+    await h.nav('分析');main=h.renderer.root.findByType('main');
+    assert.notEqual(main.props.style.animationName,first);
+    assert.equal(h.renderer.root.findByProps({className:'sidebar-soap-bubble'}).props.style.top,256);
+    const target={};await act(async()=>main.props.onAnimationEnd({target,currentTarget:target,animationName:main.props.style.animationName}));
+    assert.equal(h.renderer.root.findAllByProps({className:'sidebar-soap-bubble'}).length,0);
+    assert.equal(h.renderer.root.findByType('main').props.style,undefined);
+  }finally{await h.close();}
+});
+test('normal mode and reduced-motion preference do not show experimental soap bubbles',async()=>{
+  for(const [enabled,motion] of [[false,false],[true,true]]){
+    const h=await harness({loadAppSettings:async()=>({aiLabEnabled:enabled})},{geometry:bubbleGeometry(),motion});
+    try{await h.nav('イベント管理');assert.equal(h.renderer.root.findAllByProps({className:'sidebar-soap-bubble'}).length,0);if(motion)assert.equal(h.renderer.root.findByType('main').props.style,undefined);}
+    finally{await h.close();}
+  }
 });
