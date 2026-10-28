@@ -177,3 +177,35 @@ test('Spark settings reset retains event, tickets and terminal approval without 
     assert.match(h.text(),/TKT000001/);
   }finally{await h.close();}
 });
+
+
+test('sidebar tracks the pointer before release, settles, and cancellation preserves state',async()=>{
+  const h=await harness();try{
+    const element={getBoundingClientRect:()=>({width:248}),setPointerCapture(){},hasPointerCapture:()=>false};
+    const pointer=(x,y,time=1000)=>({button:0,pointerId:1,isPrimary:true,clientX:x,clientY:y,timeStamp:time,currentTarget:element,target:{closest:()=>null},preventDefault(){}});
+    const sidebar=()=>h.renderer.root.findByType('aside');
+    await act(async()=>sidebar().props.onPointerDown(pointer(240,200)));
+    await act(async()=>sidebar().props.onPointerMove(pointer(160,200,1100)));
+    assert.equal(sidebar().props.style.width,168);
+    assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'false');
+    await act(async()=>sidebar().props.onPointerMove(pointer(110,200,1200)));
+    assert.equal(sidebar().props.style.width,118);
+    await act(async()=>sidebar().props.onPointerUp(pointer(110,200,1400)));
+    assert.equal(sidebar().props.style,undefined);
+    assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'true');
+    element.getBoundingClientRect=()=>({width:82});
+    await act(async()=>sidebar().props.onPointerDown(pointer(70,200,1500)));
+    await act(async()=>sidebar().props.onPointerMove(pointer(190,200,1600)));
+    assert.equal(sidebar().props.style.width,202);
+    await act(async()=>sidebar().props.onPointerCancel(pointer(190,200,1700)));
+    assert.equal(sidebar().props.style,undefined);
+    assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'true');
+    // Vertical scrolling must not resize or toggle the sidebar.
+    await act(async()=>sidebar().props.onPointerDown(pointer(70,200,1800)));
+    await act(async()=>sidebar().props.onPointerMove(pointer(72,250,1900)));
+    await act(async()=>sidebar().props.onPointerUp(pointer(72,250,2000)));
+    assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'true');
+    await act(async()=>h.renderer.root.findByProps({'data-sidebar-handle':true}).props.onClick({detail:0}));
+    assert.equal(h.storage.get('qr-ticket-sidebar-collapsed'),'false');
+  }finally{await h.close();}
+});

@@ -116,23 +116,56 @@ export default function App() {
   const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
   const navSwipeRef = useRef<{ startX: number; startY: number; current: string; moved: boolean } | null>(null);
   const navSuppressClickRef = useRef(false);
-  const sidebarDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  const [sidebarDragWidth, setSidebarDragWidth] = useState<number | null>(null);
+  const sidebarClickSuppressed = useRef(false);
+  const sidebarDragRef = useRef<{
+    pointerId: number; startX: number; startY: number; startWidth: number;
+    min: number; max: number; width: number; lastX: number; lastTime: number;
+    velocity: number; moving: boolean;
+  } | null>(null);
   const handleSidebarPointerDown = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("button, a, input, textarea, select, [data-nav-label]")) return;
-    sidebarDragRef.current = { startX: event.clientX, startY: event.clientY };
-    // Keep receiving pointer-up even if the sidebar moves or the pointer leaves its edge.
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* capture may be unavailable */ }
+    if (event.button !== 0 || event.isPrimary === false || sidebarDragRef.current) return;
+    const handle = (event.target as HTMLElement).closest("[data-sidebar-handle]");
+    if (!handle && (event.target as HTMLElement).closest("button, a, input, textarea, select, [data-nav-label]")) return;
+    // Phones use a horizontal navigation strip rather than a resizable sidebar.
+    if (window.matchMedia?.("(max-width: 560px)").matches) return;
+    const css = window.getComputedStyle?.(event.currentTarget);
+    const min = Number.parseFloat(css?.getPropertyValue("--sidebar-collapsed-width") ?? "") || 82;
+    const max = Number.parseFloat(css?.getPropertyValue("--sidebar-expanded-width") ?? "") || 248;
+    const width = event.currentTarget.getBoundingClientRect().width;
+    sidebarClickSuppressed.current = false;
+    sidebarDragRef.current = {pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+      startWidth:width,min,max,width,lastX:event.clientX,lastTime:event.timeStamp,velocity:0,moving:false};
   };
-  const handleSidebarPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+  const handleSidebarPointerMove = (event: React.PointerEvent<HTMLElement>) => {
     const drag = sidebarDragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
+    if (!drag.moving) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) > Math.abs(dx)) { sidebarDragRef.current = null; return; }
+      drag.moving = true;
+      sidebarClickSuppressed.current = true;
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* pointer may have ended */ }
+    }
+    event.preventDefault();
+    const elapsed = event.timeStamp - drag.lastTime;
+    if (elapsed > 0) drag.velocity = (event.clientX - drag.lastX) / elapsed;
+    drag.lastX = event.clientX;
+    drag.lastTime = event.timeStamp;
+    drag.width = Math.max(drag.min, Math.min(drag.max, drag.startWidth + dx));
+    setSidebarDragWidth(drag.width);
+  };
+  const finishSidebarDrag = (event: React.PointerEvent<HTMLElement>, cancelled = false) => {
+    const drag = sidebarDragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
     sidebarDragRef.current = null;
-    if (!drag) return;
-    const deltaX = event.clientX - drag.startX;
-    const deltaY = event.clientY - drag.startY;
-    // Ignore vertical scrolling and short movements; only a clear horizontal swipe toggles.
-    if (Math.abs(deltaX) < 36 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15) return;
-    if (deltaX < 0 && !sidebarCollapsed) setSidebarCollapsed(true);
-    if (deltaX > 0 && sidebarCollapsed) setSidebarCollapsed(false);
+    if (drag.moving && !cancelled) {
+      const velocity = event.timeStamp - drag.lastTime < 100 ? drag.velocity : 0;
+      setSidebarCollapsed(drag.width + Math.max(-80, Math.min(80, velocity * 140)) < (drag.min + drag.max) / 2);
+    }
+    setSidebarDragWidth(null);
+    try { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   const [event, setEvent] = useState<Event>(baseEvent);
   const currentEventId = useRef(event.eventId);
@@ -2808,7 +2841,7 @@ function NavIcon({type}:{type:string}){
     </div>;
   }
 
-  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${sidebarDragWidth !== null ? "sidebar-dragging" : ""}`}>
     {navigationNotice && <div className="navigation-notice-backdrop">
       <section className="navigation-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="navigation-notice-title">
         <h2 id="navigation-notice-title">チケット管理を開けません</h2>
@@ -2820,10 +2853,20 @@ function NavIcon({type}:{type:string}){
     <aside
       className="sidebar"
       onPointerDown={handleSidebarPointerDown}
-      onPointerUp={handleSidebarPointerUp}
-      onPointerCancel={() => { sidebarDragRef.current = null; }}
+      style={sidebarDragWidth === null ? undefined : {width: sidebarDragWidth}}
+      onPointerMove={handleSidebarPointerMove}
+      onPointerUp={event => finishSidebarDrag(event)}
+      onPointerCancel={event => finishSidebarDrag(event, true)}
+      onLostPointerCapture={event => finishSidebarDrag(event, true)}
       aria-label="ナビゲーション。左へスライドすると折りたたみ、右へスライドすると展開します"
     >
+      <button type="button" className="sidebar-resize-handle" data-sidebar-handle
+        aria-label={sidebarCollapsed ? "サイドバーを開く" : "サイドバーを閉じる"}
+        aria-expanded={!sidebarCollapsed}
+        onClick={event => {
+          if (sidebarClickSuppressed.current && event.detail !== 0) { sidebarClickSuppressed.current = false; return; }
+          setSidebarCollapsed(value => !value);
+        }}><span aria-hidden="true" /></button>
       <div className="brand">
         <div className="brand-mark">QR</div>
         <div className="brand-copy"><small>QR TICKET SYSTEM</small><strong>管理アプリ</strong></div>
