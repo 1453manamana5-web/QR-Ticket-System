@@ -1,52 +1,59 @@
 type Sound = "detected" | "success" | "error";
 const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav"};
-let context:AudioContext|null=null;
-let resultVersion=0;
-const buffers=new Map<Sound,Promise<AudioBuffer>>();
-const fallback=new Map<Sound,HTMLAudioElement>();
-const active=new Map<Sound,AudioBufferSourceNode>();
-const mediaPreferred=new Set<Sound>();
-function getContext(){
-  if(context?.state==="closed"){context=null;buffers.clear();}
-  if(!context){const Constructor=window.AudioContext||window.webkitAudioContext;if(Constructor)context=new Constructor();}
-  return context;
-}
+const players=new Map<Sound,HTMLAudioElement>();
+const objectUrls=new Map<Sound,string>();
+const generations=new Map<Sound,number>();
+const unlocked=new Set<Sound>();
+let preload:Promise<void>|null=null;
 function path(kind:Sound){return `${import.meta.env.BASE_URL}sounds/${files[kind]}`;}
-function buffer(kind:Sound){
-  let value=buffers.get(kind);if(value)return value;
-  const ctx=getContext();if(!ctx)return null;
-  value=fetch(path(kind)).then(response=>{if(!response.ok)throw Error(`Audio HTTP ${response.status}`);return response.arrayBuffer();}).then(data=>ctx.decodeAudioData(data));
-  buffers.set(kind,value);void value.catch(()=>buffers.delete(kind));return value;
+function next(kind:Sound){const version=(generations.get(kind)??0)+1;generations.set(kind,version);return version;}
+function player(kind:Sound){
+  let audio=players.get(kind);
+  if(!audio){audio=new Audio(path(kind));audio.preload="auto";audio.volume=1;audio.load();players.set(kind,audio);}
+  const cached=objectUrls.get(kind);
+  if(cached&&audio.src!==cached&&audio.paused){audio.src=cached;audio.load();}
+  return audio;
 }
-function element(kind:Sound){let audio=fallback.get(kind);if(!audio){audio=new Audio(path(kind));audio.preload="auto";fallback.set(kind,audio);}return audio;}
-function unlockReceptionAudio(){
-  try{
-    const ctx=getContext();
-    if(ctx && ctx.state!=="running"){
-      // Run resume and the silent priming source directly in the user gesture.
-      void ctx.resume().catch(()=>{});
-      if(typeof ctx.createBuffer==="function"){
-        const source=ctx.createBufferSource();source.buffer=ctx.createBuffer(1,1,ctx.sampleRate||44100);
-        source.connect(ctx.destination);source.onended=()=>source.disconnect();source.start(0);
-      }
-    }
-  }catch(error){console.warn("受付音の有効化に失敗しました",error);}
+function preloadSounds(){
+  if(preload)return preload;
+  preload=Promise.all((Object.keys(files) as Sound[]).map(async kind=>{
+    player(kind);
+    try{
+      let cache:Cache|undefined;
+      try{if(window.caches)cache=await window.caches.open("qr-reception-sounds-v2");}catch{/* private browsing can deny Cache Storage */}
+      let response=await cache?.match(path(kind));
+      if(!response?.ok){response=await fetch(path(kind));if(!response.ok)throw Error(`Audio HTTP ${response.status}`);try{await cache?.put(path(kind),response.clone());}catch{/* playback still works without a cache write */}}
+      // The legacy app uses Blob URLs: iPad's media player need not make Range
+      // requests against the service worker's complete cached WAV response.
+      const url=URL.createObjectURL(await response.blob());objectUrls.set(kind,url);
+      player(kind);
+    }catch(error){console.warn("受付音の端末保存に失敗しました。元の音源で再生します。",error);}
+  })).then(()=>{});
+  return preload;
+}
+function unlockRecordedSounds(){
+  const preferences=getReceptionAudioSettings();
+  if(preferences.volume===0)return;
+  // Like the old receptionSound.ts, prime each reusable media element inside
+  // the gesture. Never await network/cache preparation before calling play().
+  for(const kind of Object.keys(files) as Sound[]){
+    if(unlocked.has(kind)||(kind==="success"&&!preferences.successSound))continue;
+    const audio=player(kind),version=next(kind);
+    try{
+      audio.pause();audio.currentTime=0;audio.volume=.01;
+      void audio.play().then(()=>{
+        // A delayed unlock must not pause/mute a newer real scan or test sound.
+        if(generations.get(kind)===version){unlocked.add(kind);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;}
+      }).catch(()=>{if(generations.get(kind)===version)audio.volume=preferences.volume;});
+    }catch{/* retry on the next gesture */}
+  }
 }
 export function prepareReceptionAudio(){
-  for(const kind of Object.keys(files) as Sound[]){try{const ready=buffer(kind);if(ready)void ready.catch(()=>{});else element(kind).load();}catch(error){console.warn("受付音を先読みできませんでした",error);}}
-  // Touch pointerdown is not an activation event on every Safari version.
+  void preloadSounds();
   const events=["pointerdown","touchend","click","keydown"] as const;
   const options={passive:true,capture:true};
-  for(const event of events)document.addEventListener(event,unlockReceptionAudio,options);
-  return()=>{for(const event of events)document.removeEventListener(event,unlockReceptionAudio,options);};
-}
-async function resumeForPlayback(ctx:AudioContext){
-  const running=()=>ctx.state==="running";
-  if(running())return;
-  let timer:ReturnType<typeof setTimeout>|undefined;
-  try{await Promise.race([ctx.resume(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error("Audio resume timeout")),350);})]);}
-  finally{if(timer!==undefined)clearTimeout(timer);}
-  if(!running())throw Error("Audio is not running");
+  for(const event of events)document.addEventListener(event,unlockRecordedSounds,options);
+  return()=>{for(const event of events)document.removeEventListener(event,unlockRecordedSounds,options);};
 }
 export function getReceptionAudioSettings(){
   try{
@@ -55,28 +62,16 @@ export function getReceptionAudioSettings(){
   }catch{return {volume:1,successSound:true,voiceGuidance:true};}
 }
 export async function playReceptionAudio(kind:Sound){
-  const version=kind==="detected"?resultVersion:++resultVersion;
-  if(kind!=="detected")for(const previous of ["success","error"] as Sound[]){try{active.get(previous)?.stop();}catch{}fallback.get(previous)?.pause();}
   const preferences=getReceptionAudioSettings();
-  if(preferences.volume===0 || (kind==="success"&&!preferences.successSound))return "muted";
-  const current=()=>version===resultVersion;
+  if(kind!=="detected")for(const previous of ["success","error"] as Sound[]){if(previous!==kind)next(previous);players.get(previous)?.pause();}
+  const version=next(kind);
+  if(preferences.volume===0||(kind==="success"&&!preferences.successSound)){players.get(kind)?.pause();return "muted";}
   try{
-    const ctx=mediaPreferred.has(kind)?null:getContext(),ready=ctx?buffer(kind):null;
-    if(ctx&&ready){
-      // Observe decode failures immediately even while resume is pending.
-      void ready.catch(()=>{});
-      await resumeForPlayback(ctx);
-      const data=await ready;
-      if(!current())return "superseded";
-      try{active.get(kind)?.stop();}catch{}
-      const source=ctx.createBufferSource();source.buffer=data;
-      const gain=typeof ctx.createGain==="function"?ctx.createGain():null;if(gain){gain.gain.value=preferences.volume;gain.connect(ctx.destination);}source.connect(gain??ctx.destination);
-      active.set(kind,source);source.onended=()=>{source.disconnect();gain?.disconnect();if(active.get(kind)===source)active.delete(kind);};
-      source.start();return "played";
-    }
-  }catch(error){mediaPreferred.add(kind);console.warn("Web Audioで再生できないため音声プレーヤーへ切り替えます",error);}
-  if(!current())return "superseded";
-  try{
-    const audio=element(kind);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;await audio.play();return "played";
-  }catch(error){console.warn("受付音を再生できませんでした。音の確認を押してください。",error);return "blocked";}
+    const audio=player(kind);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;
+    // HTMLAudio is the primary legacy playback path, even if AudioContext exists.
+    // Calling play synchronously preserves the tap's activation on Safari.
+    await audio.play();
+    if(generations.get(kind)!==version)return "superseded";
+    unlocked.add(kind);return "played";
+  }catch(error){unlocked.delete(kind);console.warn("受付音を再生できません。音の確認を押してください。",error);return "blocked";}
 }
