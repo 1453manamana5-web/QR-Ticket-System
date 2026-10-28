@@ -582,3 +582,33 @@ test('accepting a newly issued server ticket updates local inventory count for t
   await local.saveReceptionTransaction(added,{...record('new-ticket-entry'),ticketId:'new-ticket'},null);
   assert.equal((await local.loadLocalEvent()).ticketCount,2);assert.equal(await local.countTickets('event-one'),2);
 });
+
+test('audio can unlock at touchend/click after pointerdown was insufficient',async()=>{
+  const listeners={};let activated=false,starts=0,primed=0;
+  class Context{
+    state='suspended';destination={};sampleRate=44100;
+    resume=async()=>{if(activated)this.state='running';};
+    decodeAudioData=async()=>({});createBuffer(){primed++;return {};}
+    createBufferSource(){return {connect(){},disconnect(){},stop(){},start(){starts++;}};}
+  }
+  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},document:{addEventListener:(name,fn)=>listeners[name]=fn,removeEventListener:name=>delete listeners[name]},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)})});
+  const cleanup=audio.prepareReceptionAudio();listeners.pointerdown();assert.ok(primed);
+  activated=true;listeners.touchend();listeners.click();
+  const before=starts;assert.equal(await audio.playReceptionAudio('success'),'played');assert.equal(starts,before+1);
+  cleanup();assert.equal(Object.keys(listeners).length,0);
+});
+
+test('WAV decode failure falls back to an audio element with configured volume',async()=>{
+  const players=[];
+  class Context{state='running';destination={};decodeAudioData=async()=>{throw Error('decode failed');};}
+  class Player{constructor(src){this.src=src;players.push(this);}pause(){}play=async()=>{this.played=true;};}
+  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},Audio:Player,fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),localStorage:{getItem:()=>JSON.stringify({volume:45})},console:{warn(){}}});
+  assert.equal(await audio.playReceptionAudio('success'),'played');assert.equal(players[0].volume,.45);assert.ok(players[0].played);assert.match(players[0].src,/qr_result_chime.wav$/);
+});
+
+test('interrupted audio resume cannot hang forever and failed fallback reports blocked',async()=>{
+  class Context{state='interrupted';destination={};resume=()=>new Promise(()=>{});decodeAudioData=async()=>({});}
+  class Player{pause(){}play=async()=>{throw Error('NotAllowedError');};}
+  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},Audio:Player,fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),console:{warn(){}}});
+  assert.equal(await audio.playReceptionAudio('error'),'blocked');
+});
