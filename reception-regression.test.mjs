@@ -348,18 +348,7 @@ test("fast scanner serializes processing, accepts the next QR after 60ms and sup
 test("legacy WAV assets are byte-identical; audio unlock does not wait for network preloading",async()=>{
   const expected={"qr_scan_detected.wav":"c030f32e524b8c5f9b43b987d9ab78fb28cc5ac52685a4969505140c67967994","qr_result_chime.wav":"fb6d5070938612822bbe550bce935752ff45a69fafb0b02cb457cec70139b55a","qr_gate_error_chime_v1.wav":"6a7ad6060edd3325181aea0bfeb8fbcc59318c21e61a06a0993972d1dc68bd22"};
   for(const [file,hash] of Object.entries(expected))assert.equal(createHash("sha256").update(readFileSync(new URL("./reception-app/public/sounds/"+file,import.meta.url))).digest("hex"),hash);
-  const listeners={},requests=[],pending=[];let resumes=0,starts=0;
-  class Context {
-    state="suspended";destination={};
-    async resume(){resumes++;this.state="running";}
-    async decodeAudioData(){return {};}
-    createBufferSource(){return {connect:()=>{},disconnect:()=>{},start:()=>{starts++;},stop:()=>{}};}
-  }
-  const audio=load("./reception-app/src/receptionAudio.ts",{},{window:{AudioContext:Context},document:{addEventListener:(event,fn)=>{listeners[event]=fn;},removeEventListener:event=>delete listeners[event]},fetch:url=>{requests.push(url);return new Promise(resolve=>pending.push(()=>resolve({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)})));}});
-  const cleanup=audio.prepareReceptionAudio();assert.equal(requests.length,3);
-  listeners.pointerdown();assert.equal(resumes,1);
-  pending.forEach(resolve=>resolve());await audio.playReceptionAudio("success");assert.equal(starts,1);
-  cleanup();assert.equal(listeners.pointerdown,undefined);
+
 });
 
 test("offline shell preloads all three original audio assets at their full paths",async()=>{
@@ -555,19 +544,6 @@ test('version 7 queue upgrades preserve history and allocate new sequences after
   assert.equal(pending[1].sequence,1001);assert.ok(await local.getReceptionRecord('history-1'));
 });
 
-test('audio preferences apply gain without changing legacy WAV assets, and success can be disabled',async()=>{
-  let starts=0;const gains=[];
-  class Context{
-    state='running';destination={};resume=async()=>{};decodeAudioData=async()=>({});
-    createGain(){const node={gain:{value:0},connect(){},disconnect(){}};gains.push(node);return node;}
-    createBufferSource(){return {connect(){},disconnect(){},stop(){},start(){starts++;}};}
-  }
-  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),localStorage:{getItem:()=>JSON.stringify({volume:25,successSound:false,voiceGuidance:false})}});
-  await audio.playReceptionAudio('success');assert.equal(starts,0);
-  await audio.playReceptionAudio('error');assert.equal(starts,1);assert.equal(gains[0].gain.value,0.25);
-  assert.equal(audio.getReceptionAudioSettings().voiceGuidance,false);
-});
-
 test('simultaneous local readers cannot accept the same unused ticket twice',async()=>{
   const local=localDb();await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const expected=await local.getTicket('ticket-one');
@@ -583,32 +559,62 @@ test('accepting a newly issued server ticket updates local inventory count for t
   assert.equal((await local.loadLocalEvent()).ticketCount,2);assert.equal(await local.countTickets('event-one'),2);
 });
 
-test('audio can unlock at touchend/click after pointerdown was insufficient',async()=>{
-  const listeners={};let activated=false,starts=0,primed=0;
-  class Context{
-    state='suspended';destination={};sampleRate=44100;
-    resume=async()=>{if(activated)this.state='running';};
-    decodeAudioData=async()=>({});createBuffer(){primed++;return {};}
-    createBufferSource(){return {connect(){},disconnect(){},stop(){},start(){starts++;}};}
+
+function recordedAudioHarness({play,fetch:fetchSound,volume=45,successSound=true,cache}={}){
+  const players=[],listeners={};let urls=0;
+  class Player{
+    paused=true;volume=1;currentTime=0;
+    constructor(src){this.src=src;players.push(this);}
+    load(){}pause(){this.paused=true;}
+    play(){this.paused=false;return play?play(this):Promise.resolve();}
   }
-  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},document:{addEventListener:(name,fn)=>listeners[name]=fn,removeEventListener:name=>delete listeners[name]},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)})});
-  const cleanup=audio.prepareReceptionAudio();listeners.pointerdown();assert.ok(primed);
-  activated=true;listeners.touchend();listeners.click();
-  const before=starts;assert.equal(await audio.playReceptionAudio('success'),'played');assert.equal(starts,before+1);
-  cleanup();assert.equal(Object.keys(listeners).length,0);
+  const response={ok:true,blob:async()=>({}),clone(){return this;}};
+  const audio=load('./reception-app/src/receptionAudio.ts',{},{
+    window:{AudioContext:class{constructor(){throw Error('legacy WAV playback must not use Web Audio');}},...(cache?{caches:{open:async()=>cache}}:{})},
+    Audio:Player,URL:{createObjectURL:()=>`blob:sound-${++urls}`},
+    document:{addEventListener:(event,fn)=>listeners[event]=fn,removeEventListener:event=>delete listeners[event]},
+    fetch:fetchSound??(async()=>response),localStorage:{getItem:()=>JSON.stringify({volume,successSound,voiceGuidance:false})},console:{warn(){}},
+  });
+  return {audio,players,listeners,response};
+}
+
+test('legacy media playback starts synchronously without Web Audio or waiting for preload',async()=>{
+  let called=0;const h=recordedAudioHarness({fetch:()=>new Promise(()=>{}),play:()=>{called++;return Promise.resolve();}});
+  const cleanup=h.audio.prepareReceptionAudio();assert.equal(h.players.length,3);
+  const result=h.audio.playReceptionAudio('success');assert.equal(called,1);
+  assert.equal(await result,'played');assert.equal(h.players[1].volume,.45);
+  assert.equal(h.audio.getReceptionAudioSettings().voiceGuidance,false);
+  cleanup();assert.equal(Object.keys(h.listeners).length,0);
 });
 
-test('WAV decode failure falls back to an audio element with configured volume',async()=>{
-  const players=[];
-  class Context{state='running';destination={};decodeAudioData=async()=>{throw Error('decode failed');};}
-  class Player{constructor(src){this.src=src;players.push(this);}pause(){}play=async()=>{this.played=true;};}
-  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},Audio:Player,fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),localStorage:{getItem:()=>JSON.stringify({volume:45})},console:{warn(){}}});
-  assert.equal(await audio.playReceptionAudio('success'),'played');assert.equal(players[0].volume,.45);assert.ok(players[0].played);assert.match(players[0].src,/qr_result_chime.wav$/);
+test('all original media elements are primed on touch completion and reused for scans',async()=>{
+  const h=recordedAudioHarness({fetch:()=>new Promise(()=>{})});
+  h.audio.prepareReceptionAudio();h.listeners.touchend();await nextTurn();
+  assert.equal(h.players.length,3);assert.ok(h.players.every(p=>p.paused&&p.volume===.45));
+  await h.audio.playReceptionAudio('detected');assert.equal(h.players.length,3);assert.equal(h.players[0].paused,false);
 });
 
-test('interrupted audio resume cannot hang forever and failed fallback reports blocked',async()=>{
-  class Context{state='interrupted';destination={};resume=()=>new Promise(()=>{});decodeAudioData=async()=>({});}
-  class Player{pause(){}play=async()=>{throw Error('NotAllowedError');};}
-  const audio=load('./reception-app/src/receptionAudio.ts',{},{window:{AudioContext:Context},Audio:Player,fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),console:{warn(){}}});
-  assert.equal(await audio.playReceptionAudio('error'),'blocked');
+test('late unlock completion cannot pause or lower the volume of a real result',async()=>{
+  const pending=[];const h=recordedAudioHarness({fetch:()=>new Promise(()=>{}),play:p=>p.volume===.01?new Promise(resolve=>pending.push(resolve)):Promise.resolve()});
+  h.audio.prepareReceptionAudio();h.listeners.pointerdown();
+  await h.audio.playReceptionAudio('success');const success=h.players[1];
+  pending.forEach(resolve=>resolve());await nextTurn();
+  assert.equal(success.paused,false);assert.equal(success.volume,.45);
+});
+
+test('cached original WAVs are played through Blob URLs rather than Range requests',async()=>{
+  let fetches=0;const response={ok:true,blob:async()=>({})};
+  const h=recordedAudioHarness({fetch:async()=>{fetches++;throw Error('offline');},cache:{match:async()=>response}});
+  h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();
+  assert.equal(await h.audio.playReceptionAudio('success'),'played');
+  assert.match(h.players[1].src,/^blob:sound-/);assert.equal(fetches,0);
+});
+
+test('muted preferences stay muted and rejected media playback reports blocked for retry',async()=>{
+  let attempts=0;const muted=recordedAudioHarness({volume:0,play:async()=>{attempts++;}});
+  assert.equal(await muted.audio.playReceptionAudio('error'),'muted');assert.equal(attempts,0);
+  const disabled=recordedAudioHarness({successSound:false});assert.equal(await disabled.audio.playReceptionAudio('success'),'muted');
+  const h=recordedAudioHarness({play:async()=>{if(++attempts===1)throw Error('NotAllowedError');}});
+  assert.equal(await h.audio.playReceptionAudio('success'),'blocked');
+  assert.equal(await h.audio.playReceptionAudio('success'),'played');assert.equal(h.players.length,1);
 });

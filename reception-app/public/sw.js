@@ -1,4 +1,4 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v4";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v5";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
 
