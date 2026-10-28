@@ -64,6 +64,11 @@ async function logReceptionError(
 }
 
 export default function App(){
+  const [audioNotice,setAudioNotice]=useState("");
+  const checkReceptionSound=async()=>{
+    const status=await playReceptionAudio("success");
+    setAudioNotice(status==="muted"?"音量が0、または成功音がオフです。管理アプリの設定を確認してください。":status==="blocked"?"音を再生できません。端末の音量・消音設定を確認して、もう一度「音の確認」を押してください。":"");
+  };
   useEffect(()=>prepareReceptionAudio(),[]);
   const [screen,setScreen]=useState<Screen>("registration");
   const screenRef=useRef<Screen>(screen);
@@ -791,6 +796,7 @@ export default function App(){
                   <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
                   <button type="button" className="primary" disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
                   <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
+                  <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
                   <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");speakReception(mode==="entry"?"entry":"exit");playSuccessSound();}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
@@ -839,6 +845,7 @@ export default function App(){
             </div>
           </>}
           <div style={{display:"flex",gap:"10px",justifyContent:"center",flexWrap:"wrap",marginTop:"24px"}}>
+            <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");speakReception("entry");void playSuccessSound();}}>入口結果</button>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");speakReception("exit");void playSuccessSound();}}>出口結果</button>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");void playReceptionAudio("error");window.speechSynthesis?.cancel();}}>エラー結果</button>
@@ -965,6 +972,7 @@ export default function App(){
                 <h2>受付準備完了</h2>
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
+                <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
                 <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
                 <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
