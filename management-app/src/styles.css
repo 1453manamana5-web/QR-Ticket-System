@@ -4917,3 +4917,25 @@ body:has(.ticket-screen),
 @media (prefers-reduced-motion: reduce) {
   .navigation-notice-backdrop, .navigation-notice-dialog { animation: none; }
 }
+
+/* Pointer-tracked resizing: no easing while the finger is on the sidebar. */
+@media(min-width:561px){
+  .app-shell .sidebar{--sidebar-expanded-width:248px;--sidebar-collapsed-width:82px;}
+  .app-shell.liquid-glass-enabled .sidebar{--sidebar-expanded-width:252px;}
+  .app-shell.sidebar-dragging .sidebar{transition:none!important;cursor:grabbing;}
+  .app-shell.sidebar-dragging .management-main{flex:1;min-width:0;width:0;}
+  .app-shell.sidebar-dragging .sidebar nav button{white-space:nowrap;overflow:hidden;}
+  .sidebar-resize-handle{position:absolute;right:0;top:45%;width:20px;height:96px;z-index:3;padding:0;border:0;background:transparent;color:inherit;cursor:ew-resize;touch-action:none;display:grid;place-items:center;}
+  .sidebar-resize-handle span{width:4px;height:38px;border-radius:8px;background:rgba(255,255,255,.4);transition:background .15s;}
+  .sidebar-resize-handle:hover span,.sidebar-resize-handle:focus-visible span{background:#fff;}
+  .sidebar-resize-handle:focus-visible{outline:2px solid #fff;outline-offset:-3px;border-radius:10px;}
+}
+@media(min-width:561px) and (max-width:900px){.app-shell .sidebar{--sidebar-expanded-width:228px;--sidebar-collapsed-width:76px;}}
+@media(min-width:561px) and (max-width:700px){.app-shell .sidebar{--sidebar-expanded-width:210px;--sidebar-collapsed-width:68px;}}
+@media(max-width:560px){.sidebar-resize-handle{display:none;}}
+
+@media(min-width:561px) and (max-width:900px){.app-shell.liquid-glass-enabled .sidebar{--sidebar-expanded-width:228px;}}
+@media(max-width:560px){
+  .sidebar-resize-handle{display:grid;place-items:center;position:absolute;right:12px;top:12px;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:rgba(255,255,255,.12);color:#fff;}
+  .sidebar-resize-handle span{width:3px;height:16px;border-radius:4px;background:currentColor;}
+}
