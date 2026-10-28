@@ -176,25 +176,28 @@ function loadDesignSettings(
   }
 }
 
-function FloatingPanel({title,className,children,onClose}:{title:string;className:string;children:ReactNode;onClose:()=>void}) {
+let floatingPanelZ = 10;
+function FloatingPanel({title,className,children,onClose,offset=0}:{title:string;className:string;children:ReactNode;onClose:()=>void;offset?:number}) {
+  const initialOffset=useRef(offset).current;
   const ref=useRef<HTMLElement>(null);
   const drag=useRef<{x:number;y:number;left:number;top:number}|null>(null);
   useEffect(()=>{
     const panel=ref.current;if(!panel)return;
+    panel.style.zIndex=String(++floatingPanelZ);
     const clamp=()=>{const host=panel.offsetParent as HTMLElement;if(!host)return;
       if(panel.style.left)panel.style.left=`${Math.max(8,Math.min(parseFloat(panel.style.left),host.clientWidth-panel.offsetWidth-8))}px`;
       if(panel.style.top)panel.style.top=`${Math.max(8,Math.min(parseFloat(panel.style.top),host.clientHeight-panel.offsetHeight-8))}px`;
     };
     const observer=new ResizeObserver(clamp);observer.observe(panel);if(panel.offsetParent)observer.observe(panel.offsetParent);return()=>observer.disconnect();
   },[]);
-  return <section ref={ref} className={`studio-panel ${className}`}><header onPointerDown={e=>{
-    if((e.target as HTMLElement).closest('button'))return;
+  return <section ref={ref} className={`studio-panel ${className}`} style={initialOffset?{top:12+initialOffset,right:12+initialOffset,bottom:"auto"}:undefined} onPointerDownCapture={()=>{if(ref.current)ref.current.style.zIndex=String(++floatingPanelZ);}} onFocusCapture={()=>{if(ref.current)ref.current.style.zIndex=String(++floatingPanelZ);}}><header onPointerDown={e=>{
+    if(e.button!==0||e.isPrimary===false||(e.target as HTMLElement).closest('button'))return;
     drag.current={x:e.clientX,y:e.clientY,left:ref.current!.offsetLeft,top:ref.current!.offsetTop};e.currentTarget.setPointerCapture(e.pointerId);
   }} onPointerMove={e=>{const start=drag.current,panel=ref.current;if(!start||!panel)return;const host=panel.offsetParent as HTMLElement;
     panel.style.left=`${Math.max(8,Math.min(host.clientWidth-panel.offsetWidth-8,start.left+e.clientX-start.x))}px`;
     panel.style.top=`${Math.max(8,Math.min(host.clientHeight-panel.offsetHeight-8,start.top+e.clientY-start.y))}px`;
     panel.style.right='auto';panel.style.bottom='auto';
-  }} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><strong>⠿ &nbsp;{title}</strong><button type="button" onClick={onClose} aria-label={`${title}を閉じる`}>×</button></header><div className="studio-panel-body">{children}</div></section>;
+  }} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}} onLostPointerCapture={()=>{drag.current=null;}}><strong>⠿ &nbsp;{title}</strong><button type="button" onClick={onClose} aria-label={`${title}を閉じる`}>×</button></header><div className="studio-panel-body">{children}</div></section>;
 }
 
 function TicketDesigner({
@@ -228,7 +231,12 @@ function TicketDesigner({
       : 0;
 
   const detectionId = useRef(0);
-  const [panel,setPanel]=useState<"settings"|"range"|"layers"|null>(null);
+  type ToolPanel = "settings" | "range" | "layers";
+  const [panels,setPanels]=useState<ToolPanel[]>([]);
+  const togglePanel=(id:ToolPanel)=>setPanels(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
+  const closePanel=(id:ToolPanel)=>setPanels(current=>current.filter(item=>item!==id));
+  const [partPanels,setPartPanels]=useState<string[]>([]);
+  const openPartPanel=(id:string)=>setPartPanels(current=>current.includes(id)?current:[...current,id]);
   const [titleSelected,setTitleSelected]=useState(false);
   const [selectedImage,setSelectedImage]=useState<string|null>(null);
   const [guides,setGuides]=useState<{x?:number;y?:number}>({});
@@ -847,6 +855,20 @@ function TicketDesigner({
   const rotation=activeLayer?settings.rotations?.[activeLayer]??0:0;
   const activeImage=images.find(image=>image.id===activeLayer);
   const rotationPosition=activeImage?{x:activeImage.x,y:activeImage.y}:activeLayer==="qr"?{x:settings.qrX,y:settings.qrY}:activeLayer==="number"?{x:settings.numberX,y:settings.numberY}:{x:settings.titleX??32,y:settings.titleY??30};
+
+  const partName=(id:string)=>id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(image=>image.id===id)?.name??"画像";
+  const updatePart=(id:string,field:"x"|"y"|"size"|"rotation",value:number)=>{
+    if(!Number.isFinite(value)||settings.locked?.[id])return;
+    checkpoint();
+    if(field==="rotation"){setRotation(id,value);return;}
+    const bounded=field==="size"?Math.max(id.startsWith("image-")?5:id==="qr"?12:10,Math.min(id.startsWith("image-")?100:id==="qr"?55:id==="number"?60:80,value)):Math.max(-50,Math.min(150,value));
+    setSettings(current=>{
+      if(current.locked?.[id])return current;
+      if(id.startsWith("image-"))return {...current,images:current.images?.map(image=>image.id===id?{...image,[field==="size"?"width":field]:bounded}:image)};
+      const key=id==="qr"?(field==="x"?"qrX":field==="y"?"qrY":"qrSize"):id==="number"?(field==="x"?"numberX":field==="y"?"numberY":"numberSize"):(field==="x"?"titleX":field==="y"?"titleY":"titleSize");
+      return {...current,[key]:bounded};
+    });
+  };
   const startRotation=(e:React.PointerEvent<HTMLButtonElement>)=>{
     e.stopPropagation();if(!activeLayer||activeLocked||!ticketCardRef.current)return;checkpoint();
     const id=activeLayer,rect=ticketCardRef.current.getBoundingClientRect(),cx=rect.left+rect.width*rotationPosition.x/100,cy=rect.top+rect.height*rotationPosition.y/100;
@@ -871,7 +893,7 @@ function TicketDesigner({
     const top=image?image.y:part==="qr"?settings.qrY:part==="number"?settings.numberY:settings.titleY??30;
     const halfX=item.width/rect.width*50,halfY=item.height/rect.height*50;
     const peers=[{id:"qr",x:settings.qrX,y:settings.qrY},{id:"number",x:settings.numberX,y:settings.numberY},...(settings.title?[{id:"title",x:settings.titleX??32,y:settings.titleY??30}]:[]),...images].filter(i=>i.id!==part);
-    const snap=(value:number,targets:{value:number;line:number}[],threshold:number)=>{const closest=targets.reduce((a,b)=>Math.abs(b.value-value)<Math.abs(a.value-value)?b:a);return snapEnabled&&Math.abs(closest.value-value)<threshold?{value:closest.value,line:closest.line}:{value:Math.max(0,Math.min(100,value)),line:undefined};};
+    const snap=(value:number,targets:{value:number;line:number}[],threshold:number)=>{const closest=targets.reduce((a,b)=>Math.abs(b.value-value)<Math.abs(a.value-value)?b:a);return snapEnabled&&Math.abs(closest.value-value)<threshold?{value:closest.value,line:closest.line}:{value:Math.max(-50,Math.min(150,value)),line:undefined};};
     const target=e.currentTarget;target.setPointerCapture(e.pointerId);
     const move=(event:PointerEvent)=>{const nx=snap(left+(event.clientX-x)/rect.width*100,[{value:halfX,line:0},{value:50,line:50},{value:100-halfX,line:100},...peers.map(p=>({value:p.x,line:p.x}))],7/rect.width*100);const ny=snap(top+(event.clientY-y)/rect.height*100,[{value:halfY,line:0},{value:50,line:50},{value:100-halfY,line:100},...peers.map(p=>({value:p.y,line:p.y}))],7/rect.height*100);setGuides({x:nx.line,y:ny.line});setSettings(current=>image?({...current,images:current.images?.map(i=>i.id===part?{...i,x:nx.value,y:ny.value}:i)}):({...current,[part==="qr"?"qrX":part==="number"?"numberX":"titleX"]:nx.value,[part==="qr"?"qrY":part==="number"?"numberY":"titleY"]:ny.value}));};
     const stop=()=>{setGuides({});target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',stop);target.removeEventListener('pointercancel',stop);};target.addEventListener('pointermove',move);target.addEventListener('pointerup',stop);target.addEventListener('pointercancel',stop);
@@ -890,22 +912,24 @@ function TicketDesigner({
         </header>
         <main className="studio-workspace">
           <nav className="studio-dock" aria-label="編集ツール">
-            <button type="button" onClick={()=>{setPanel(null);setSelectedImage(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
+            <button type="button" onClick={()=>{setPanels([]);setSelectedImage(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
             <button type="button" onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setSelectedImage(null);setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
             <label>▧<small>画像</small><input aria-label="画像を追加" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={imageUpload}/></label>
-            <button type="button" onClick={()=>setPanel(panel==="layers"?null:"layers")}>▱<small>レイヤー</small></button>
+            <button type="button" onClick={()=>togglePanel("layers")}>▱<small>レイヤー</small></button>
             <label>▧<small>背景</small><input type="file" accept="image/*" onChange={handleBackgroundImage}/></label>
             <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
             <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
-            <button type="button" className={panel==="settings"?"active":""} onClick={()=>setPanel(panel==="settings"?null:"settings")}>⚙<small>設定</small></button>
-            <button type="button" className={panel==="range"?"active":""} onClick={()=>setPanel(panel==="range"?null:"range")}>▤<small>一覧</small></button>
+            <button type="button" className={panels.includes("settings")?"active":""} onClick={()=>togglePanel("settings")}>⚙<small>設定</small></button>
+            <button type="button" className={panels.includes("range")?"active":""} onClick={()=>togglePanel("range")}>▤<small>一覧</small></button>
           </nav>
           <div className="studio-canvas" onClick={()=>{}}>
             <div className="studio-context" onPointerDownCapture={checkpoint}>
+              <button type="button" aria-pressed={snapEnabled} onClick={()=>setSnapEnabled(value=>!value)}>{snapEnabled?"吸着オン":"吸着オフ"}</button>
+              {activeLayer&&<button type="button" onClick={()=>openPartPanel(activeLayer)}>パーツ設定を開く</button>}
               {activeLayer&&<label className="studio-angle">角度 <input aria-label="回転角度" type="number" min="-180" max="180" step="1" disabled={activeLocked} value={rotation} onChange={e=>setRotation(activeLayer,Number(e.target.value))}/>°<button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,rotation-15)}>−15°</button><button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,rotation+15)}>＋15°</button><button type="button" disabled={activeLocked} onClick={()=>setRotation(activeLayer,0)}>0°</button></label>}
               <span>{titleSelected?"イベント名":selectedPart==="qr"?"QRコード":selectedPart==="number"?"チケット番号":"キャンバス"}</span>
               {selectedImage?<><span>追加画像{activeLocked?"（ロック中）":""}</span><button type="button" disabled={activeLocked} onClick={()=>{checkpoint();setSettings(current=>({...current,images:current.images?.filter(i=>i.id!==selectedImage),layerOrder:layers.filter(id=>id!==selectedImage)}));setSelectedImage(null);}}>削除</button></>:titleSelected?<><input disabled={activeLocked} aria-label="イベント名の文字" value={settings.title??""} onChange={e=>updateSetting("title",e.target.value)}/><input disabled={activeLocked} type="number" aria-label="イベント名の文字サイズ" min="10" max="80" value={settings.titleSize??28} onChange={e=>updateSetting("titleSize",Math.max(10,Math.min(80,Number(e.target.value))))}/><input aria-label="文字色" type="color" disabled={activeLocked} value={settings.titleColor??"#162e4a"} onChange={e=>updateSetting("titleColor",e.target.value)}/><select aria-label="フォント" disabled={activeLocked} value={settings.titleFont??"sans-serif"} onChange={e=>updateSetting("titleFont",e.target.value)}><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select><button type="button" disabled={activeLocked} aria-pressed={settings.titleBold!==false} onClick={()=>updateSetting("titleBold",settings.titleBold===false)}>太字</button><button type="button" disabled={activeLocked} onClick={()=>updateSetting("title","")}>削除</button></>:
-              selectedPart?<><span>サイズ</span><input disabled={activeLocked} type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>setPanel("settings")}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
+              selectedPart?<><span>サイズ</span><input disabled={activeLocked} type="range" aria-label="選択パーツのサイズ" min={selectedPart==="qr"?12:10} max={selectedPart==="qr"?55:60} value={selectedPart==="qr"?settings.qrSize:settings.numberSize} onChange={e=>updateSetting(selectedPart==="qr"?"qrSize":"numberSize",Number(e.target.value))}/><button type="button" onClick={()=>{if(activeLayer)openPartPanel(activeLayer);}}>配置を調整</button></>:<span>文字・QR・番号をドラッグして配置</span>}
             </div>
             <div className="studio-paper-area" onPointerDown={e=>{if((e.target as HTMLElement).closest('.ticket-draggable-part'))return;panDragStart.current={pointerId:e.pointerId,x:e.clientX,y:e.clientY,panX:previewPan.x,panY:previewPan.y};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const start=panDragStart.current;if(start?.pointerId===e.pointerId)setPreviewPan({x:start.panX+e.clientX-start.x,y:start.panY+e.clientY-start.y});}} onPointerUp={()=>{panDragStart.current=null;}} onPointerCancel={()=>{panDragStart.current=null;}} onTouchStart={e=>{if(e.touches.length===2){pinchStartDistance.current=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pinchStartZoom.current=previewZoom;}}} onTouchMove={e=>{if(e.touches.length===2&&pinchStartDistance.current){const distance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);setPreviewZoom(Math.max(.5,Math.min(3,pinchStartZoom.current*distance/pinchStartDistance.current)));}}} onTouchEnd={()=>{pinchStartDistance.current=null;}}>
               <div ref={ticketCardRef} className="ticket-design-card" style={{...previewTicketStyle,transform:`translate(${previewPan.x}px,${previewPan.y}px) scale(${previewZoom})`,transformOrigin:"center"}}>
@@ -920,8 +944,26 @@ function TicketDesigner({
             </div>
             <div className="studio-zoom"><button type="button" aria-label="縮小" onClick={()=>setPreviewZoom(z=>Math.max(.5,z-.1))}>−</button><span>{Math.round(previewZoom*100)}%</span><button type="button" aria-label="拡大" onClick={()=>setPreviewZoom(z=>Math.min(3,z+.1))}>＋</button><button type="button" onClick={()=>{setPreviewZoom(1);setPreviewPan({x:0,y:0});}}>画面に合わせる</button></div>
           </div>
-          {panel==="layers"&&<FloatingPanel title="レイヤー" className="studio-inspector" onClose={()=>setPanel(null)}><div className="studio-layers"><label><input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)}/>吸着・整列ガイド</label><p>上の項目ほど手前に表示されます</p>{[...layers].reverse().filter(id=>id!=="title"||settings.title).map(id=><div key={id} className={activeLayer===id?"active":""}><button type="button" onClick={()=>selectLayer(id)}>{id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(i=>i.id===id)?.name??"画像"}</button><button type="button" aria-label={`${id}をロック切替`} aria-pressed={Boolean(settings.locked?.[id])} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{settings.locked?.[id]?"固定":"自由"}</button><button type="button" aria-label={`${id}を前へ`} disabled={layers.indexOf(id)===layers.length-1} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i+1]]=[order[i+1],order[i]];updateSetting("layerOrder",order);}}>↑</button><button type="button" aria-label={`${id}を後ろへ`} disabled={layers.indexOf(id)===0} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i-1]]=[order[i-1],order[i]];updateSetting("layerOrder",order);}}>↓</button></div>)}<p>背景画像は常に最背面に固定されます。</p></div></FloatingPanel>}
-          {panel==="settings"&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>setPanel(null)}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
+          {partPanels.filter(id=>id==="qr"||id==="number"||(id==="title"&&settings.title)||images.some(image=>image.id===id)).map((id,index)=>{
+            const image=images.find(item=>item.id===id),name=partName(id),locked=Boolean(settings.locked?.[id]);
+            const x=image?.x??(id==="qr"?settings.qrX:id==="number"?settings.numberX:settings.titleX??32);
+            const y=image?.y??(id==="qr"?settings.qrY:id==="number"?settings.numberY:settings.titleY??30);
+            const size=image?.width??(id==="qr"?settings.qrSize:id==="number"?settings.numberSize:settings.titleSize??28);
+            return <FloatingPanel key={id} title={`${name}の設定`} className="studio-inspector studio-part-inspector" offset={56+(index%6)*24} onClose={()=>setPartPanels(current=>current.filter(item=>item!==id))}>
+              <div className="studio-part-controls" data-part-settings={id}>
+                <button type="button" onClick={()=>selectLayer(id)}>このパーツを選択</button>
+                <button type="button" aria-pressed={locked} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{locked?"固定を解除":"パーツを固定"}</button>
+                <label>横位置（%）<input aria-label={`${name}の横位置`} disabled={locked} type="number" min="-50" max="150" step="0.1" value={x} onChange={e=>updatePart(id,"x",Number(e.target.value))}/></label>
+                <label>縦位置（%）<input aria-label={`${name}の縦位置`} disabled={locked} type="number" min="-50" max="150" step="0.1" value={y} onChange={e=>updatePart(id,"y",Number(e.target.value))}/></label>
+                <label>{image||id==="qr"?"幅（%）":"文字サイズ"}<input aria-label={`${name}のサイズ`} disabled={locked} type="number" min={image?5:id==="qr"?12:10} max={image?100:id==="qr"?55:id==="number"?60:80} step="0.1" value={size} onChange={e=>updatePart(id,"size",Number(e.target.value))}/></label>
+                <label>回転（°）<input aria-label={`${name}の回転`} disabled={locked} type="number" min="-180" max="180" step="1" value={settings.rotations?.[id]??0} onChange={e=>updatePart(id,"rotation",Number(e.target.value))}/></label>
+                {id==="title"&&<label>文字<input aria-label="パーツ設定の文字" disabled={locked} value={settings.title??""} onChange={e=>{checkpoint();updateSetting("title",e.target.value);}}/></label>}
+                <p>0.1%単位で調整できます。枠外の部分は印刷されません。</p>
+              </div>
+            </FloatingPanel>;
+          })}
+          {panels.includes("layers")&&<FloatingPanel title="レイヤー" className="studio-inspector" onClose={()=>closePanel("layers")} offset={0}><div className="studio-layers"><label><input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)}/>吸着・整列ガイド</label><p>上の項目ほど手前に表示されます</p>{[...layers].reverse().filter(id=>id!=="title"||settings.title).map(id=><div key={id} className={activeLayer===id?"active":""}><button type="button" onClick={()=>selectLayer(id)}>{id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(i=>i.id===id)?.name??"画像"}</button><button type="button" aria-label={`${id}をロック切替`} aria-pressed={Boolean(settings.locked?.[id])} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{settings.locked?.[id]?"固定":"自由"}</button><button type="button" aria-label={`${id}を前へ`} disabled={layers.indexOf(id)===layers.length-1} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i+1]]=[order[i+1],order[i]];updateSetting("layerOrder",order);}}>↑</button><button type="button" aria-label={`${id}を後ろへ`} disabled={layers.indexOf(id)===0} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i-1]]=[order[i-1],order[i]];updateSetting("layerOrder",order);}}>↓</button></div>)}<p>背景画像は常に最背面に固定されます。</p></div></FloatingPanel>}
+          {panels.includes("settings")&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>closePanel("settings")} offset={28}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
               <h4>
                 チケットサイズ
               </h4>
@@ -1328,7 +1370,7 @@ function TicketDesigner({
               </label>
             </div>
 <div className="studio-reset"><button type="button" onClick={resetDesign}>初期状態に戻す</button></div></div></FloatingPanel>}
-          {panel==="range"&&<FloatingPanel title="チケット一覧・印刷範囲" className="studio-inventory" onClose={()=>setPanel(null)}><div className="ticket-print-range"><div className="studio-thumbnails">{printableTickets.slice(Math.max(0,startIndex-2),Math.max(0,startIndex-2)+12).map(ticket=><button type="button" key={ticket.id} aria-label={`チケット ${ticket.qrNumber} を表示`} onClick={()=>{const index=printableTickets.indexOf(ticket);setStartIndex(index);if(endIndex<index)setEndIndex(index);}} style={{backgroundImage:settings.backgroundImage?`url("${settings.backgroundImage}")`:undefined}}><span>{ticket.qrNumber}</span></button>)}</div><div className="ticket-range-inputs">
+          {panels.includes("range")&&<FloatingPanel title="チケット一覧・印刷範囲" className="studio-inventory" onClose={()=>closePanel("range")} offset={56}><div className="ticket-print-range"><div className="studio-thumbnails">{printableTickets.slice(Math.max(0,startIndex-2),Math.max(0,startIndex-2)+12).map(ticket=><button type="button" key={ticket.id} aria-label={`チケット ${ticket.qrNumber} を表示`} onClick={()=>{const index=printableTickets.indexOf(ticket);setStartIndex(index);if(endIndex<index)setEndIndex(index);}} style={{backgroundImage:settings.backgroundImage?`url("${settings.backgroundImage}")`:undefined}}><span>{ticket.qrNumber}</span></button>)}</div><div className="ticket-range-inputs">
                 <label>
                   最初のチケット
 

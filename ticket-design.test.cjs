@@ -9,4 +9,32 @@ await click('T文字');let color=r.root.findAllByType('input').find(x=>x.props['
 const upload=r.root.findAllByType('input').find(x=>x.props['aria-label']==='画像を追加');await act(async()=>upload.props.onChange({target:{files:[{name:'badge.png',type:'image/png',size:20}],value:'x'}}));if(r.root.findAllByType('img').length!==7)throw Error('image not in editor and print');
 const rotationHandle=r.root.findAllByType('button').find(x=>x.props['aria-label']==='選択要素を回転');await act(async()=>rotationHandle.props.onPointerDown({stopPropagation:()=>{},currentTarget:target,clientX:250,clientY:50,pointerId:1}));await act(async()=>events.pointermove({clientX:350,clientY:150}));if(r.root.findAllByType('input').find(x=>x.props['aria-label']==='回転角度').props.value!==90)throw Error('rotation gesture');await act(async()=>events.pointerup());const angleInput=r.root.findAllByType('input').find(x=>x.props['aria-label']==='回転角度');await act(async()=>angleInput.props.onChange({target:{value:'30'}}));await click('保存');const stored=JSON.parse([...storage.values()][0]);if(stored.rotations[stored.images[0].id]!==30)throw Error('rotation persistence');const printImage=r.root.findAll(n=>n.props.className==='studio-image  ')[0];if(!printImage||!printImage.props.style.transform.includes('rotate(30deg)'))throw Error('print image rotation');if(stored.images.length!==1||stored.titleColor!=='#ff0000'||stored.titleFont!=='serif'||stored.qrX!==50)throw Error('extended settings persistence');
 await click('T文字');let textAngle=r.root.findAllByType('input').find(x=>x.props['aria-label']==='回転角度');await act(async()=>textAngle.props.onChange({target:{value:'45'}}));const printed=r.root.findAll(n=>n.props.className==='ticket-print-card')[0];if(!printed.findAll(n=>n.props.className==='ticket-design-title')[0].props.style.transform.includes('rotate(45deg)'))throw Error('text print rotation');if(printed.findAll(n=>n.props.className==='ticket-design-title')[0].props.style.color!=='#ff0000')throw Error('print text color');
+
+// Independent tool windows remain open; closing one must not close the others.
+await click('⚙設定');
+if(!r.root.findAll(n=>n.props.className==='studio-panel studio-inventory').length)throw Error('range closed when settings opened');
+await act(async()=>r.root.findAllByType('button').find(n=>n.props['aria-label']==='配置・サイズを閉じる').props.onClick());
+if(!r.root.findAll(n=>n.props.className==='studio-panel studio-inventory').length)throw Error('range closed with settings');
+await click('▦QR');await click('パーツ設定を開く');
+await click('＃番号');await click('パーツ設定を開く');
+await click('T文字');await click('パーツ設定を開く');
+const partPanels=()=>r.root.findAll(n=>n.props['data-part-settings']);
+if(partPanels().length!==3)throw Error('part inspectors must coexist');
+await click('＃番号');
+const numberBefore=r.root.findAll(n=>typeof n.props.className==='string'&&n.props.className.includes('ticket-design-number ticket-draggable-part'))[0].props.style.left;
+let qx=r.root.findAllByType('input').find(n=>n.props['aria-label']==='QRコードの横位置');
+await act(async()=>qx.props.onChange({target:{value:'-12.5'}}));
+if(qr().props.style.left!=='-12.5%')throw Error('pinned QR inspector changed wrong part');
+if(r.root.findAll(n=>typeof n.props.className==='string'&&n.props.className.includes('ticket-design-number ticket-draggable-part'))[0].props.style.left!==numberBefore)throw Error('number moved while editing QR panel');
+await click('パーツ設定を開く');if(partPanels().length!==3)throw Error('duplicate inspector');
+await click('吸着オン');
+await act(async()=>qr().props.onPointerDown({stopPropagation:()=>{},currentTarget:target,clientX:0,clientY:0,pointerId:1}));
+await act(async()=>events.pointermove({clientX:315,clientY:0}));
+if(qr().props.style.left!=='50.5%')throw Error('snap off must allow fine movement');
+await act(async()=>events.pointermove({clientX:-500,clientY:0}));
+if(qr().props.style.left!=='-50%')throw Error('free drag should allow partial off-paper placement');
+await act(async()=>events.pointerup());
+await click('保存');if(JSON.parse([...storage.values()][0]).qrX!==-50)throw Error('free position not saved');
+await act(async()=>r.root.findAllByType('button').find(n=>n.props['aria-label']==='QRコードの設定を閉じる').props.onClick());
+if(partPanels().length!==2)throw Error('closing QR inspector affected other parts');
 await act(async()=>r.unmount());console.log('PASS: rotation persistence/print,  editing, save, print output, panel controls, locked drag, snapping, layer order, font/color and image persistence');})();
