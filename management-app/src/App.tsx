@@ -78,7 +78,9 @@ export default function App() {
     try { localStorage.setItem("qr-ticket-sidebar-collapsed", String(sidebarCollapsed)); }
     catch { /* storage may be unavailable; the toggle still works for this session */ }
   }, [sidebarCollapsed]);
-  const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number } | null>(null);
+  const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number; radius: number;
+    bubble?: { left:number; top:number; width:number; height:number; dx:number; dy:number }
+  } | null>(null);
   const pageOpeningSequence = useRef(0);
   const navigateFromSidebar = (nextPage: string, source?: HTMLElement | null) => {
     if (nextPage === "チケット管理" && (!event.eventId || event.eventStatus === "finished")) {
@@ -92,15 +94,21 @@ export default function App() {
     const sourceElement = source ?? Array.from(document.querySelectorAll<HTMLElement>("[data-nav-label]"))
       .find(element => element.dataset.navLabel === nextPage);
     const mainElement = document.querySelector<HTMLElement>(".management-main");
-    if (sourceElement && mainElement) {
+    const reducedMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (sourceElement && mainElement && !reducedMotion) {
       const sourceRect = sourceElement.getBoundingClientRect();
       const mainRect = mainElement.getBoundingClientRect();
+      const cx=sourceRect.left+sourceRect.width/2,cy=sourceRect.top+sourceRect.height/2;
+      const bubble=appSettings.aiLabEnabled ? {
+        left:cx,top:cy,width:mainRect.width,height:mainRect.height,
+        dx:mainRect.left+mainRect.width/2-cx,dy:mainRect.top+mainRect.height/2-cy,
+      }:undefined;
+      const x=bubble?cx-mainRect.left:Math.max(0,cx-mainRect.left);
+      const y=Math.max(0,Math.min(mainRect.height,cy-mainRect.top));
       pageOpeningSequence.current += 1;
-      setPageOpeningOrigin({
-        // Align the reveal with the center of the clicked navigation item.
-        x: Math.max(0, sourceRect.left + sourceRect.width / 2 - mainRect.left),
-        y: Math.max(0, Math.min(mainRect.height, sourceRect.top + sourceRect.height / 2 - mainRect.top)),
-        sequence: pageOpeningSequence.current,
+      setPageOpeningOrigin({x,y,bubble,
+        radius:Math.hypot(Math.max(Math.abs(x),Math.abs(mainRect.width-x)),Math.max(y,mainRect.height-y))+8,
+        sequence:pageOpeningSequence.current,
       });
     } else setPageOpeningOrigin(null);
     setPage(nextPage);
@@ -110,7 +118,7 @@ export default function App() {
     const sequence = pageOpeningOrigin.sequence;
     const timer = window.setTimeout(() => {
       setPageOpeningOrigin(current => current?.sequence === sequence ? null : current);
-    }, 720);
+    }, 820);
     return () => window.clearTimeout(timer);
   }, [pageOpeningOrigin]);
   const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
@@ -2940,11 +2948,22 @@ function NavIcon({type}:{type:string}){
         ))}
       </nav>
     </aside>
+    {pageOpeningOrigin?.bubble&&appSettings.aiLabEnabled&&<div
+      key={pageOpeningOrigin.sequence} className="sidebar-soap-bubble" aria-hidden="true"
+      style={{left:pageOpeningOrigin.bubble.left,top:pageOpeningOrigin.bubble.top,
+        width:pageOpeningOrigin.bubble.width,height:pageOpeningOrigin.bubble.height,
+        "--bubble-dx":`${pageOpeningOrigin.bubble.dx}px`,"--bubble-dy":`${pageOpeningOrigin.bubble.dy}px`,
+      } as import("react").CSSProperties}/>}
     <main
-      className={pageOpeningOrigin ? "management-main page-opening" : "management-main"}
+      className={pageOpeningOrigin ? `management-main page-opening ${pageOpeningOrigin.bubble&&appSettings.aiLabEnabled?"soap-page-opening":""}` : "management-main"}
+      onAnimationEnd={event=>{
+        if(event.target===event.currentTarget&&event.animationName.startsWith("sidebar-"))setPageOpeningOrigin(null);
+      }}
       style={pageOpeningOrigin ? ({
         "--page-origin-x": `${pageOpeningOrigin.x}px`,
         "--page-origin-y": `${pageOpeningOrigin.y}px`,
+        "--page-bubble-radius": `${pageOpeningOrigin.radius}px`,
+        animationName:pageOpeningOrigin.bubble&&appSettings.aiLabEnabled?(pageOpeningOrigin.sequence%2?"sidebar-soap-open-a":"sidebar-soap-open-b"):undefined,
       } as import("react").CSSProperties) : undefined}
     >
       <header className="management-header">
