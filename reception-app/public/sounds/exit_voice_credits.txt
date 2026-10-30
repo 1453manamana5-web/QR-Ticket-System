@@ -1,0 +1,22 @@
+出口受付「ご来場ありがとうございました。」（Dの声・承認済み抑揚修正版）
+
+AI-generated speech. Preset jf_nezumi, Kokoro-82M v1.0 (Apache License 2.0).
+Model: https://huggingface.co/hexgrad/Kokoro-82M
+ONNX: https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX
+Voice/source list: https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+CC BY source credit as identified by the model author: Koniwa / tnc — ねずみの嫁入り
+https://github.com/koniwa/koniwa/blob/master/source/tnc/tnc__nezuminoyomeiri.txt
+https://creativecommons.org/licenses/by/3.0/
+
+Standalone MP3 is byte-identical to approved exit_thank_you_D.mp3 revision 1.
+Generation modifications: phoneme-aligned local F0 conditioning, silence
+padding, volume normalization and MP3 encoding. No additional voice recording
+or training of a real person. No endorsement by the source contributors.
+
+Accent research consulted: 郡史郎（2014）「ありがとうございました」の
+イントネーションと「心から感謝されている気持ち」の関係（発表資料）
+https://www.lang.osaka-u.ac.jp/~caris/articles/「ありがとうございました」のイントネーションと「心から感謝されている気持ち」の関係.pdf
+This research informs prosody; it does not endorse this recording.
+
+exit_success_voice_d_v1.mp3: derived mix of original qr_result_chime.wav
+at 35% volume and D voice delayed 220ms, limited and encoded as MP3.

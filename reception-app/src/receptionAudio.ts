@@ -1,5 +1,5 @@
-type Sound = "detected" | "success" | "error" | "entryGuidance" | "entrySuccess";
-const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav",entryGuidance:"entry_osusumi_voice_d_v1.mp3",entrySuccess:"entry_success_voice_d_v1.mp3"};
+type Sound = "detected" | "success" | "error" | "entryGuidance" | "entrySuccess" | "exitGuidance" | "exitSuccess";
+const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav",entryGuidance:"entry_osusumi_voice_d_v1.mp3",entrySuccess:"entry_success_voice_d_v1.mp3",exitGuidance:"exit_thank_you_voice_d_v1.mp3",exitSuccess:"exit_success_voice_d_v1.mp3"};
 const objectUrls=new Map<Sound,string>();
 let media:HTMLAudioElement|null=null;
 let activeKind:Sound|null=null;
@@ -69,14 +69,14 @@ export function enableReceptionVoice(){
   }catch{return false;}
 }
 export function stopReceptionGuidance(){
-  if(activeKind!=="entryGuidance"&&activeKind!=="entrySuccess")return;
+  if(activeKind!=="entryGuidance"&&activeKind!=="entrySuccess"&&activeKind!=="exitGuidance"&&activeKind!=="exitSuccess")return;
   ++generation;media?.pause();if(media)media.currentTime=0;
 }
 export async function playReceptionAudio(kind:Sound){
   const preferences=getReceptionAudioSettings();
-  const isVoice=kind==="entryGuidance"||kind==="entrySuccess";
+  const isVoice=kind==="entryGuidance"||kind==="entrySuccess"||kind==="exitGuidance"||kind==="exitSuccess";
   if(preferences.volume===0||(kind==="success"&&!preferences.successSound)||(isVoice&&!preferences.voiceGuidance))return "muted";
-  const selected=kind==="entrySuccess"&&!preferences.successSound?"entryGuidance":kind;
+  const selected=!preferences.successSound?(kind==="entrySuccess"?"entryGuidance":kind==="exitSuccess"?"exitGuidance":kind):kind;
   const version=++generation;
   try{
     const audio=player(selected);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;
