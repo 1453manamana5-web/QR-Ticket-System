@@ -22,6 +22,7 @@ export type TicketDesignerTicket = {
   qrNumber: string;
   status: "unused" | "inside" | "exited";
   valid: boolean;
+  reserve?:boolean;
 };
 
 type TicketDesignerProps = {
@@ -29,6 +30,7 @@ type TicketDesignerProps = {
   eventName: string;
   eventId?: string;
   initialTicketNumber?: string;
+  initialReserveOpen?:boolean;
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
 };
@@ -341,6 +343,7 @@ function TicketDesigner({
   eventName,
   eventId,
   initialTicketNumber,
+  initialReserveOpen=false,
   qrValue,
   onClose,
 }: TicketDesignerProps) {
@@ -374,7 +377,7 @@ function TicketDesigner({
   const imageReadVersion=useRef(0);
   useEffect(()=>()=>{++detectionId.current;++imageReadVersion.current;},[]);
   type ToolPanel = "settings" | "range" | "layers" | "reserve";
-  const [panels,setPanels]=useState<ToolPanel[]>([]);
+  const [panels,setPanels]=useState<ToolPanel[]>(initialReserveOpen?["reserve"]:[]);
   const togglePanel=(id:ToolPanel)=>setPanels(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
   const closePanel=(id:ToolPanel)=>setPanels(current=>current.filter(item=>item!==id));
   const [partPanels,setPartPanels]=useState<string[]>([]);
@@ -551,7 +554,7 @@ function TicketDesigner({
       return printableTickets.slice(
         safeStart,
         safeEnd + 1
-      ).filter(ticket=>!reservedIds.includes(ticket.id));
+      ).filter(ticket=>!ticket.reserve&&!reservedIds.includes(ticket.id));
     }, [
       printableTickets,
       reservedIds,
