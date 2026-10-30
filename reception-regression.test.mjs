@@ -130,7 +130,7 @@ test("one upload worker serializes concurrent triggers and blocks dependent reco
 async function harness({saved=true,automatic,latestTicket,download,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
-  const intervals=new Map(),timeouts=new Map();
+  const intervals=new Map(),timeouts=new Map(),audioRequests=[];
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
   const navigator={onLine:true};
@@ -143,7 +143,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async()=>{},stopReceptionGuidance:()=>{},getReceptionAudioSettings:()=>({volume:1,voiceGuidance:false})},"./localDb":local,
+    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":local,
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -179,7 +179,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
     assert.ok(button,"Missing button: "+text);
     await act(async()=>{await button.props.onClick();});await flush();
   };
-  return {local,renderer,Scanner,click,flush,navigator,
+  return {local,renderer,Scanner,click,flush,navigator,audioRequests,
     text:()=>JSON.stringify(renderer.toJSON()),
     get registerCalls(){return registerCalls;},
     get inventoryDownloads(){return inventoryDownloads;},
@@ -460,7 +460,7 @@ test("offline shell preloads the original chimes and recorded entry guidance at 
     addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},
   },URL,{open:async()=>({put:async url=>stored.push(url)})},async()=>response);
   listeners.install({waitUntil:promise=>{installed=promise;}});await installed;
-  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
+  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3","entry_success_voice_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
   assert.ok(stored.includes("https://example.test/QR-Ticket-System/assets/app.js"));
 });
 
@@ -600,27 +600,27 @@ for(const mode of ['entry','exit'])for(const status of ['unused','inside','exite
   });
 }
 
-function receptionSpeechHarness({synthesis=true,voiceGuidance=true,volume=1}={}){
+function receptionSpeechHarness({synthesis=true,voiceGuidance=true,volume=1,successSound=true}={}){
   const callbacks=new Set(),timers=[],spoken=[],recorded=[];let stops=0;
   const synth={cancel(){},getVoices:()=>[],speak:value=>spoken.push(value.text),addEventListener:(_event,fn)=>callbacks.add(fn),removeEventListener:(_event,fn)=>callbacks.delete(fn)};
   const source=readFileSync(new URL('./reception-app/src/App.tsx',import.meta.url),'utf8')+'\nexport {speakReception,cancelReceptionSpeech};';
-  const out={};new Function('exports','require','window','SpeechSynthesisUtterance',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,()=>({getReceptionAudioSettings:()=>({volume,voiceGuidance}),playReceptionAudio:kind=>recorded.push(kind),stopReceptionGuidance:()=>{stops++;}}),{...(synthesis?{speechSynthesis:synth}:{}),setTimeout:fn=>timers.push(fn)},class{constructor(text){this.text=text;}});
+  const out={};new Function('exports','require','window','SpeechSynthesisUtterance',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,()=>({getReceptionAudioSettings:()=>({volume,voiceGuidance,successSound}),playReceptionAudio:kind=>{recorded.push(kind);return Promise.resolve(volume===0?"muted":"played");},stopReceptionGuidance:()=>{stops++;}}),{...(synthesis?{speechSynthesis:synth}:{}),setTimeout:fn=>timers.push(fn)},class{constructor(text){this.text=text;}});
   return {out,spoken,recorded,flush(){[...callbacks].forEach(fn=>fn());timers.forEach(fn=>fn());},get stops(){return stops;}};
 }
 
 test('entry and reentry use recorded D without device TTS, while exit retains its own greeting',()=>{
   const h=receptionSpeechHarness();h.out.speakReception('entry');h.out.speakReception('reentry');
-  assert.deepEqual(h.recorded,['entryGuidance','entryGuidance']);assert.deepEqual(h.spoken,[]);
+  assert.deepEqual(h.recorded,['entrySuccess','entrySuccess']);assert.deepEqual(h.spoken,[]);
   h.out.speakReception('exit');h.flush();assert.deepEqual(h.spoken,['ご来場ありがとうございました。']);assert.equal(h.stops,3);
-  const offline=receptionSpeechHarness({synthesis:false});offline.out.speakReception('entry');assert.deepEqual(offline.recorded,['entryGuidance']);
+  const offline=receptionSpeechHarness({synthesis:false});offline.out.speakReception('entry');assert.deepEqual(offline.recorded,['entrySuccess']);
   for(const preferences of [{voiceGuidance:false},{volume:0}]){
-    const muted=receptionSpeechHarness(preferences);muted.out.speakReception('entry');muted.out.speakReception('exit');muted.flush();assert.deepEqual(muted.recorded,[]);assert.deepEqual(muted.spoken,[]);
+    const muted=receptionSpeechHarness(preferences);muted.out.speakReception('entry');muted.out.speakReception('exit');muted.flush();assert.deepEqual(muted.spoken,[]);assert.ok(muted.recorded.every(kind=>kind==="success"||preferences.volume===0));
   }
 });
 
 test('delayed exit voice never speaks twice or revives after a newer entry or error',()=>{
   const h=receptionSpeechHarness();h.out.speakReception('exit');h.out.speakReception('exit');h.flush();assert.deepEqual(h.spoken,['ご来場ありがとうございました。']);
-  const entry=receptionSpeechHarness();entry.out.speakReception('exit');entry.out.speakReception('entry');entry.flush();assert.deepEqual(entry.spoken,[]);assert.deepEqual(entry.recorded,['entryGuidance']);
+  const entry=receptionSpeechHarness();entry.out.speakReception('exit');entry.out.speakReception('entry');entry.flush();assert.deepEqual(entry.spoken,[]);assert.deepEqual(entry.recorded,['success','entrySuccess']);
   const error=receptionSpeechHarness();error.out.speakReception('exit');error.out.cancelReceptionSpeech();error.flush();assert.deepEqual(error.spoken,[]);
 });
 
@@ -684,35 +684,36 @@ function recordedAudioHarness({play,fetch:fetchSound,volume=45,successSound=true
     play(){this.paused=false;return play?play(this):Promise.resolve();}
   }
   const response={ok:true,blob:async()=>({}),clone(){return this;}};
+  let settings=JSON.stringify({volume,successSound,voiceGuidance});
   const audio=load('./reception-app/src/receptionAudio.ts',{},{
     window:{AudioContext:class{constructor(){throw Error('legacy WAV playback must not use Web Audio');}},...(cache?{caches:{open:async()=>cache}}:{})},
     Audio:Player,URL:{createObjectURL:()=>`blob:sound-${++urls}`},
     document:{addEventListener:(event,fn)=>listeners[event]=fn,removeEventListener:event=>delete listeners[event]},
-    fetch:fetchSound??(async()=>response),localStorage:{getItem:()=>JSON.stringify({volume,successSound,voiceGuidance})},console:{warn(){}},
+    fetch:fetchSound??(async()=>response),localStorage:{getItem:()=>settings,setItem:(_key,value)=>{settings=value;}},console:{warn(){}},
   });
   return {audio,players,listeners,response};
 }
 
 test('legacy media playback starts synchronously without Web Audio or waiting for preload',async()=>{
   let called=0;const h=recordedAudioHarness({fetch:()=>new Promise(()=>{}),play:()=>{called++;return Promise.resolve();}});
-  const cleanup=h.audio.prepareReceptionAudio();assert.equal(h.players.length,4);
+  const cleanup=h.audio.prepareReceptionAudio();assert.equal(h.players.length,1);
   const result=h.audio.playReceptionAudio('success');assert.equal(called,1);
-  assert.equal(await result,'played');assert.equal(h.players[1].volume,.45);
+  assert.equal(await result,'played');assert.equal(h.players[0].volume,.45);
   assert.equal(h.audio.getReceptionAudioSettings().voiceGuidance,false);
   cleanup();assert.equal(Object.keys(h.listeners).length,0);
 });
 
-test('all original media elements are primed on touch completion and reused for scans',async()=>{
+test('one media element is primed on touch completion and reused for every sound',async()=>{
   const h=recordedAudioHarness({voiceGuidance:true,fetch:()=>new Promise(()=>{})});
   h.audio.prepareReceptionAudio();h.listeners.touchend();await nextTurn();
-  assert.equal(h.players.length,4);assert.ok(h.players.every(p=>p.paused&&p.volume===.45));
-  await h.audio.playReceptionAudio('detected');assert.equal(h.players.length,4);assert.equal(h.players[0].paused,false);
+  assert.equal(h.players.length,1);assert.ok(h.players.every(p=>p.paused&&p.volume===.45));
+  await h.audio.playReceptionAudio('detected');assert.equal(h.players.length,1);assert.equal(h.players[0].paused,false);
 });
 
 test('late unlock completion cannot pause or lower the volume of a real result',async()=>{
   const pending=[];const h=recordedAudioHarness({fetch:()=>new Promise(()=>{}),play:p=>p.volume===.01?new Promise(resolve=>pending.push(resolve)):Promise.resolve()});
   h.audio.prepareReceptionAudio();h.listeners.pointerdown();
-  await h.audio.playReceptionAudio('success');const success=h.players[1];
+  await h.audio.playReceptionAudio('success');const success=h.players[0];
   pending.forEach(resolve=>resolve());await nextTurn();
   assert.equal(success.paused,false);assert.equal(success.volume,.45);
 });
@@ -722,7 +723,7 @@ test('cached original WAVs are played through Blob URLs rather than Range reques
   const h=recordedAudioHarness({fetch:async()=>{fetches++;throw Error('offline');},cache:{match:async()=>response}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();
   assert.equal(await h.audio.playReceptionAudio('success'),'played');
-  assert.match(h.players[1].src,/^blob:sound-/);assert.equal(fetches,0);
+  assert.match(h.players[0].src,/^blob:sound-/);assert.equal(fetches,0);
 });
 
 test('muted preferences stay muted and rejected media playback reports blocked for retry',async()=>{
@@ -738,10 +739,10 @@ test('recorded entry guidance obeys voice settings independently of chimes and s
   const muted=recordedAudioHarness();assert.equal(await muted.audio.playReceptionAudio('entryGuidance'),'muted');assert.equal(muted.players.length,0);
   const h=recordedAudioHarness({voiceGuidance:true,successSound:false,fetch:()=>new Promise(()=>{})});
   h.audio.prepareReceptionAudio();h.listeners.click();await nextTurn();
-  assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');const entry=h.players[3];
+  assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');const entry=h.players[0];
   assert.match(entry.src,/entry_osusumi_voice_d_v1\.mp3$/);assert.equal(entry.volume,.45);assert.equal(entry.paused,false);
   assert.equal(await h.audio.playReceptionAudio('success'),'muted');assert.equal(entry.paused,false);
-  await h.audio.playReceptionAudio('error');assert.equal(entry.paused,true);
+  await h.audio.playReceptionAudio('error');assert.equal(h.players.length,1);assert.match(entry.src,/qr_gate_error_chime_v1\.wav$/);
   await h.audio.playReceptionAudio('entryGuidance');h.audio.stopReceptionGuidance();assert.equal(entry.paused,true);
 });
 
@@ -749,5 +750,31 @@ test('recorded D is the selected sample and plays offline using a cached blob',a
   const bytes=readFileSync(new URL('./reception-app/public/sounds/entry_osusumi_voice_d_v1.mp3',import.meta.url));
   assert.equal(createHash('sha256').update(bytes).digest('hex'),'db8b652a46de3cc1aa09de6703722c558f4ecabf2bcad56a0de6817e6889cce5');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
-  h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');assert.match(h.players[3].src,/^blob:/);
+  h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');assert.match(h.players[0].src,/^blob:/);
+});
+
+test('entry result makes one play request including the chime instead of interrupting D with a second sound',()=>{
+  const both=receptionSpeechHarness();both.out.speakReception('entry');assert.deepEqual(both.recorded,['entrySuccess']);
+  const voiceOnly=receptionSpeechHarness({successSound:false});voiceOnly.out.speakReception('entry');assert.deepEqual(voiceOnly.recorded,['entryGuidance']);
+  const chimeOnly=receptionSpeechHarness({voiceGuidance:false});chimeOnly.out.speakReception('entry');assert.deepEqual(chimeOnly.recorded,['success']);
+});
+
+test('enabling voice from reception repairs old disabled settings and zero volume without changing chime preference',async()=>{
+  const h=recordedAudioHarness({volume:0,voiceGuidance:false,successSound:false});
+  assert.equal(h.audio.enableReceptionVoice(),true);assert.deepEqual(h.audio.getReceptionAudioSettings(),{volume:.7,voiceGuidance:true,successSound:false});
+  assert.equal(await h.audio.playReceptionAudio('entrySuccess'),'played');assert.match(h.players[0].src,/entry_osusumi_voice_d_v1\.mp3$/);assert.equal(h.players[0].volume,.7);
+});
+
+test('late preload cannot reload or interrupt the active single media player',async()=>{
+  let release;const downloads=new Promise(resolve=>{release=resolve;});const h=recordedAudioHarness({voiceGuidance:true,fetch:()=>downloads});
+  h.audio.prepareReceptionAudio();await h.audio.playReceptionAudio('entrySuccess');const src=h.players[0].src;
+  release(h.response);await nextTurn();await nextTurn();assert.equal(h.players[0].src,src);assert.equal(h.players[0].paused,false);
+  await h.audio.playReceptionAudio('entrySuccess');assert.equal(h.players.length,1);assert.match(h.players[0].src,/^blob:/);
+});
+
+test('reception voice check enables and auditions D directly on the actual reception screen',async()=>{
+  const h=await harness();try{
+    await h.click('音声を有効にして確認');assert.deepEqual(h.audioRequests,['entrySuccess']);assert.match(h.text(),/音声案内を有効にしました/);
+    await h.click('受付結果を試験表示');assert.equal(h.audioRequests.at(-1),'entrySuccess');
+  }finally{await h.close();}
 });

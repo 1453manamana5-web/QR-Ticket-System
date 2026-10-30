@@ -17,3 +17,7 @@ https://creativecommons.org/licenses/by/3.0/
 Changes during generation: fixed phoneme durations and local F0 conditioning
 for the approved accent, silence padding, volume normalization, MP3 encoding.
 No endorsement by the source contributors is implied.
+
+entry_success_voice_d_v1.mp3: derived combined playback asset.
+Original qr_result_chime.wav at 35% volume plus D voice delayed 220ms,
+mixed and limited to avoid clipping, encoded as MP3. Standalone D unchanged.

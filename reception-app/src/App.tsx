@@ -3,7 +3,7 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
-import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance} from "./receptionAudio";
+import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance,enableReceptionVoice} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
@@ -67,10 +67,18 @@ async function logReceptionError(
 
 export default function App(){
   const [audioNotice,setAudioNotice]=useState("");
-  const checkReceptionSound=async()=>{
-    const status=await playReceptionAudio("success");
-    setAudioNotice(status==="muted"?"音量が0、または成功音がオフです。管理アプリの設定を確認してください。":status==="blocked"?"音を再生できません。端末の音量・消音設定を確認して、もう一度「音の確認」を押してください。":"");
+  const reportAudioStatus=(status:string)=>{
+    if(status!=="muted"&&status!=="blocked"&&status!=="played")return;
+    setAudioNotice(status==="muted"?"音声がオフ、または音量が0です。「音声を有効にして確認」を押してください。":status==="blocked"?"音声を再生できません。「音声を有効にして確認」を押して、端末の音量も確認してください。":status==="played"?"":"音声の再生が切り替わりました。");
   };
+  const checkReceptionSound=async()=>{
+    cancelReceptionSpeech();
+    if(!enableReceptionVoice()){setAudioNotice("音声設定を保存できません。ブラウザーの端末保存設定を確認してください。");return;}
+    const status=await playReceptionAudio("entrySuccess");
+    reportAudioStatus(status);
+    if(status==="played")setAudioNotice("音声案内を有効にしました。Dの声で「お進みください」を再生しています。");
+  };
+  const announceReception=(type:ReceptionType)=>{void speakReception(type).then(reportAudioStatus);};
   useEffect(()=>prepareReceptionAudio(),[]);
   const [screen,setScreen]=useState<Screen>("registration");
   const screenRef=useRef<Screen>(screen);
@@ -718,8 +726,7 @@ export default function App(){
         title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",
         detail:ticketId
       });
-      speakReception(receptionType);
-      playSuccessSound();
+      announceReception(receptionType);
     }catch(reason){
       console.error("受付処理に失敗しました",reason);
       void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed");
@@ -852,8 +859,8 @@ export default function App(){
                   <button type="button" className="primary" onClick={()=>{setError("");++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setScreen("authScan");}}>イベントデータQRを読み取る</button>
                   <button type="button" className="primary" disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
                   <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
-                  <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
-                  <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");speakReception(mode==="entry"?"entry":"exit");playSuccessSound();}}>受付結果を試験表示</button>
+                  <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
+                  <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");announceReception(mode==="entry"?"entry":"exit");}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
                   <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
@@ -901,9 +908,9 @@ export default function App(){
             </div>
           </>}
           <div style={{display:"flex",gap:"10px",justifyContent:"center",flexWrap:"wrap",marginTop:"24px"}}>
-            <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
-            <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");speakReception("entry");void playSuccessSound();}}>入口結果</button>
-            <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");speakReception("exit");void playSuccessSound();}}>出口結果</button>
+            <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");announceReception("entry");}}>入口結果</button>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");announceReception("exit");}}>出口結果</button>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");cancelReceptionSpeech();void playReceptionAudio("error");}}>エラー結果</button>
           </div>
           <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
@@ -1029,9 +1036,9 @@ export default function App(){
                 <h2>受付準備完了</h2>
                 <p className="entry-result-primary">受付用QRデータ {localEvent.ticketCount}件を端末に保存しました（未印刷の予備を含む）</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
-                <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
+                <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
                 <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button><button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setError("");setScreen("authScan");}}>イベントQRを読み直す</button>
-                <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
+                <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");announceReception(mode==="entry"?"entry":"exit");setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>
           </div>
@@ -1177,7 +1184,7 @@ export default function App(){
   </div>;
   };
   if(guide.open)return <ReceptionGuide controller={guide}/>;
-  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>beginGuide()}>使い方ガイドを始める</button><h3>項目を選んで練習</h3><div className="reception-guide-topics">{receptionGuideTopics.map(topic=><button key={topic.id} onClick={()=>beginGuide(topic.id)}>{topic.label}</button>)}</div><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
+  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><button onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p role="status">{audioNotice}</p>}<p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>beginGuide()}>使い方ガイドを始める</button><h3>項目を選んで練習</h3><div className="reception-guide-topics">{receptionGuideTopics.map(topic=><button key={topic.id} onClick={()=>beginGuide(topic.id)}>{topic.label}</button>)}</div><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
 
 }
 
@@ -1201,11 +1208,11 @@ function speakReception(type:ReceptionType){
   cancelReceptionSpeech();
   const version=speechVersion;
   const preferences=getReceptionAudioSettings();
-  if(!preferences.voiceGuidance||preferences.volume===0)return;
   // Entry and re-entry use the approved recorded voice, including offline and
   // devices without speech synthesis. Exit retains its own existing greeting.
-  if(type!=="exit"){void playReceptionAudio("entryGuidance");return;}
-  if(!("speechSynthesis" in window))return;
+  if(type!=="exit")return playReceptionAudio(preferences.voiceGuidance?(preferences.successSound?"entrySuccess":"entryGuidance"):"success");
+  const playback=playReceptionAudio("success");
+  if(!preferences.voiceGuidance||preferences.volume===0||!("speechSynthesis" in window))return playback;
   const synth=window.speechSynthesis;
   let spoken=false;
   const message="ご来場ありがとうございました。";
@@ -1236,9 +1243,8 @@ function speakReception(type:ReceptionType){
       speakWithJapaneseVoice();
     },500);
   }
+  return playback;
 }
-
-function playSuccessSound(){void playReceptionAudio("success");}
 function getTerminalId():string{
   const key="qr-ticket-terminal-id";
   const existing=localStorage.getItem(key);
