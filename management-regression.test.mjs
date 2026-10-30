@@ -237,3 +237,35 @@ test('reserve preparation selects issuance flags across nonconsecutive batches w
     assert.deepEqual(built,['a','c']);assert.ok(saved);
   }finally{await act(async()=>renderer.unmount());}
 });
+
+test('print ledger persists unacknowledged confirmations, retries after reconnect and never acknowledges failed writes',async()=>{
+  const store=reserveStore();await store.saveReservePackage(reservePacket());
+  let packet=await store.claimReserveBatch('reserve-event',1);await store.finishReserveBatch('reserve-event',packet.pending.id,true);
+  let timer,online,view,writes=0,fail=true;const navigator={onLine:false};
+  const out={};
+  new Function('exports','require','window','navigator',ts.transpileModule(readFileSync('management-app/src/reservePrintLedger.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out,n=>n==='react'?React:n==='./reservePrintStore'?store:n==='./firebaseClient'?{getFirebaseUid:async()=> 'manager'}:{markReserveTicketsPrinted:async(_event,ids)=>{writes++;assert.deepEqual(ids,['TKT501']);if(fail)throw Error('offline');}},{setInterval:fn=>{timer=fn;return 1;},clearInterval(){},addEventListener:(_name,fn)=>{online=fn;},removeEventListener(){}},navigator);
+  function Harness(){view=out.useReservePrintLedger('reserve-event',true);return null;}
+  let renderer;const flush=async()=>{await act(async()=>{for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});};
+  await act(async()=>{renderer=create(React.createElement(Harness));});await flush();
+  try{
+    assert.deepEqual(view.confirmed,['TKT501']);assert.equal(view.unsynced,1);assert.equal(writes,0);
+    navigator.onLine=true;await act(async()=>online());await flush();assert.equal(writes,1);assert.equal(view.unsynced,1);assert.deepEqual((await store.loadReservePackage('reserve-event')).synced,[]);
+    fail=false;await act(async()=>timer());await flush();assert.equal(writes,2);assert.equal(view.unsynced,0);assert.deepEqual((await store.loadReservePackage('reserve-event')).synced,['TKT501']);
+    await act(async()=>timer());await flush();assert.equal(writes,2);
+  }finally{await act(async()=>renderer.unmount());}
+});
+
+test('a stalled network request cannot block later local print confirmations',async()=>{
+  const store=reserveStore();await store.saveReservePackage(reservePacket());
+  let packet=await store.claimReserveBatch('reserve-event',1);await store.finishReserveBatch('reserve-event',packet.pending.id,true);
+  let timer,view,release;const auth=new Promise(resolve=>{release=resolve;});
+  const out={};new Function('exports','require','window','navigator',ts.transpileModule(readFileSync('management-app/src/reservePrintLedger.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out,n=>n==='react'?React:n==='./reservePrintStore'?store:n==='./firebaseClient'?{getFirebaseUid:()=>auth}:{markReserveTicketsPrinted:async()=>{}},{setInterval:fn=>{timer=fn;return 1;},clearInterval(){}},{onLine:true});
+  function Harness(){view=out.useReservePrintLedger('reserve-event',true);return null;}
+  const flush=async()=>{await act(async()=>{for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});};
+  let renderer;await act(async()=>{renderer=create(React.createElement(Harness));});await flush();
+  try{
+    packet=await store.claimReserveBatch('reserve-event',1);await store.finishReserveBatch('reserve-event',packet.pending.id,true);
+    await act(async()=>timer());await flush();assert.deepEqual(view.confirmed,['TKT501','TKT502']);assert.equal(view.unsynced,2);
+    await act(async()=>release('manager'));await flush();await act(async()=>timer());await flush();assert.equal(view.unsynced,0);
+  }finally{await act(async()=>renderer.unmount());}
+});

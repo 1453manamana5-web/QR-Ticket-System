@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import {useReservePrintLedger} from './reservePrintLedger';
 import {claimReserveBatch,finishReserveBatch,loadReservePackage,saveReservePackage,selectReserveTickets,type ReservePackage} from './reservePrintStore';
 
 export function openReservePrint(packet:ReservePackage,popup:Window){
@@ -48,7 +49,7 @@ export function ReservePrintControls({packet,onChange}:{packet:ReservePackage;on
     <p>次の番号：<strong>{remaining[0]?.number??'予備を使い切りました'}</strong></p>
     {packet.pending?<><p role="status">{packet.pending.ids.length}枚が印刷確認待ちです。紙が出るまで次の番号へは進みません。</p><p>再印刷する場合は、先に出た同じ番号の紙を回収してください。</p><button disabled={busy} onClick={()=>void print(true)}>同じ分を再印刷</button><button disabled={busy} onClick={()=>void finish(true)}>印刷完了して次へ</button><button disabled={busy} onClick={()=>void finish(false)}>印刷を中止・未印刷に戻す</button></>:<><label>今回の印刷枚数<input aria-label="予備の印刷枚数" type="number" min="1" max={remaining.length} value={count} onChange={e=>setCount(Number(e.target.value))}/></label><button disabled={busy||!remaining.length} onClick={()=>void print()}>予備チケットを印刷</button></>}
     <button disabled={busy} onClick={()=>void update().catch(()=>setError('状態を取得できませんでした。'))}>印刷状態を更新</button>
-    <p>印刷記録はこの端末・ブラウザー内のものです。予備印刷は1台で担当してください。印刷画面を閉じただけでは印刷済みになりません。</p>
+    <p>未印刷の予備はチケット総数に含めません。「印刷完了して次へ」で確定した分だけ枚数に加わります。</p><p>印刷記録はこの端末・ブラウザー内のものです。予備印刷は1台で担当してください。印刷画面を閉じただけでは印刷済みになりません。</p>
     {error&&<p role="alert">{error}</p>}
   </div>;
 }
@@ -63,6 +64,7 @@ export function ReserveConfiguration({eventId,tickets,build,onSaved}:{eventId:st
 }
 
 export default function OfflineReserveRoot({eventId}:{eventId:string}){
+  const ledger=useReservePrintLedger(eventId,true);
   const [packet,setPacket]=useState<ReservePackage|null>(null),[error,setError]=useState('');
   const [offlineReady,setOfflineReady]=useState(false);
   useEffect(()=>{
@@ -79,5 +81,5 @@ export default function OfflineReserveRoot({eventId}:{eventId:string}){
     return()=>{active=false;clearInterval(timer);};
   },[]);
   useEffect(()=>{let active=true;void loadReservePackage(eventId).then(p=>{if(!active)return;if(p)setPacket(p);else setError('この端末に予備印刷が保存されていません。オンラインの管理画面で事前準備してください。');}).catch(()=>setError('端末内の予備印刷を読み込めませんでした。'));return()=>{active=false;};},[eventId]);
-  return <main className="offline-reserve-root"><h1>予備チケット印刷</h1>{packet?<><h2>{packet.eventName}</h2><p>保存したデザインとQRを使用します。この画面をブックマークし、本番前に通信を切って開き直せることを確認してください。</p><p role="status">{offlineReady?'オフライン起動の準備完了':'オフライン起動の準備を確認中です。オンラインでこの画面を開いてください。'}</p><p>保存日時：{new Date(packet.preparedAt).toLocaleString('ja-JP')}</p><ReservePrintControls packet={packet} onChange={setPacket}/></>:<p role="status">{error||'保存済みデータを読み込んでいます…'}</p>}</main>;
+  return <main className="offline-reserve-root"><h1>予備チケット印刷</h1>{packet?<><h2>{packet.eventName}</h2><p>「印刷完了して次へ」で確定した分だけチケット枚数に加わります。{ledger.unsynced>0?`他端末へ未反映：${ledger.unsynced}枚。オンラインに戻すと自動で反映します。`:"確定済みの印刷記録を確認します。"}</p><p>保存したデザインとQRを使用します。この画面をブックマークし、本番前に通信を切って開き直せることを確認してください。</p><p role="status">{offlineReady?'オフライン起動の準備完了':'オフライン起動の準備を確認中です。オンラインでこの画面を開いてください。'}</p><p>保存日時：{new Date(packet.preparedAt).toLocaleString('ja-JP')}</p><ReservePrintControls packet={packet} onChange={setPacket}/></>:<p role="status">{error||'保存済みデータを読み込んでいます…'}</p>}</main>;
 }

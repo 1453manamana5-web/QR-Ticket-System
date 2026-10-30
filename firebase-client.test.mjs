@@ -148,3 +148,20 @@ for (const scenario of ["new", "pending", "manager", "handoff", "offline"]) {
     if (scenario === "manager") assert.equal(stored.get("qr-ticket-device-id"), terminalId);
   });
 }
+
+test('reserve print activation is idempotent, preserves reception state, and leaves transfer inventory count unchanged',async()=>{
+  const inventory=new Map([
+    ['events/e',{ticketCount:700,inventoryRevision:1,dataVersion:1}],
+    ['events/e/tickets/r',{basicInfo:{ticketNumber:501,reserve:true},currentStatus:'inside',valid:false}],
+    ['events/e/tickets/n',{basicInfo:{ticketNumber:1},currentStatus:'unused',valid:true}],
+  ]);
+  const writes=[];
+  const api=loadModule('./management-app/src/firebaseData.ts',{
+    './firebaseClient':{getFirebaseDb:()=>({})},
+    'firebase/firestore':{doc:(_db,...parts)=>parts.join('/'),runTransaction:async(_db,fn)=>fn({get:async ref=>({exists:()=>inventory.has(ref),data:()=>inventory.get(ref)}),update:(ref,patch)=>{writes.push({ref,patch});const value=inventory.get(ref);for(const [key,v] of Object.entries(patch)){if(key==='basicInfo.reservePrinted')value.basicInfo.reservePrinted=v;else value[key]=v;}},set:()=>assert.fail('no published bundle expected')})},
+  });
+  await api.markReserveTicketsPrinted('e',['r','r','n','missing']);
+  assert.equal(inventory.get('events/e/tickets/r').basicInfo.reservePrinted,true);assert.equal(inventory.get('events/e/tickets/r').currentStatus,'inside');assert.equal(inventory.get('events/e/tickets/r').valid,false);
+  assert.equal(inventory.get('events/e').ticketCount,700);assert.equal(inventory.get('events/e/tickets/n').basicInfo.reservePrinted,undefined);
+  const count=writes.length;await api.markReserveTicketsPrinted('e',['r']);assert.equal(writes.length,count);
+});

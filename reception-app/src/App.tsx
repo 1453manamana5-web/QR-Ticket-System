@@ -949,7 +949,7 @@ export default function App(){
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
       <div className="entry-result-icon">?</div><span className="entry-result-eyebrow">EVENT AUTHENTICATION</span>
-      <h2>このイベントで認証しますか？</h2>{offlineData&&<p className="entry-result-secondary">オフラインデータ：チケット {offlineData.tickets.length}枚。管理者が表示したQRであることと、イベント名を確認してください。</p>}<p className="entry-result-primary">{authPayload.eventName}</p><p className="entry-result-number">{authPayload.eventId}</p>
+      <h2>このイベントで認証しますか？</h2>{offlineData&&<p className="entry-result-secondary">オフラインデータ：QR {offlineData.tickets.length}件（未印刷の予備を含む）。管理者が表示したQRであることと、イベント名を確認してください。</p>}<p className="entry-result-primary">{authPayload.eventName}</p><p className="entry-result-number">{authPayload.eventId}</p>
       {error&&<p className="entry-result-secondary">{error}</p>}
       <button type="button" className="primary" disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"イベントデータを準備中…":"このイベントで認証"}</button>
       <button type="button" className="secondary" disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
@@ -1022,7 +1022,7 @@ export default function App(){
               <div className="reception-start-content">
                 <div className="entry-result-icon">✓</div>
                 <h2>受付準備完了</h2>
-                <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
+                <p className="entry-result-primary">受付用QRデータ {localEvent.ticketCount}件を端末に保存しました（未印刷の予備を含む）</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
                 <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button><button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setError("");setScreen("authScan");}}>イベントQRを読み直す</button>

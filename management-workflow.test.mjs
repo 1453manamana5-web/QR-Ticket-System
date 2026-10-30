@@ -15,7 +15,7 @@ const safety=load('management-app/src/operationSafety.ts');
 const event=(id='event-a')=>({eventId:id,eventName:id,eventDate:'2099-10-27',startTime:'09:00',endTime:'17:00',eventStatus:'preparing',dataVersion:1});
 const ticket=(eventId='event-a')=>({eventId,ticketId:'TKT000001',basicInfo:{ticketNumber:1},currentStatus:'unused',valid:true,updatedAt:'2026-10-27T00:00:00.000Z'});
 const manager={terminalId:'T-TEST-MANAGER',name:'Manager',type:'Web / iPad',role:'management',approved:true,managementApproved:true,receptionApproved:false,status:'online',lastSeen:null,networkMbps:null,battery:null,admin:true};
-async function harness(overrides={}, {quota=false,fileText,geometry,motion=false}={}) {
+async function harness(overrides={}, {quota=false,fileText,geometry,motion=false,ledger={confirmed:[],unsynced:0}}={}) {
   const storage=new Map([['qr-ticket-terminal-id',manager.terminalId],['qr-ticket-device-id',manager.terminalId]]);
   let eventsCallback;const ticketCallbacks=new Map(),recordCallbacks=new Map(),savedSettings=[],deleted=[];
   const intervals=new Map();let next=0;
@@ -34,7 +34,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
   const window={matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
-  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./OfflineEventTransfer':{default:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
+  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./OfflineEventTransfer':{default:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./reservePrintLedger':{useReservePrintLedger:()=>ledger},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
   let renderer;await act(async()=>{renderer=create(React.createElement(exported.default));});
   const flush=async()=>{await act(async()=>{for(let i=0;i<8;i++)await tick();});};await flush();
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
@@ -389,5 +389,19 @@ test('issuance validates the combined count and supports issuing only reserves',
     await set('通常分の枚数','5000');await set('予備分の枚数','1');await h.click('QR・チケットを発行');assert.equal(calls,0);
     await set('通常分の枚数','0');await set('予備分の枚数','1.5');await h.click('QR・チケットを発行');assert.equal(calls,0);
     await set('予備分の枚数','2');await h.click('QR・チケットを発行');assert.equal(calls,1);assert.equal(issued.length,2);assert.ok(issued.every(t=>t.basicInfo.reserve===true));
+  }finally{await h.close();}
+});
+
+test('management totals and status cards exclude unprinted reserves and include only confirmed paper tickets',async()=>{
+  const regular=ticket();
+  const reserves=[2,3,4].map(n=>({...ticket(),ticketId:'R'+n,basicInfo:{ticketNumber:n,reserve:true,...(n===3?{reservePrinted:true}:{})}}));
+  const h=await harness({subscribeTickets:(id,cb)=>{cb([regular,...reserves].map(t=>({...t,eventId:id})));return()=>{};}},{ledger:{confirmed:['R4'],unsynced:1}});
+  try{
+    await h.nav('チケット管理');
+    const heading=h.renderer.root.findByProps({className:'ticket-status-heading'});
+    assert.equal(heading.findByType('strong').children[0],'3');
+    const unused=h.renderer.root.findByProps({className:'ticket-status-box unused'});assert.equal(unused.findByType('strong').children[0],'3');
+    const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
+    assert.match(label(h.renderer.root.findByProps({className:'ticket-sync-state'})),/未印刷の予備 1枚/);
   }finally{await h.close();}
 });
