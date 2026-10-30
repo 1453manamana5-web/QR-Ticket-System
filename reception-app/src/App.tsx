@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import QrScanner from "./QrScanner";
+import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
 import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
@@ -77,6 +78,10 @@ export default function App(){
   const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
+  const offlineCollector=useRef(new OfflineEventCollector());
+  const offlineScanVersion=useRef(0);
+  const [offlineData,setOfflineData]=useState<OfflineEventData|null>(null);
+  const [offlineProgress,setOfflineProgress]=useState({received:0,total:0});
   const [authCode,setAuthCode]=useState("");
   const [authCodeMode,setAuthCodeMode]=useState(false);
   const [localEvent,setLocalEvent]=useState<LocalEventData|null>(null);
@@ -540,9 +545,21 @@ export default function App(){
     }
   };
 
-  const handleAuthScan=useCallback((text:string)=>{
+  const handleAuthScan=useCallback(async(text:string)=>{
+    let offline=false;try{offline=JSON.parse(text)?.type==="qr-ticket-offline-v1";}catch{}
+    if(offline){
+      try{
+        const version=registrationVersionRef.current,scanVersion=offlineScanVersion.current;
+        const data=await offlineCollector.current.add(text);
+        if(!registrationIsCurrent(version)||screenRef.current!=="authScan"||scanVersion!==offlineScanVersion.current)return;
+        setOfflineProgress({...offlineCollector.current.progress});setError("");
+        if(data){setOfflineData(data);setAuthPayload({type:"qr-ticket-event-auth",eventId:data.event.eventId,eventName:data.event.eventName,dataVersion:data.event.dataVersion,authToken:"offline"});setScreen("confirm");}
+      }catch(e){setOfflineProgress({...offlineCollector.current.progress});setError(e instanceof Error?e.message:"オフラインQRを読み取れませんでした。");}
+      return;
+    }
     const payload=parseAuthPayload(text);
     if(!payload){setError("このQRコードはイベント認証QRではありません。");return;}
+    setOfflineData(null);
     setError("");
     setAuthPayload(payload);
     setScreen("confirm");
@@ -556,9 +573,12 @@ export default function App(){
     eventLoadingRef.current=true;
     const registrationVersion=registrationVersionRef.current;
     try{
-      const downloaded=await downloadEventData(authPayload,getTerminalId());
+      const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
       if(!registrationIsCurrent(registrationVersion))return;
-      if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
+      if(offlineData){
+        const saved=await loadLocalEvent();
+        if(saved&&saved.event.eventId!==offlineData.event.eventId)throw Error("別イベントへの切替にはオンラインで受付端末の再承認が必要です。");
+      }else if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
       if(!registrationIsCurrent(registrationVersion))return;
       const event:LocalEventData={...downloaded.localEvent,dataReady:false};
       await prepareLocalEventData(event,downloaded.tickets);
@@ -570,9 +590,9 @@ export default function App(){
       setResult(null);
       setAuthCode("");
       setAuthCodeMode(false);
-    }catch{
+    }catch(reason){
       if(!registrationIsCurrent(registrationVersion))return;
-      setError("イベントデータを端末に保存できませんでした。");
+      setError(offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
     }finally{eventLoadingRef.current=false;setBusy(false);}
   };
@@ -587,6 +607,7 @@ export default function App(){
       const payload=await getEventAuthPayloadByToken(token);
       if(!registrationIsCurrent(registrationVersion))return;
       if(!payload)throw new Error("EVENT_DATA_NOT_FOUND");
+      setOfflineData(null);
       setAuthPayload(payload);
       setAuthCodeMode(false);
       setScreen("confirm");
@@ -823,7 +844,7 @@ export default function App(){
                 <p className="entry-result-primary">管理アプリのイベントデータQRを読み取るか、連携コードを入力してください</p>
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
-                  <button type="button" className="primary" onClick={()=>{setError("");setScreen("authScan");}}>イベントデータQRを読み取る</button>
+                  <button type="button" className="primary" onClick={()=>{setError("");++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setScreen("authScan");}}>イベントデータQRを読み取る</button>
                   <button type="button" className="primary" disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
                   <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
                   <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
@@ -903,6 +924,7 @@ export default function App(){
             <div className="entry-scanner-ready"><span className="entry-scanner-ready-dot"/>読み取り中</div>
           </div>
           <div className="entry-scanner-wrapper">
+            {offlineProgress.total>0&&<p role="status">オフラインQR：{offlineProgress.received} / {offlineProgress.total}枚を受信。全て揃うまで次のQRを読み取ってください。</p>}
             <div className="camera-qr-scanner"><QrScanner readerId="event-auth-reader" onResult={handleAuthScan} onError={setError}/></div>
           </div>
         </div>
@@ -911,7 +933,7 @@ export default function App(){
           <span className="entry-scan-instruction-copy"><strong>管理アプリのイベント認証QRをカメラに向けてください</strong><small>読み取り後、イベントデータの準備を開始します</small></span>
         </div>
         {error&&<div className="entry-auth-error">{error}</div>}
-        <button type="button" className="secondary" onClick={()=>{setError("");setScreen("auth");}}>戻る</button>
+        <button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;setError("");setScreen("auth");}}>戻る</button>
       </section>
     </main>
   </div>;
@@ -927,7 +949,7 @@ export default function App(){
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
       <div className="entry-result-icon">?</div><span className="entry-result-eyebrow">EVENT AUTHENTICATION</span>
-      <h2>このイベントで認証しますか？</h2><p className="entry-result-primary">{authPayload.eventName}</p><p className="entry-result-number">{authPayload.eventId}</p>
+      <h2>このイベントで認証しますか？</h2>{offlineData&&<p className="entry-result-secondary">オフラインデータ：チケット {offlineData.tickets.length}枚。管理者が表示したQRであることと、イベント名を確認してください。</p>}<p className="entry-result-primary">{authPayload.eventName}</p><p className="entry-result-number">{authPayload.eventId}</p>
       {error&&<p className="entry-result-secondary">{error}</p>}
       <button type="button" className="primary" disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"イベントデータを準備中…":"このイベントで認証"}</button>
       <button type="button" className="secondary" disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
@@ -1003,7 +1025,7 @@ export default function App(){
                 <p className="entry-result-primary">チケット {localEvent.ticketCount}枚を端末に保存しました</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
-                <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button>
+                <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button><button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setError("");setScreen("authScan");}}>イベントQRを読み直す</button>
                 <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");speakReception(mode==="entry"?"entry":"exit");void playSuccessSound();setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>

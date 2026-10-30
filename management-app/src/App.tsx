@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import VenueOccupancyChart from "./VenueOccupancyChart";
+import OfflineEventTransfer from "./OfflineEventTransfer";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, saveEventStatus, type PublishedEventBundle } from "./eventPublisher";
@@ -1914,6 +1915,7 @@ export default function App() {
 
       {error && <div className="notice error">{error}</div>}
       {bundle && <div className="notice success">イベントデータはFirebaseへ公開済みです。受付端末は下のQRで認証できます。</div>}
+      {bundle && (event.eventStatus==="ready"||event.eventStatus==="active") && <OfflineEventTransfer key={bundle.authToken+bundle.event.dataVersion} data={{event:{...bundle.event,eventStatus:event.eventStatus},settings:bundle.settings,tickets}}/>}
       {bundle && <section className="auth-card event-auth-card">
         <div><small>EVENT AUTHENTICATION</small><h2>イベントデータQR</h2><p>受付アプリで読み取ると、このイベントのデータを受付端末へ準備します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => window.print()}>イベントデータQRを印刷</button></div>
         <div className="qr-box"><QRCodeSVG value={eventDataQrValue} size={220} includeMargin /></div>

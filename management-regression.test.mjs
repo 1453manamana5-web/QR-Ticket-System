@@ -2,10 +2,28 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import {webcrypto} from 'node:crypto';
 import React from 'react';
 import {act,create} from 'react-test-renderer';
 const require=createRequire(import.meta.url),ts=require('typescript');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+test('offline manager export creates self contained QR pages and escapes the event name',async()=>{
+  const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+  const protocol={};new Function('exports','crypto',compile('shared/src/offlineTransfer.ts'))(protocol,webcrypto);
+  let saved;const module={};
+  new Function('exports','require','document','URL','setTimeout',compile('management-app/src/OfflineEventTransfer.tsx'))(module,n=>n==='../../shared/src/offlineTransfer'?protocol:require(n),{createElement:()=>({click(){}})},{createObjectURL:blob=>{saved=blob;return 'blob:test';}},()=>0);
+  const event={eventId:'export-test',eventName:'<img src=x onerror=alert(1)>',eventDate:'2026-10-30',startTime:'09:00',endTime:'17:00',eventStatus:'ready',dataVersion:1};
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{data:{event,settings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true},tickets:[]}}));});
+  try{
+    const label=node=>node.children.map(c=>typeof c==='string'?c:label(c)).join('');
+    const click=async text=>{const button=renderer.root.findAllByType('button').find(n=>label(n)===text);assert.ok(button,text);await act(async()=>button.props.onClick());};
+    await click('オフラインQRを作成・更新');await click('QRをファイルに保存');
+    const html=await saved.text();
+    assert.match(html,/<svg/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img src=x/);
+    assert.doesNotMatch(html,/<script[^>]+src=|<link[^>]+href=/);
+    assert.equal((html.match(/<script>/g)??[]).length,1);
+  }finally{await act(async()=>renderer.unmount());}
+});
 test('print title treats event names as text and prints only once',async()=>{
   const name='文化祭</title><script>alert(1)</script>&体験';
   let html='',prints=0,load;

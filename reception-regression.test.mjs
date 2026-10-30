@@ -20,6 +20,7 @@ function load(file, dependencies={}, globals={}) {
   const exports={};
   new Function("exports","require",...Object.keys(globals),compiled)(exports,name=>{
     if(name in dependencies)return dependencies[name];
+    if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
     if(name==="react"||name==="react/jsx-runtime")return require(name);
     throw Error("Unexpected dependency: "+name);
   },...Object.values(globals));
@@ -33,6 +34,24 @@ const makeEvent=(eventId="event-one",dataVersion=1)=>({
 const makeTicket=(eventId="event-one")=>({ticketId:"ticket-one",eventId,basicInfo:{},valid:true,currentStatus:"unused",updatedAt:"2026-10-27T00:00:00.000Z"});
 const localDb=()=>load("./reception-app/src/localDb.ts",{},{indexedDB:new IDBFactory()});
 const record=(recordId,type="entry",timestamp="2026-10-27T01:00:00.000Z")=>({recordId,type,timestamp,eventId:"event-one",ticketId:"ticket-one",terminalId:"T-REGRESSION-01"});
+
+const offlineProtocol=()=>load('./shared/src/offlineTransfer.ts',{}, {crypto:webcrypto});
+test('offline QR transfers 500 tickets out of order, ignores repeats and rejects mixed or damaged chunks',async()=>{
+  const {encodeOfflineEvent,OfflineEventCollector}=offlineProtocol();
+  const data={event:makeEvent().event,settings:makeEvent().settings,tickets:Array.from({length:500},(_,i)=>({...makeTicket(),ticketId:'ticket-'+i,basicInfo:{ticketNumber:i+1}}))};
+  const frames=await encodeOfflineEvent(data);assert.ok(frames.length>1);assert.ok(frames.every(s=>s.length<=1400));
+  const collector=new OfflineEventCollector();
+  assert.equal(await collector.add(frames.at(-1)),null);assert.equal(await collector.add(frames.at(-1)),null);
+  const other=await encodeOfflineEvent({...data,event:{...data.event,eventName:'Another event'}});
+  await assert.rejects(collector.add(other[0]),/別のデータ/);
+  let decoded;for(const frame of frames.slice(0,-1).reverse())decoded=await collector.add(frame);
+  assert.deepEqual(decoded,data);assert.equal(collector.progress.received,frames.length);
+  const broken=new OfflineEventCollector();let part=JSON.parse(frames[0]);part.data=(part.data[0]==='A'?'B':'A')+part.data.slice(1);
+  await broken.add(JSON.stringify(part));
+  await assert.rejects(async()=>{for(const frame of frames.slice(1))await broken.add(frame);},/一致しません/);
+  await assert.rejects(encodeOfflineEvent({...data,tickets:[data.tickets[0],data.tickets[0]]}),/重複/);
+  console.log('500 tickets offline QR pages:',frames.length);
+});
 
 test("inventory refresh preserves unsent ticket state, validity edits and queue",async()=>{
   const local=localDb();
@@ -186,6 +205,35 @@ test("event QR authentication saves the complete downloaded event and is not int
     assert.equal(saved.dataReady,true);
     assert.equal(saved.dataVersion,undefined);
     assert.match(h.text(),/受付準備完了/);
+  }finally{await h.close();}
+});
+
+test('offline event QR preparation saves all tickets without calling the Firebase downloader',async()=>{
+  const h=await harness({saved:false,automatic:async()=>{throw Error('NO_PUBLISHED_EVENT');},download:async()=>{throw Error('OFFLINE_DOWNLOAD_MUST_NOT_RUN');}});
+  try{
+    h.navigator.onLine=false;
+    await h.click('イベントデータQRを読み取る');
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    assert.match(h.text(),/オフラインデータ/);
+    const downloads=h.inventoryDownloads;await h.click('このイベントで認証');
+    assert.equal(h.inventoryDownloads,downloads);assert.equal((await h.local.loadLocalEvent(true)).dataReady,true);
+    assert.equal((await h.local.getTicket('ticket-one')).valid,true);assert.match(h.text(),/受付準備完了/);
+    await h.click('受付を開始する');await h.scan('ticket-one');assert.equal((await h.local.getPendingSyncItems()).length,1);
+  }finally{await h.close();}
+});
+
+test('offline event transfer cannot replace another event or bypass its reapproval',async()=>{
+  let switched=false;
+  const h=await harness({automatic:async()=>({localEvent:makeEvent(switched?'event-two':'event-one'),tickets:[makeTicket(switched?'event-two':'event-one')],authPayload:{authToken:'token'}})});
+  try{
+    switched=true;await h.poll();h.navigator.onLine=false;
+    await h.click('イベントデータQRを読み取る');
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent('event-two').event,settings:makeEvent().settings,tickets:[makeTicket('event-two')]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click('このイベントで認証');
+    assert.match(h.text(),/再承認が必要/);assert.equal((await h.local.loadLocalEvent()).event.eventId,'event-one');
+    assert.throws(()=>offlineProtocol().validateOfflineEvent({event:{...makeEvent().event,eventStatus:'finished'},settings:makeEvent().settings,tickets:[]}),/形式/);
   }finally{await h.close();}
 });
 
