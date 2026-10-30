@@ -1,6 +1,8 @@
 import {useEffect,useState} from 'react';
 import {useReservePrintLedger} from './reservePrintLedger';
-import {claimReserveBatch,finishReserveBatch,loadReservePackage,saveReservePackage,selectReserveTickets,type ReservePackage} from './reservePrintStore';
+import * as realStore from './reservePrintStore';
+import {loadReservePackage,selectReserveTickets,type ReservePackage} from './reservePrintStore';
+type PrintStore=Pick<typeof realStore,'loadReservePackage'|'saveReservePackage'|'claimReserveBatch'|'finishReserveBatch'>;
 
 export function openReservePrint(packet:ReservePackage,popup:Window){
   if(!packet.pending)throw Error('印刷対象がありません。');
@@ -24,24 +26,25 @@ export function openReservePrint(packet:ReservePackage,popup:Window){
   popup.addEventListener('load',print,{once:true});doc.close();if(doc.readyState==='complete')setTimeout(print,300);
 }
 
-export function ReservePrintControls({packet,onChange}:{packet:ReservePackage;onChange:(value:ReservePackage)=>void}){
+export function ReservePrintControls({packet,onChange,practice=false,store=realStore}:{packet:ReservePackage;onChange:(value:ReservePackage)=>void;practice?:boolean;store?:PrintStore}){
+  const {loadReservePackage,claimReserveBatch,finishReserveBatch}=store;
   const [count,setCount]=useState(20),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const done=new Set(packet.confirmed),remaining=packet.tickets.filter(t=>!done.has(t.id));
   useEffect(()=>{setCount(current=>Math.max(1,Math.min(current,remaining.length||1)));},[remaining.length]);
   const update=async()=>{const current=await loadReservePackage(packet.eventId);if(current)onChange(current);};
   const print=async(repeat=false)=>{
     if(busy)return;setError('');
-    const popup=window.open('','_blank');if(!popup){setError('印刷画面を開けません。ポップアップを許可してください。');return;}
+    const popup=practice?null:window.open('','_blank');if(!practice&&!popup){setError('印刷画面を開けません。ポップアップを許可してください。');return;}
     setBusy(true);
     try{
       const latest=repeat?await loadReservePackage(packet.eventId):await claimReserveBatch(packet.eventId,count);
       if(!latest?.pending||(repeat&&latest.pending.id!==packet.pending?.id))throw Error('印刷状態が変わりました。状態を更新してください。');
-      onChange(latest);openReservePrint(latest,popup);
-    }catch(e){popup.close();setError(e instanceof Error?e.message:'印刷を準備できませんでした。');await update().catch(()=>{});}finally{setBusy(false);}
+      onChange(latest);if(popup)openReservePrint(latest,popup);
+    }catch(e){popup?.close();setError(e instanceof Error?e.message:'印刷を準備できませんでした。');await update().catch(()=>{});}finally{setBusy(false);}
   };
   const finish=async(printed:boolean)=>{
     if(!packet.pending||busy)return;
-    if(!window.confirm(printed?'紙が正しく出たことを確認しましたか？この分を印刷済みにして次の番号へ進みます。':'手元にこの分の印刷物がないことを確認してください。番号を未印刷に戻します。'))return;
+    if(!practice&&!window.confirm(printed?'紙が正しく出たことを確認しましたか？この分を印刷済みにして次の番号へ進みます。':'手元にこの分の印刷物がないことを確認してください。番号を未印刷に戻します。'))return;
     setBusy(true);setError('');try{onChange(await finishReserveBatch(packet.eventId,packet.pending.id,printed));}catch(e){setError(e instanceof Error?e.message:'印刷記録を保存できませんでした。');await update().catch(()=>{});}finally{setBusy(false);}
   };
   return <div className="reserve-print-controls">
@@ -54,13 +57,14 @@ export function ReservePrintControls({packet,onChange}:{packet:ReservePackage;on
   </div>;
 }
 
-export function ReserveConfiguration({eventId,tickets,build,onSaved}:{eventId:string;tickets:{id:string;qrNumber:string;valid:boolean;status:string;reserve?:boolean}[];build:(ids:string[])=>Promise<ReservePackage>;onSaved:(ids:string[])=>void}){
+export function ReserveConfiguration({eventId,tickets,build,onSaved,practice=false,store=realStore}:{practice?:boolean;store?:PrintStore;eventId:string;tickets:{id:string;qrNumber:string;valid:boolean;status:string;reserve?:boolean}[];build:(ids:string[])=>Promise<ReservePackage>;onSaved:(ids:string[])=>void}){
+  const {loadReservePackage,saveReservePackage}=store;
   const issuedReserves=tickets.filter(t=>t.reserve===true);
   const [useIssued,setUseIssued]=useState(true);
   const [start,setStart]=useState(501),[end,setEnd]=useState(700),[packet,setPacket]=useState<ReservePackage|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   useEffect(()=>{let active=true;void loadReservePackage(eventId).then(p=>{if(!active||!p)return;setPacket(p);setStart(Number(p.tickets[0].number));setEnd(Number(p.tickets.at(-1)!.number));}).catch(()=>setError('予備印刷の保存状態を読み込めませんでした。'));return()=>{active=false;};},[eventId]);
   const save=async()=>{if(busy)return;setBusy(true);setError('');try{const selected=useIssued&&issuedReserves.length?issuedReserves.filter(t=>t.valid&&t.status==='unused').sort((a,b)=>Number(a.qrNumber)-Number(b.qrNumber)):selectReserveTickets(tickets,start,end);if(!selected.length)throw Error('保存できる未使用の予備がありません。');const ids=selected.map(t=>t.id);const p=await saveReservePackage(await build(ids));setPacket(p);onSaved(ids);}catch(e){setError(e instanceof Error?e.message:'予備印刷を保存できませんでした。');}finally{setBusy(false);}};
-  return <div className="reserve-print-controls"><p>発行済み・未使用のチケット番号から予備分を指定します。発行時に指定した予備は、通常印刷から除外済みです。ここでデザインとQRを保存するとオフラインで印刷できます。</p><p>受付の入場用・退場用の両端末には、予備分を含む全チケットを事前に読み込んでください。デザインを変更したときは、予備分も保存し直してください。</p><label>予備の指定方法<select aria-label="予備の指定方法" value={useIssued&&issuedReserves.length?'issued':'range'} onChange={e=>setUseIssued(e.target.value==='issued')}>{issuedReserves.length>0&&<option value="issued">発行時に指定した予備（{issuedReserves.length}枚）</option>}<option value="range">番号の範囲を指定</option></select></label>{!(useIssued&&issuedReserves.length)&&<><label>予備の開始番号<input aria-label="予備の開始番号" type="number" min="1" value={start} onChange={e=>setStart(Number(e.target.value))}/></label><label>予備の終了番号<input aria-label="予備の終了番号" type="number" min="1" value={end} onChange={e=>setEnd(Number(e.target.value))}/></label></>}<button disabled={busy} onClick={()=>void save()}>{busy?'デザインとQRを保存中…':'予備のデザインとQRを端末に保存'}</button>{error&&<p role="alert">{error}</p>}{packet&&<><p>保存日時：{new Date(packet.preparedAt).toLocaleString('ja-JP')}</p><a href={`?reserve-print=${encodeURIComponent(eventId)}`} target="_blank" rel="noopener">オフライン用の予備印刷画面を開く</a><ReservePrintControls packet={packet} onChange={setPacket}/></>}</div>;
+  return <div className="reserve-print-controls"><p>発行済み・未使用のチケット番号から予備分を指定します。発行時に指定した予備は、通常印刷から除外済みです。ここでデザインとQRを保存するとオフラインで印刷できます。</p><p>受付の入場用・退場用の両端末には、予備分を含む全チケットを事前に読み込んでください。デザインを変更したときは、予備分も保存し直してください。</p><label>予備の指定方法<select aria-label="予備の指定方法" value={useIssued&&issuedReserves.length?'issued':'range'} onChange={e=>setUseIssued(e.target.value==='issued')}>{issuedReserves.length>0&&<option value="issued">発行時に指定した予備（{issuedReserves.length}枚）</option>}<option value="range">番号の範囲を指定</option></select></label>{!(useIssued&&issuedReserves.length)&&<><label>予備の開始番号<input aria-label="予備の開始番号" type="number" min="1" value={start} onChange={e=>setStart(Number(e.target.value))}/></label><label>予備の終了番号<input aria-label="予備の終了番号" type="number" min="1" value={end} onChange={e=>setEnd(Number(e.target.value))}/></label></>}<button disabled={busy} onClick={()=>void save()}>{busy?'デザインとQRを保存中…':'予備のデザインとQRを端末に保存'}</button>{error&&<p role="alert">{error}</p>}{packet&&<><p>保存日時：{new Date(packet.preparedAt).toLocaleString('ja-JP')}</p>{practice?<p>練習：専用画面は本番の準備後にブックマークしてください。通信を切って開き直す確認が必要です。</p>:<a href={`?reserve-print=${encodeURIComponent(eventId)}`} target="_blank" rel="noopener">オフライン用の予備印刷画面を開く</a>}<ReservePrintControls packet={packet} onChange={setPacket} practice={practice} store={store}/></>}</div>;
 }
 
 export default function OfflineReserveRoot({eventId}:{eventId:string}){

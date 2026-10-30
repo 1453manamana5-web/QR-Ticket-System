@@ -143,7 +143,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async()=>{}},"./localDb":local,
+    "./ReceptionGuide":{default:()=>null,useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async()=>{}},"./localDb":local,
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{

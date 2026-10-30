@@ -3,13 +3,16 @@ import VenueOccupancyChart from "./VenueOccupancyChart";
 import OfflineEventTransfer from "./OfflineEventTransfer";
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, saveEventStatus, type PublishedEventBundle } from "./eventPublisher";
+import * as livePublisher from "./eventPublisher";
+import type {PublishedEventBundle} from "./eventPublisher";
+import {createGuidePractice} from "./guidePractice";
+import ManagementGuide,{useManagementGuide} from "./ManagementGuide";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import {parseManagementBackup} from "./backup";
 import {localDateValue, receptionDataCollected, csvCell,isCountedTicket} from "./operationSafety";
 import {useReservePrintLedger} from "./reservePrintLedger";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import * as liveData from "./firebaseData";
 
 type AnalysisRecord = {
   eventId: string;
@@ -22,9 +25,9 @@ type AnalysisRecord = {
   savedAt: string;
 };
 
-function loadAnalysisHistory(): AnalysisRecord[] {
+function loadAnalysisHistory(storage:Pick<Storage,"getItem">=localStorage): AnalysisRecord[] {
   try {
-    const raw = localStorage.getItem("qr-ticket-analysis-history");
+    const raw = storage.getItem("qr-ticket-analysis-history");
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter(item => item && typeof item.eventId === "string" && typeof item.eventName === "string" && typeof item.savedAt === "string" && [item.total,item.unused,item.inside,item.exited].every(Number.isFinite)) : [];
@@ -71,14 +74,20 @@ const statusLabel: Record<Event["eventStatus"], string> = {
   finished: "終了",
 };
 
-export default function App() {
+type AppProps={practice?:boolean};
+export default function App({practice=false}:AppProps={}) {
+  const practiceBackend=useMemo(()=>createGuidePractice(),[]);
+  const appStorage=practice?practiceBackend.storage:localStorage;
+  const {deleteEvent: deleteFirebaseEvent, deleteMember: deleteFirebaseMember, deleteTicket: deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal: approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception: releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets}=practice?practiceBackend.api:liveData;
+  const {loadPublishedEventBundle,publishEventBundle,saveEventMetadata,saveEventStatus}=practice?practiceBackend.publisher:livePublisher;
+
   const [page, setPage] = useState("ホーム");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem("qr-ticket-sidebar-collapsed") === "true"; }
+    try { return appStorage.getItem("qr-ticket-sidebar-collapsed") === "true"; }
     catch { return false; }
   });
   useEffect(() => {
-    try { localStorage.setItem("qr-ticket-sidebar-collapsed", String(sidebarCollapsed)); }
+    try { appStorage.setItem("qr-ticket-sidebar-collapsed", String(sidebarCollapsed)); }
     catch { /* storage may be unavailable; the toggle still works for this session */ }
   }, [sidebarCollapsed]);
   const [pageOpeningOrigin, setPageOpeningOrigin] = useState<{ x: number; y: number; sequence: number; radius: number;
@@ -184,7 +193,7 @@ export default function App() {
   const finalizationRunning = useRef(false);
   const [eventHistory, setEventHistory] = useState<Event[]>(() => {
     try {
-      const raw = localStorage.getItem("qr-ticket-event-history");
+      const raw = appStorage.getItem("qr-ticket-event-history");
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
@@ -196,7 +205,7 @@ export default function App() {
   const eventHistoryRef=useRef(eventHistory);
   eventHistoryRef.current=eventHistory;
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState("");
-  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(loadAnalysisHistory);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(()=>loadAnalysisHistory(appStorage));
   const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState("");
   const [newEventModalOpen, setNewEventModalOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
@@ -268,7 +277,7 @@ export default function App() {
   };
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
     try {
-      const raw = localStorage.getItem("qr-ticket-app-settings");
+      const raw = appStorage.getItem("qr-ticket-app-settings");
       if (!raw) return defaultAppSettings;
       return normalizeAppSettings(JSON.parse(raw));
     } catch {
@@ -284,7 +293,7 @@ export default function App() {
   type AiLabWarning = { id: string; eventId: string; title: string; detail: string; detectedAt: string };
   const [aiLabWarnings, setAiLabWarnings] = useState<AiLabWarning[]>(() => {
     try {
-      const raw = localStorage.getItem("qr-ticket-ai-lab-warnings");
+      const raw = appStorage.getItem("qr-ticket-ai-lab-warnings");
       const parsed=raw?JSON.parse(raw):[];
       return Array.isArray(parsed)?parsed.filter(item=>item && [item.id,item.eventId,item.title,item.detail,item.detectedAt].every(value=>typeof value === "string")):[];
     } catch {
@@ -398,7 +407,7 @@ export default function App() {
         .map(item => ({ ...item, eventId: event.eventId, detectedAt: now }));
       if (additions.length === 0) return current;
       const next = [...additions, ...current].slice(0, 100);
-      try { localStorage.setItem("qr-ticket-ai-lab-warnings", JSON.stringify(next)); } catch (reason) { console.warn("AI試験警告履歴を保存できませんでした", reason); }
+      try { appStorage.setItem("qr-ticket-ai-lab-warnings", JSON.stringify(next)); } catch (reason) { console.warn("AI試験警告履歴を保存できませんでした", reason); }
       return next;
     });
   }, [appSettings.aiLabEnabled, event.eventId, aiLabDiagnostics]);
@@ -452,15 +461,15 @@ export default function App() {
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
     const key = "qr-ticket-terminal-id";
     const legacyKey = "qr-ticket-device-id";
-    const existing = localStorage.getItem(key) || localStorage.getItem(legacyKey);
+    const existing = appStorage.getItem(key) || appStorage.getItem(legacyKey);
     if (existing && /^T-[A-Za-z0-9-]{8,40}$/.test(existing)) {
-      localStorage.setItem(key, existing);
-      localStorage.setItem(legacyKey, existing);
+      appStorage.setItem(key, existing);
+      appStorage.setItem(legacyKey, existing);
       return existing;
     }
     const created = `T-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    localStorage.setItem(key, created);
-    localStorage.setItem(legacyKey, created);
+    appStorage.setItem(key, created);
+    appStorage.setItem(legacyKey, created);
     return created;
   });
   const firebaseEventHydratedRef = useRef(false);
@@ -473,7 +482,8 @@ export default function App() {
       (terminal.role === "management" || terminal.role === "both") &&
       terminal.approved && terminal.managementApproved === true,
   );
-  const reserveLedger=useReservePrintLedger(event.eventId,ownManagementTerminalApproved);
+  const guide=useManagementGuide(firebaseDeviceId,!practice&&terminalDataHydrated&&ownManagementTerminalApproved,appStorage);
+  const reserveLedger=useReservePrintLedger(event.eventId,ownManagementTerminalApproved&&!practice);
   const countedTickets=useMemo(()=>tickets.filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[tickets,reserveLedger.confirmed,reserveLedger.reserved]);
   const waitingReserveCount=tickets.length-countedTickets.length;
   const bundleLoadVersion=useRef(0);
@@ -493,7 +503,7 @@ export default function App() {
 
 
   useEffect(() => {
-    try { localStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
+    try { appStorage.setItem("qr-ticket-event-history", JSON.stringify(eventHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [eventHistory]);
 
   useEffect(() => {
@@ -608,11 +618,11 @@ export default function App() {
     setEventHistory(current => current.filter(item => item.eventId));
     setAnalysisHistory(current => current.filter(item => item.eventId));
     try {
-      const raw = localStorage.getItem("qr-ticket-event-history");
+      const raw = appStorage.getItem("qr-ticket-event-history");
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          localStorage.setItem("qr-ticket-event-history", JSON.stringify(parsed.filter((item: Event) => item?.eventId)));
+          appStorage.setItem("qr-ticket-event-history", JSON.stringify(parsed.filter((item: Event) => item?.eventId)));
         }
       }
     } catch (reason) {
@@ -621,14 +631,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem("qr-ticket-managed-terminals-v2", JSON.stringify(terminals)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
+    try { appStorage.setItem("qr-ticket-managed-terminals-v2", JSON.stringify(terminals)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [terminals]);
 
   useEffect(() => {
-    try { localStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
+    try { appStorage.setItem("qr-ticket-analysis-history", JSON.stringify(analysisHistory)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
   }, [analysisHistory]);
   useEffect(() => {
-    try { localStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
+    try { appStorage.setItem("qr-ticket-app-settings", JSON.stringify(appSettings)); } catch (reason) { console.warn("端末内キャッシュを保存できませんでした", reason); }
     if (appSettingsHydrated === firebaseDeviceId && ownManagementTerminalApproved) {
       void saveAppSettings(firebaseDeviceId, appSettings).catch(reason => console.error("Firebase app settings save failed", reason));
     }
@@ -673,7 +683,7 @@ export default function App() {
     setTerminalDataHydrated(false);
 
     void loadTerminals().then(remote => {
-      setFirebaseDeviceId(localStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
+      setFirebaseDeviceId(appStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
       setTerminals(remote);
       setTerminalDataHydrated(true);
     }).catch(reason => {
@@ -685,7 +695,7 @@ export default function App() {
 
     try {
       unsubscribe = subscribeTerminals(remote => {
-        setFirebaseDeviceId(localStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
+        setFirebaseDeviceId(appStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
       setTerminals(remote);
         setTerminalDataHydrated(true);
       }, reason => {
@@ -747,7 +757,7 @@ export default function App() {
 
 
   useEffect(() => {
-    if (!ownManagementTerminalApproved || !(event as Event & {receptionTarget?:boolean}).receptionTarget) return;
+    if (practice || !ownManagementTerminalApproved || !(event as Event & {receptionTarget?:boolean}).receptionTarget) return;
 
     const finishEvent = async () => {
       if (finalizationRunning.current || !terminalDataHydrated || !firebaseTicketHydratedRef.current) return;
@@ -927,7 +937,7 @@ export default function App() {
     }
 
     const next: Event = {
-      eventId: createEventId(),
+      eventId: practice?"GUIDE-NEW-EVENT":createEventId(),
       eventName: normalizedName,
       eventDate: newEventDate,
       startTime: newStartTime,
@@ -1178,6 +1188,7 @@ export default function App() {
   };
 
   const exportBackup = () => {
+    if(practice){setSettingsNotice("練習：バックアップの保存場所を確認しました。本番ではJSONファイルを保存します。");return;}
     const backup = {
       version: 1,
       eventId: event.eventId,
@@ -1200,6 +1211,7 @@ export default function App() {
   };
 
   const importBackup = () => {
+    if(practice){setSettingsNotice("練習：復元前にファイルを選び確認します。本番では既存の受付状態を上書きせず、不足分を復元します。");return;}
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "application/json,.json";
@@ -1488,8 +1500,8 @@ export default function App() {
         setForceTerminalRegistration(false);
         setSelectedTerminalId(firebaseDeviceId);
         setTerminalNotice("この端末はサーバーで承認済みです。");
-        localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
-        localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
+        appStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
+        appStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
         return;
       }
       await requestTerminalRegistration({
@@ -1498,8 +1510,8 @@ export default function App() {
         type: "Web / iPad",
         role: "management",
       });
-      localStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
-      localStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
+      appStorage.setItem("qr-ticket-terminal-id", firebaseDeviceId);
+      appStorage.setItem("qr-ticket-device-id", firebaseDeviceId);
       setForceTerminalRegistration(false);
       setTerminals(currentTerminals => [
         ...currentTerminals.filter(item => item.terminalId !== firebaseDeviceId),
@@ -1781,6 +1793,7 @@ export default function App() {
   };
 
   const downloadAiReport = () => {
+    if(practice){setSettingsNotice("練習：レポート保存を確認しました。");return;}
     if (!aiReportText) return;
     const blob = new Blob(["\uFEFF", aiReportText], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1922,9 +1935,9 @@ export default function App() {
 
       {error && <div className="notice error">{error}</div>}
       {bundle && <div className="notice success">イベントデータはFirebaseへ公開済みです。受付端末は下のQRで認証できます。</div>}
-      {bundle && (event.eventStatus==="ready"||event.eventStatus==="active") && <OfflineEventTransfer key={bundle.authToken+bundle.event.dataVersion} data={{event:{...bundle.event,eventStatus:event.eventStatus},settings:bundle.settings,tickets}}/>}
+      {bundle && (event.eventStatus==="ready"||event.eventStatus==="active") && <OfflineEventTransfer practice={practice} key={bundle.authToken+bundle.event.dataVersion} data={{event:{...bundle.event,eventStatus:event.eventStatus},settings:bundle.settings,tickets}}/>}
       {bundle && <section className="auth-card event-auth-card">
-        <div><small>EVENT AUTHENTICATION</small><h2>イベントデータQR</h2><p>受付アプリで読み取ると、このイベントのデータを受付端末へ準備します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => window.print()}>イベントデータQRを印刷</button></div>
+        <div><small>EVENT AUTHENTICATION</small><h2>イベントデータQR</h2><p>受付アプリで読み取ると、このイベントのデータを受付端末へ準備します。</p><p className="token">{bundle.authToken}</p><button className="secondary" onClick={() => practice?setSettingsNotice("練習：印刷画面を開く操作を確認しました。実際の印刷は本番画面で行います。"):window.print()}>イベントデータQRを印刷</button></div>
         <div className="qr-box"><QRCodeSVG value={eventDataQrValue} size={220} includeMargin /></div>
       </section>}
     </section>;
@@ -2035,6 +2048,7 @@ export default function App() {
         key={event.eventId}
         eventId={event.eventId}
         initialReserveOpen={ticketDesignReserveOpen}
+        practice={practice}
         eventName={event.eventName}
         tickets={tickets.map(ticket => ({
           id: ticket.ticketId,
@@ -2059,6 +2073,7 @@ export default function App() {
             <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>
           </div>
           <TicketQrPreview
+            practice={practice}
             eventId={event.eventId}
             eventName={event.eventName}
             ticketNumber={String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(6, "0")}
@@ -2441,7 +2456,7 @@ export default function App() {
           <span>{memberQrModal.memberId}</span>
           <p>このQRを部員認証に使用できます。</p>
           <div className="member-qr-actions">
-            <button className="secondary" onClick={() => window.print()}>印刷</button>
+            <button className="secondary" onClick={() => practice?setSettingsNotice("練習：印刷画面を開く操作を確認しました。実際の印刷は本番画面で行います。"):window.print()}>印刷</button>
             <button className="secondary" onClick={() => setMemberQrModal(null)}>閉じる</button>
           </div>
         </section>
@@ -2488,6 +2503,7 @@ export default function App() {
       const analysisEndTime = selectedEvent?.endTime ?? "16:00";
 
       const exportAnalysisCsv = () => {
+        if(practice){setSettingsNotice("練習：分析CSVの保存操作を確認しました。");return;}
         const rows = [
           ["項目", "値"],
           ["イベント名", analysisEventName],
@@ -2660,6 +2676,7 @@ export default function App() {
         </div>
       </section>
 
+      <section className="settings-section"><div className="settings-section-heading"><small>GUIDE</small><h3>使い方ガイド</h3><p>練習用データで、実際の画面を操作しながら使い方を確認します。途中からの再開や、最初からのやり直しができます。</p></div><div className="settings-actions"><button className="primary-action" onClick={()=>guide.start(false)}>使い方ガイドを始める</button><button className="secondary" onClick={()=>guide.start(true)}>最初から練習する</button></div></section>
       <section className="settings-section settings-danger">
         <div className="settings-section-heading"><small>SYSTEM</small><h3>システム</h3><p>この端末のアプリ設定を初期状態に戻します。イベント・チケット・受付履歴・端末登録は保持します。</p></div>
         <div className="settings-card">
@@ -2837,7 +2854,7 @@ function NavIcon({type}:{type:string}){
     </div>;
   }
 
-  return <div className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${sidebarDragWidth !== null ? "sidebar-dragging" : ""}`}>
+  return <><div inert={guide.open?true:undefined} className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${sidebarDragWidth !== null ? "sidebar-dragging" : ""}`}>
     {navigationNotice && <div className="navigation-notice-backdrop">
       <section className="navigation-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="navigation-notice-title">
         <h2 id="navigation-notice-title">チケット管理を開けません</h2>
@@ -3152,7 +3169,7 @@ function NavIcon({type}:{type:string}){
         <span className="ai-lab-fab-glint" /><span className="ai-lab-fab-icon">✧</span>
       </button>
     </div>}
-  </div>;
+  </div>{guide.open&&!practice&&<ManagementGuide controller={guide} renderWorkspace={()=><App practice/>}/>}</>;
 }
 
 function Metric({ title, value, sub }: { title: string; value: string; sub: string }) {

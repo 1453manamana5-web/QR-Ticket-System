@@ -12,7 +12,7 @@
     "build": "npm run build --workspace management-app && npm run build --workspace reception-app",
     "test:rules": "firebase emulators:exec --project qr-ticket-rules-test --only firestore \"node --test firestore.rules.test.mjs event-reception.flow.test.mjs\"",
     "test:callables": "npm --prefix functions run build && firebase emulators:exec --project qr-ticket-callables-test --only firestore \"node --test functions/terminal-handoff.test.mjs\"",
-    "test:client": "node --test firebase-client.test.mjs reception-regression.test.mjs ticket-design.test.cjs management-regression.test.mjs management-workflow.test.mjs"
+    "test:client": "node --test firebase-client.test.mjs reception-regression.test.mjs ticket-design.test.cjs management-regression.test.mjs management-workflow.test.mjs guide.test.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 
+import {createGuideReserveStore} from "./guidePractice";
 import LazyQrCode from "./LazyQrCode";
 import {QRCodeSVG} from "qrcode.react";
 import {renderToStaticMarkup} from "react-dom/server";
@@ -31,6 +32,7 @@ type TicketDesignerProps = {
   eventId?: string;
   initialTicketNumber?: string;
   initialReserveOpen?:boolean;
+  practice?:boolean;
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
 };
@@ -272,15 +274,16 @@ function createDesignStorageKey(
 
 function loadDesignSettings(
   eventName: string,
-  eventId?: string
+  eventId?: string,
+  storage:Pick<Storage,"getItem">=localStorage
 ): TicketDesignSettings {
   try {
     const savedDesign =
-      localStorage.getItem(
+      storage.getItem(
         createDesignStorageKey(
           eventName, eventId
         )
-      ) ?? (eventId ? localStorage.getItem(createDesignStorageKey(eventName)) : null);
+      ) ?? (eventId ? storage.getItem(createDesignStorageKey(eventName)) : null);
 
     if (savedDesign === null) {
       return defaultSettings;
@@ -344,9 +347,14 @@ function TicketDesigner({
   eventId,
   initialTicketNumber,
   initialReserveOpen=false,
+  practice=false,
   qrValue,
   onClose,
 }: TicketDesignerProps) {
+  const memoryStorage=useRef(new Map<string,string>());
+  const designStorage=practice?{getItem:(key:string)=>memoryStorage.current.get(key)??null,setItem:(key:string,value:string)=>memoryStorage.current.set(key,value),removeItem:(key:string)=>memoryStorage.current.delete(key)}:localStorage;
+  const reserveStore=useMemo(()=>practice?createGuideReserveStore():null,[practice]);
+
   const printableTickets =
     useMemo(
       () =>
@@ -372,7 +380,7 @@ function TicketDesigner({
   const [reservedIds,setReservedIds]=useState<string[]>([]);
   const [reserveReady,setReserveReady]=useState(!eventId);
   const [reserveNotice,setReserveNotice]=useState("");
-  useEffect(()=>{let active=true;if(eventId)void loadReservePackage(eventId).then(packet=>{if(active){setReservedIds(packet?.tickets.map(t=>t.id)??[]);setReserveReady(true);}}).catch(()=>{if(active)setReserveNotice("予備の印刷記録を確認できません。予備設定を確認してから印刷してください。");});return()=>{active=false;};},[eventId]);
+  useEffect(()=>{let active=true;if(eventId)void (reserveStore?reserveStore.loadReservePackage(eventId):loadReservePackage(eventId)).then(packet=>{if(active){setReservedIds(packet?.tickets.map(t=>t.id)??[]);setReserveReady(true);}}).catch(()=>{if(active)setReserveNotice("予備の印刷記録を確認できません。予備設定を確認してから印刷してください。");});return()=>{active=false;};},[eventId]);
   const detectionId = useRef(0);
   const imageReadVersion=useRef(0);
   useEffect(()=>()=>{++detectionId.current;++imageReadVersion.current;},[]);
@@ -396,12 +404,12 @@ function TicketDesigner({
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
-      () => loadDesignSettings(eventName, eventId)
+      () => loadDesignSettings(eventName, eventId,designStorage)
     );
   const settingsRef=useRef(settings);
   settingsRef.current=settings;
   const [showEditor, setShowEditor] = useState(
-    () => {const saved=loadDesignSettings(eventName, eventId);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
+    () => {const saved=loadDesignSettings(eventName, eventId,designStorage);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
   );
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
@@ -410,7 +418,7 @@ function TicketDesigner({
   const [sizeUnit, setSizeUnit] = useState<"mm" | "cm">("mm");
   const [screenScale, setScreenScale] = useState(() => {
     try {
-      const saved = Number(localStorage.getItem("qr-ticket-screen-scale"));
+      const saved = Number(designStorage.getItem("qr-ticket-screen-scale"));
       return Number.isFinite(saved) && saved >= 0.5 && saved <= 2.5 ? saved : 1;
     } catch {
       return 1;
@@ -746,7 +754,7 @@ function TicketDesigner({
 
   const saveDesign = () => {
     try {
-      localStorage.setItem(
+      designStorage.setItem(
         createDesignStorageKey(
           eventName, eventId
         ),
@@ -784,7 +792,7 @@ function TicketDesigner({
     ++imageReadVersion.current;
 
     try {
-      localStorage.setItem(createDesignStorageKey(eventName, eventId), JSON.stringify(defaultSettings));
+      designStorage.setItem(createDesignStorageKey(eventName, eventId), JSON.stringify(defaultSettings));
     } catch (error) {
       console.error(
         "保存済みデザインの削除に失敗しました。",
@@ -815,6 +823,7 @@ function TicketDesigner({
   };
 
   const printTickets = () => {
+    if(practice){alert("練習：印刷する操作を確認しました。本番では印刷プレビューで枚数と用紙を確認してください。");return;}
     if(!reserveReady){alert(reserveNotice||"予備の印刷設定を確認しています。少し待ってから印刷してください。");return;}
     if (selectedTickets.length === 0) {
       alert("印刷できるチケットがありません。");
@@ -1047,7 +1056,7 @@ function TicketDesigner({
               </div>
             </FloatingPanel>;
           })}
-          {panels.includes("reserve")&&eventId&&<FloatingPanel title="予備チケット・緊急印刷" className="studio-inspector" offset={28} onClose={()=>closePanel("reserve")}><ReserveConfiguration eventId={eventId} tickets={tickets} build={prepareReserve} onSaved={ids=>{setReservedIds(ids);setReserveReady(true);setReserveNotice("");}}/></FloatingPanel>}
+          {panels.includes("reserve")&&eventId&&<FloatingPanel title="予備チケット・緊急印刷" className="studio-inspector" offset={28} onClose={()=>closePanel("reserve")}><ReserveConfiguration practice={practice} store={reserveStore??undefined} eventId={eventId} tickets={tickets} build={prepareReserve} onSaved={ids=>{setReservedIds(ids);setReserveReady(true);setReserveNotice("");}}/></FloatingPanel>}
           {panels.includes("layers")&&<FloatingPanel title="レイヤー" className="studio-inspector" onClose={()=>closePanel("layers")} offset={0}><div className="studio-layers"><label><input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)}/>吸着・整列ガイド</label><p>上の項目ほど手前に表示されます</p>{[...layers].reverse().filter(id=>id!=="title"||settings.title).map(id=><div key={id} className={activeLayer===id?"active":""}><button type="button" onClick={()=>selectLayer(id)}>{id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(i=>i.id===id)?.name??"画像"}</button><button type="button" aria-label={`${id}をロック切替`} aria-pressed={Boolean(settings.locked?.[id])} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{settings.locked?.[id]?"固定":"自由"}</button><button type="button" aria-label={`${id}を前へ`} disabled={layers.indexOf(id)===layers.length-1} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i+1]]=[order[i+1],order[i]];updateSetting("layerOrder",order);}}>↑</button><button type="button" aria-label={`${id}を後ろへ`} disabled={layers.indexOf(id)===0} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i-1]]=[order[i-1],order[i]];updateSetting("layerOrder",order);}}>↓</button></div>)}<p>背景画像は常に最背面に固定されます。</p></div></FloatingPanel>}
           {panels.includes("settings")&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>closePanel("settings")} offset={28}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
               <h4>
@@ -1610,7 +1619,7 @@ function TicketDesigner({
                 <input type="range" min="0.5" max="2.5" step="0.01" value={screenScale} onChange={(event) => {
                   const next = Number(event.target.value);
                   setScreenScale(next);
-                  try { localStorage.setItem("qr-ticket-screen-scale", String(next)); } catch {}
+                  try { designStorage.setItem("qr-ticket-screen-scale", String(next)); } catch {}
                 }} />
                 <output>{Math.round(screenScale * 100)}%</output>
               </label>
@@ -1652,8 +1661,8 @@ function TicketDesigner({
 
 
 
-export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string }) {
-  const settings = loadDesignSettings(eventName, eventId);
+export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,practice=false }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string;practice?:boolean }) {
+  const settings = practice?defaultSettings:loadDesignSettings(eventName, eventId);
   const ratio = (() => {
     switch (settings.cardRatio) {
       case "4:3": return "4 / 3";

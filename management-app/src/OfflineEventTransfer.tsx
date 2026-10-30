@@ -3,11 +3,12 @@ import {QRCodeSVG} from 'qrcode.react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {encodeOfflineEvent,type OfflineEventData} from '../../shared/src/offlineTransfer';
 
-export default function OfflineEventTransfer({data}:{data:OfflineEventData}){
+export default function OfflineEventTransfer({data,practice=false}:{data:OfflineEventData;practice?:boolean}){
   const [frames,setFrames]=useState<string[]>([]),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [label,setLabel]=useState('');
   const prepare=async()=>{if(busy)return;setBusy(true);setError('');try{const snapshot=data;setFrames(await encodeOfflineEvent(snapshot));setLabel(`${snapshot.event.eventName}・版 ${snapshot.event.dataVersion}・QRデータ${snapshot.tickets.length}件（予備を含む）・${new Date().toLocaleString('ja-JP')}`);setIndex(0);}catch(e){setError(e instanceof Error?e.message:'QRを作成できませんでした。');}finally{setBusy(false);}};
   const save=()=>{
+    if(practice){setLabel(current=>current+" ／ 練習：保存操作を確認しました");return;}
     const escapedLabel=label.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
     const svgs=frames.map(value=>renderToStaticMarkup(<QRCodeSVG value={value} size={480} level="M" marginSize={4}/>));
     // Only generated SVGs and numeric page indexes enter this document.
