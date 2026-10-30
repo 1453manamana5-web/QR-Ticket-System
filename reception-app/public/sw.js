@@ -1,4 +1,4 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v5";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v6";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
 
@@ -8,7 +8,7 @@ async function cacheShell(cache, response) {
   const indexUrl = new URL("index.html", self.location.href).href;
   const html = await response.clone().text();
   const paths = [...[...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]),
-    "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav"];
+    "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav", "sounds/entry_osusumi_voice_d_v1.mp3"];
   await Promise.all(paths.filter(path => path && !path.startsWith("data:")).map(async path => {
     const url = new URL(path, indexUrl);
     if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
