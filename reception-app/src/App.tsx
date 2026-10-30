@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
+import ReceptionGuide,{useReceptionGuide} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
 import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
@@ -76,6 +77,8 @@ export default function App(){
   screenRef.current=screen;
   const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
   const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
+  const guide=useReceptionGuide(getTerminalId(),terminalRegistration?.approved===true);
+  const [guideSettingsOpen,setGuideSettingsOpen]=useState(false);
   const [mode,setMode]=useState<Mode>("entry");
   const [authPayload,setAuthPayload]=useState<EventAuthPayload|null>(null);
   const offlineCollector=useRef(new OfflineEventCollector());
@@ -104,7 +107,7 @@ export default function App(){
   const registrationIsCurrent=(version:number)=>registrationActiveRef.current&&version===registrationVersionRef.current;
   const lastRemoteCommandRef=useRef("");
   const receptionAllowedRef=useRef(false);
-  receptionAllowedRef.current=terminalRegistration?.approved===true&&!remoteStopped&&screen==="reception";
+  receptionAllowedRef.current=terminalRegistration?.approved===true&&!guide.open&&!guideSettingsOpen&&!remoteStopped&&screen==="reception";
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
 
@@ -777,6 +780,7 @@ export default function App(){
     }
   };
 
+  const renderScreen=()=>{
   if(screen==="registration")return <div className="entry-reception-page waiting reception-registration-page">
     <main className="entry-reception-main">
       <section className="entry-result-panel reception-registration-panel">
@@ -1170,6 +1174,10 @@ export default function App(){
     </main>
 
   </div>;
+  };
+  if(guide.open)return <ReceptionGuide controller={guide}/>;
+  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>{setGuideSettingsOpen(false);setResult(null);setScreen(localEvent?.dataReady?"ready":"auth");guide.start();}}>使い方ガイドを始める</button><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
+
 }
 
 function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:LocalEventData["settings"]):ReceptionType|null{
