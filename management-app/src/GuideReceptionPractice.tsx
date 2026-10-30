@@ -1,9 +1,9 @@
 import {useState} from 'react';
 
 /** Practice-only scanner: no camera, Firebase, device identity or reception writes. */
-export default function GuideReceptionPractice(){
-  const [running,setRunning]=useState(false),[mode,setMode]=useState<'entry'|'exit'>('entry'),[status,setStatus]=useState<'unused'|'inside'|'exited'>('unused');
-  const [result,setResult]=useState('受付を開始してください。'),[error,setError]=useState(false),[visitors,setVisitors]=useState(0);
+export default function GuideReceptionPractice({initialScenario='start'}:{initialScenario?:'start'|'inside'}={}){
+  const [running,setRunning]=useState(initialScenario==='inside'),[mode,setMode]=useState<'entry'|'exit'>('entry'),[status,setStatus]=useState<'unused'|'inside'|'exited'>(initialScenario==='inside'?'inside':'unused');
+  const [result,setResult]=useState(initialScenario==='inside'?'入場済みの練習チケットを用意しました。':'受付を開始してください。'),[error,setError]=useState(false),[visitors,setVisitors]=useState(initialScenario==='inside'?1:0);
   const scan=()=>{
     setError(false);
     if(mode==='entry'){

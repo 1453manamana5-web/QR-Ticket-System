@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
-import ReceptionGuide,{useReceptionGuide} from "./ReceptionGuide";
+import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
 import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
@@ -780,6 +780,7 @@ export default function App(){
     }
   };
 
+  const beginGuide=(topic?:string)=>{setGuideSettingsOpen(false);setResult(null);setScreen(localEvent?.dataReady?"ready":"auth");if(topic)guide.startTopic(topic);else guide.start();};
   const renderScreen=()=>{
   if(screen==="registration")return <div className="entry-reception-page waiting reception-registration-page">
     <main className="entry-reception-main">
@@ -1176,7 +1177,7 @@ export default function App(){
   </div>;
   };
   if(guide.open)return <ReceptionGuide controller={guide}/>;
-  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>{setGuideSettingsOpen(false);setResult(null);setScreen(localEvent?.dataReady?"ready":"auth");guide.start();}}>使い方ガイドを始める</button><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
+  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>beginGuide()}>使い方ガイドを始める</button><h3>項目を選んで練習</h3><div className="reception-guide-topics">{receptionGuideTopics.map(topic=><button key={topic.id} onClick={()=>beginGuide(topic.id)}>{topic.label}</button>)}</div><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
 
 }
 

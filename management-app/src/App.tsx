@@ -6,7 +6,7 @@ import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-tick
 import * as livePublisher from "./eventPublisher";
 import type {PublishedEventBundle} from "./eventPublisher";
 import {createGuidePractice} from "./guidePractice";
-import ManagementGuide,{useManagementGuide} from "./ManagementGuide";
+import ManagementGuide,{useManagementGuide,managementGuideTopics} from "./ManagementGuide";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import {parseManagementBackup} from "./backup";
 import {localDateValue, receptionDataCollected, csvCell,isCountedTicket} from "./operationSafety";
@@ -2676,7 +2676,7 @@ export default function App({practice=false}:AppProps={}) {
         </div>
       </section>
 
-      <section className="settings-section"><div className="settings-section-heading"><small>GUIDE</small><h3>使い方ガイド</h3><p>練習用データで、実際の画面を操作しながら使い方を確認します。途中からの再開や、最初からのやり直しができます。</p></div><div className="settings-actions"><button className="primary-action" onClick={()=>guide.start(false)}>使い方ガイドを始める</button><button className="secondary" onClick={()=>guide.start(true)}>最初から練習する</button></div></section>
+      <section className="settings-section"><div className="settings-section-heading"><small>GUIDE</small><h3>使い方ガイド</h3><p>練習用データで、実際の画面を操作しながら使い方を確認します。途中からの再開や、最初からのやり直しができます。</p></div><div className="settings-actions"><button className="primary-action" onClick={()=>guide.start(false)}>使い方ガイドを始める</button><button className="secondary" onClick={()=>guide.start(true)}>最初から練習する</button></div><h4>項目を選んで練習</h4><p>選んだ項目だけを練習し、終わると設定画面へ戻ります。全体ガイドの進行状況は保持します。</p><div className="guide-topic-grid">{managementGuideTopics.map(topic=><button className="secondary" key={topic.chapter} onClick={()=>guide.startTopic(topic.chapter)}><strong>{topic.label}</strong><small>{topic.steps}手順</small></button>)}</div></section>
       <section className="settings-section settings-danger">
         <div className="settings-section-heading"><small>SYSTEM</small><h3>システム</h3><p>この端末のアプリ設定を初期状態に戻します。イベント・チケット・受付履歴・端末登録は保持します。</p></div>
         <div className="settings-card">
