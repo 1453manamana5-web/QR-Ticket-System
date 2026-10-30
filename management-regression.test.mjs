@@ -3,10 +3,75 @@ import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {webcrypto} from 'node:crypto';
+import {IDBFactory} from 'fake-indexeddb';
 import React from 'react';
 import {act,create} from 'react-test-renderer';
 const require=createRequire(import.meta.url),ts=require('typescript');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+function reserveStore(){const out={};new Function('exports','indexedDB','crypto',ts.transpileModule(readFileSync('management-app/src/reservePrintStore.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out,new IDBFactory(),webcrypto);return out;}
+const reservePacket=(numbers=[501,502,503])=>({eventId:'reserve-event',eventName:'Reserve event',preparedAt:new Date().toISOString(),template:'<div class="ticket-print-card"><div class="ticket-design-qr"></div><div class="ticket-design-number"></div></div>',css:'.ticket-print-card{}',sheetStyle:'--ticket-print-width:90mm',columns:2,tickets:numbers.map(n=>({id:'TKT'+n,number:String(n),svg:'<svg></svg>'})),confirmed:[],pending:null});
+
+test('reserve printing retains pending batches after reopening, cancellation reuses numbers and confirmation advances',async()=>{
+  const store=reserveStore();await store.saveReservePackage(reservePacket());
+  let state=await store.claimReserveBatch('reserve-event',2);
+  assert.deepEqual(state.pending.ids,['TKT501','TKT502']);assert.equal(state.confirmed.length,0);
+  assert.deepEqual((await store.loadReservePackage('reserve-event')).pending,state.pending);
+  await assert.rejects(store.claimReserveBatch('reserve-event',1),/確認待ち/);
+  await store.finishReserveBatch('reserve-event',state.pending.id,false);
+  state=await store.claimReserveBatch('reserve-event',2);assert.deepEqual(state.pending.ids,['TKT501','TKT502']);
+  const id=state.pending.id;await store.finishReserveBatch('reserve-event',id,true);
+  await assert.rejects(store.finishReserveBatch('reserve-event',id,true),/変更/);
+  state=await store.claimReserveBatch('reserve-event',1);assert.deepEqual(state.pending.ids,['TKT503']);
+  await store.finishReserveBatch('reserve-event',state.pending.id,true);
+  await assert.rejects(store.claimReserveBatch('reserve-event',1),/残数/);
+});
+
+test('simultaneous reserve print windows can claim only one batch and preparing a new design preserves the print ledger',async()=>{
+  const store=reserveStore();await store.saveReservePackage(reservePacket());
+  const results=await Promise.allSettled([store.claimReserveBatch('reserve-event',2),store.claimReserveBatch('reserve-event',2)]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  const state=await store.loadReservePackage('reserve-event');
+  await assert.rejects(store.saveReservePackage(reservePacket([503,504,505])),/確認待ち/);
+  assert.deepEqual((await store.loadReservePackage('reserve-event')).tickets.map(t=>t.id),['TKT501','TKT502','TKT503']);
+  await store.finishReserveBatch('reserve-event',state.pending.id,true);
+  await store.saveReservePackage(reservePacket([503,504,505]));
+  await store.saveReservePackage(reservePacket());
+  assert.deepEqual((await store.claimReserveBatch('reserve-event',1)).pending.ids,['TKT503']);
+  assert.throws(()=>store.claimReserveBatch('reserve-event',0),/整数/);
+});
+
+test('reserves require an existing unique range of valid unused tickets',()=>{
+  const store=reserveStore();const tickets=[503,501,502].map(n=>({id:'TKT'+n,qrNumber:String(n).padStart(6,'0'),valid:true,status:'unused'}));
+  assert.deepEqual(store.selectReserveTickets(tickets,501,503).map(t=>t.id),['TKT501','TKT502','TKT503']);
+  for(const [start,end] of [[0,2],[503,501],[501.5,503],[501,504],[1,5001]])assert.throws(()=>store.selectReserveTickets(tickets,start,end));
+  for(const change of [{valid:false},{status:'inside'},{qrNumber:'501'}])assert.throws(()=>store.selectReserveTickets([{...tickets[0],...change},...tickets.slice(1)],501,503));
+});
+
+test('the offline reserve entry opens before Firebase authentication',async()=>{
+  let authentication=0,rendered;
+  function Offline(){}function App(){}
+  const deps={'react-dom/client':{default:{createRoot:()=>({render:element=>{rendered=element;}})}},'react/jsx-runtime':require('react/jsx-runtime'),'./App':{default:App},'./styles.css':{},'./legacy-ticket-design-overrides.css':{},'./ReservePrinting':{default:Offline},'./firebaseClient':{ensureFirebaseAuth:()=>{authentication++;throw Error('No network');}}};
+  const source=readFileSync('management-app/src/main.tsx','utf8').replaceAll('import.meta.env.BASE_URL','"/QR-Ticket-System/management-app/"');
+  new Function('exports','require','document','navigator','window',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:false}}).outputText)({},n=>deps[n],{getElementById:()=>({})},{},{location:{search:'?reserve-print=reserve-event'}});
+  assert.equal(authentication,0);assert.equal(rendered.type,Offline);assert.equal(rendered.props.eventId,'reserve-event');
+});
+
+test('management offline shell preserves its last complete shell and serves the reserve query without the network',async()=>{
+  const listeners=new Map(),entries=new Map();let fail=false,offline=false;
+  const base='https://test.example/QR-Ticket-System/management-app/';
+  const cache={put:async(k,v)=>entries.set(k,v.clone()),match:async k=>entries.get(typeof k==='string'?k:k.url)?.clone()};
+  const caches={open:async()=>cache,keys:async()=>[],delete:async()=>true};
+  const fetch=async url=>{if(offline)throw Error('offline');return new Response(String(url).endsWith('index.html')?'<script src="./assets/app.js"></script>':fail?'failed':'app',{status:fail&&!String(url).endsWith('index.html')?503:200});};
+  const self={location:{href:base+'sw.js',origin:'https://test.example'},addEventListener:(name,fn)=>listeners.set(name,fn),skipWaiting:async()=>{},clients:{claim:async()=>{}}};
+  new Function('self','caches','fetch','Response','URL',readFileSync('management-app/public/sw.js','utf8'))(self,caches,fetch,Response,URL);
+  let install;listeners.get('install')({waitUntil:p=>{install=p;}});await install;
+  assert.ok(entries.has(base+'assets/app.js'));const saved=await entries.get(base+'index.html').clone().text();
+  fail=true;listeners.get('install')({waitUntil:p=>{install=p;}});await assert.rejects(install);assert.equal(await entries.get(base+'index.html').clone().text(),saved);
+  offline=true;let response;
+  listeners.get('fetch')({request:{url:base+'?reserve-print=reserve-event',method:'GET',mode:'navigate'},respondWith:p=>{response=p;}});
+  assert.equal(await (await response).text(),saved);
+  let intercepted=false;listeners.get('fetch')({request:{url:'https://test.example/QR-Ticket-System/',method:'GET',mode:'navigate'},respondWith:()=>{intercepted=true;}});assert.equal(intercepted,false);
+});
 test('offline manager export creates self contained QR pages and escapes the event name',async()=>{
   const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const protocol={};new Function('exports','crypto',compile('shared/src/offlineTransfer.ts'))(protocol,webcrypto);
@@ -32,7 +97,7 @@ test('print title treats event names as text and prints only once',async()=>{
   const window={open:()=>popup,setTimeout:fn=>fn()};
   const document={querySelector:()=>({cloneNode:()=>({style:{}})})};
   const exports={};
-  new Function('exports','require','localStorage','window','document','alert',ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(exports,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./LazyQrCode'?{default:()=>null}:{},{getItem:()=>null},window,document,()=>assert.fail('printing failed'));
+  new Function('exports','require','localStorage','window','document','alert',ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(exports,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>null}:n==='./LazyQrCode'?{default:()=>null}:{},{getItem:()=>null},window,document,()=>assert.fail('printing failed'));
   let renderer;await act(async()=>{renderer=create(React.createElement(exports.default,{eventName:name,tickets:[{id:'1',qrNumber:'1',valid:true,status:'unused'}],qrValue:()=>'',onClose(){}}));});
   const click=async text=>{const button=renderer.root.findAllByType('button').find(n=>n.children.join('')===text);assert.ok(button,text);await act(async()=>button.props.onClick());};
   try{
@@ -42,9 +107,9 @@ test('print title treats event names as text and prints only once',async()=>{
   }finally{await act(async()=>renderer.unmount());}
 });
 
-function designerModule(storage,{globals={},detection={}}={}){
+function designerModule(storage,{globals={},detection={},reserve=null}={}){
   const out={};
-  new Function('exports','require','localStorage','window','alert',...Object.keys(globals),ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./LazyQrCode'?{default:()=>null}:n==='./pinkQrMarkerDetection'?detection:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{},...Object.values(globals));
+  new Function('exports','require','localStorage','window','alert',...Object.keys(globals),ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>reserve}:n==='./LazyQrCode'?{default:()=>null}:n==='./pinkQrMarkerDetection'?detection:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{},...Object.values(globals));
   return out;
 }
 const designTickets=Array.from({length:6},(_,i)=>({id:String(i),qrNumber:String(i+1),valid:true,status:'unused'}));
@@ -121,4 +186,34 @@ test('late background detection preserves a manual QR adjustment and locked QR p
       assert.equal(saved.qrX,locked?76:25);
     }finally{await act(async()=>renderer.unmount());}
   }
+});
+
+
+test('prepared reserve IDs are excluded from normal printing after reopening the designer',async()=>{
+  const module=designerModule(new Map([['qr-management-ticket-design-id-reserved',JSON.stringify({title:'Test'})]]),{reserve:{tickets:[{id:'4'},{id:'5'}]}});
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'reserved',eventName:'Test',tickets:designTickets,qrValue:t=>t.id,onClose(){}}));});
+  try{
+    const cards=renderer.root.findAll(node=>node.props.className==='ticket-print-card');
+    assert.equal(cards.length,4);
+    assert.ok(JSON.stringify(renderer.toJSON()).includes('通常印刷から予備 '));
+  }finally{await act(async()=>renderer.unmount());}
+});
+
+test('reserve print popup uses only pending tickets and preserves layout without confirming the ledger',()=>{
+  class Element{
+    children=[];attrs={};append(...nodes){this.children.push(...nodes);}appendChild(node){this.children.push(node);return node;}
+    setAttribute(key,value){this.attrs[key]=value;}get lastElementChild(){return this.children.at(-1);}
+    set innerHTML(value){this.html=value;if(value.includes('ticket-print-card')){this.card=new Element();this.card.qr=new Element();this.card.number=new Element();}}
+    querySelector(selector){return selector==='.ticket-print-card'?this.card:selector==='.ticket-design-qr'?this.qr:this.number;}
+  }
+  let html='',prints=0,onLoad;const doc={body:new Element(),open(){},write(value){html=value;},close(){},createElement(){return new Element();},readyState:'loading'};
+  const popup={document:doc,closed:false,focus(){},print(){prints++;},addEventListener(_event,fn){onLoad=fn;}};
+  const out={};const source=readFileSync('management-app/src/ReservePrinting.tsx','utf8').replaceAll('import.meta.env.BASE_URL',JSON.stringify('/management-app/'));
+  new Function('exports','require',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):{});
+  const packet=reservePacket([501,502,503,504]);packet.eventName='Test</title><script>bad()</script>';packet.pending={id:'batch',ids:['TKT501','TKT502','TKT503']};
+  out.openReservePrint(packet,popup);
+  const sheet=doc.body.children[1];assert.equal(sheet.attrs.style,packet.sheetStyle);assert.equal(sheet.children.length,2);
+  assert.deepEqual(sheet.children.flatMap(row=>row.children.map(card=>card.number.textContent)),['501','502','503']);
+  assert.equal(sheet.children[0].children[0].qr.html,'<svg></svg>');assert.equal(doc.title,packet.eventName+' - 予備チケット');assert.equal(html.includes('<script>'),false);
+  onLoad();onLoad();assert.equal(prints,1);assert.deepEqual(packet.confirmed,[]);assert.ok(packet.pending);
 });

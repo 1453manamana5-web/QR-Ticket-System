@@ -9,6 +9,10 @@ import {
 } from "react";
 
 import LazyQrCode from "./LazyQrCode";
+import {QRCodeSVG} from "qrcode.react";
+import {renderToStaticMarkup} from "react-dom/server";
+import {ReserveConfiguration} from "./ReservePrinting";
+import {loadReservePackage,type ReservePackage} from "./reservePrintStore";
 import { analyzeTicketBackgroundFromDataUrl } from "./pinkQrMarkerDetection";
 
 import "./TicketDesigner.css";
@@ -86,6 +90,94 @@ type PrintSheetStyle = CSSProperties & {
   "--ticket-print-gap": string;
 };
 
+const TICKET_PRINT_CSS = `
+  @page { size: auto; margin: 8mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
+  .ticket-print-sheet {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    font-size: 0;
+    line-height: 0;
+    text-align: left;
+  }
+  .ticket-print-row {
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: flex-start;
+    gap: var(--ticket-print-gap, 4mm);
+    width: max-content;
+    max-width: 100%;
+    margin: 0 0 var(--ticket-print-gap, 4mm);
+    break-inside: avoid;
+    page-break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+  }
+  .ticket-print-card {
+    position: relative;
+    display: block;
+    flex: 0 0 var(--ticket-print-width, 90mm);
+    width: var(--ticket-print-width, 90mm);
+    height: var(--ticket-print-height, 50.625mm);
+    min-width: var(--ticket-print-width, 90mm);
+    min-height: var(--ticket-print-height, 50.625mm);
+    max-width: var(--ticket-print-width, 90mm);
+    max-height: var(--ticket-print-height, 50.625mm);
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    background-color: #fff;
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .ticket-design-qr, .ticket-design-number, .ticket-design-title { position: absolute; }
+  .ticket-design-title { transform:translate(-50%,-50%); font-weight:700; white-space:pre-wrap; max-width:95%; line-height:1.2; }
+  .ticket-design-qr {
+    z-index: 3;
+    aspect-ratio: 1 / 1;
+    box-sizing: border-box;
+    padding: .8%;
+    background: #fff;
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+  }
+  .ticket-design-qr svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+  }
+  .ticket-design-number {
+    z-index: 2;
+    max-width: 65%;
+    color: #000;
+    font-weight: bold;
+    line-height: 1.1;
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+  }
+  @media print {
+    html, body { margin: 0; padding: 0; width: auto; height: auto; overflow: visible; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .ticket-print-sheet { break-inside: auto; page-break-inside: auto; }
+    .ticket-print-row { break-inside: avoid; page-break-inside: avoid; }
+    .ticket-print-card { break-inside: avoid; page-break-inside: avoid; }
+  }
+`;
+
 const defaultSettings: TicketDesignSettings = {
   backgroundImage: "",
 
@@ -115,6 +207,50 @@ function layerStyle(settings:TicketDesignSettings,id:string):CSSProperties {
 function textStyle(settings:TicketDesignSettings):CSSProperties{return {...layerStyle(settings,"title"),color:settings.titleColor??"#162e4a",fontFamily:settings.titleFont??"sans-serif",fontWeight:settings.titleBold===false?400:700};}
 function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesignSettings;onSelect?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;onResize?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;selected?:string|null}){
  return <>{(settings.images??[]).map(image=><div key={image.id} className={`studio-image ${onSelect?"ticket-draggable-part":""} ${selected===image.id?"is-selected":""}`} style={{position:"absolute",left:`${image.x}%`,top:`${image.y}%`,width:`${image.width}%`,transform:"translate(-50%,-50%)",...layerStyle(settings,image.id)}} onPointerDown={onSelect?e=>onSelect(image.id,e):undefined}><img src={image.src} alt={image.name} draggable={false} style={{display:"block",width:"100%",height:"auto"}}/>{onResize&&selected===image.id&&!settings.locked?.[image.id]&&<button type="button" className="studio-resize" aria-label="画像をリサイズ" onPointerDown={e=>onResize(image.id,e)}/>}</div>)}</>;
+}
+
+function PrintableTicket({ticket,settings,value,immediate=false}:{ticket:TicketDesignerTicket;settings:TicketDesignSettings;value:string;immediate?:boolean}){
+  const Qr=immediate?QRCodeSVG:LazyQrCode;
+  return (
+                  <div
+                    key={ticket.id}
+                    className="ticket-print-card"
+                    style={{
+                      backgroundImage:
+                        settings.backgroundImage === ""
+                          ? undefined
+                          : `url("${settings.backgroundImage}")`,
+                    }}
+                  >
+                    <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+                    <div
+                      className="ticket-design-qr"
+                      style={{
+                        ...layerStyle(settings,"qr"), left: `${settings.qrX}%`,
+                        top: `${settings.qrY}%`,
+                        width: `${settings.qrSize}%`,
+                      }}
+                    >
+                      <Qr
+                        value={value}
+                        size={500}
+                        level="M"
+                        marginSize={1}
+                      />
+                    </div>
+
+                    <div
+                      className="ticket-design-number"
+                      style={{
+                        ...layerStyle(settings,"number"), left: `${settings.numberX}%`,
+                        top: `${settings.numberY}%`,
+                        fontSize: `${settings.numberSize}px`,
+                      }}
+                    >
+                      {ticket.qrNumber}
+                    </div>
+                  </div>
+  );
 }
 
 function createDesignStorageKey(
@@ -230,10 +366,14 @@ function TicketDesigner({
       ? foundInitialIndex
       : 0;
 
+  const [reservedIds,setReservedIds]=useState<string[]>([]);
+  const [reserveReady,setReserveReady]=useState(!eventId);
+  const [reserveNotice,setReserveNotice]=useState("");
+  useEffect(()=>{let active=true;if(eventId)void loadReservePackage(eventId).then(packet=>{if(active){setReservedIds(packet?.tickets.map(t=>t.id)??[]);setReserveReady(true);}}).catch(()=>{if(active)setReserveNotice("予備の印刷記録を確認できません。予備設定を確認してから印刷してください。");});return()=>{active=false;};},[eventId]);
   const detectionId = useRef(0);
   const imageReadVersion=useRef(0);
   useEffect(()=>()=>{++detectionId.current;++imageReadVersion.current;},[]);
-  type ToolPanel = "settings" | "range" | "layers";
+  type ToolPanel = "settings" | "range" | "layers" | "reserve";
   const [panels,setPanels]=useState<ToolPanel[]>([]);
   const togglePanel=(id:ToolPanel)=>setPanels(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
   const closePanel=(id:ToolPanel)=>setPanels(current=>current.filter(item=>item!==id));
@@ -411,9 +551,10 @@ function TicketDesigner({
       return printableTickets.slice(
         safeStart,
         safeEnd + 1
-      );
+      ).filter(ticket=>!reservedIds.includes(ticket.id));
     }, [
       printableTickets,
+      reservedIds,
       startIndex,
       endIndex,
     ]);
@@ -649,7 +790,29 @@ function TicketDesigner({
     }
   };
 
+  const prepareReserve=async(ids:string[]):Promise<ReservePackage>=>{
+    if(!eventId)throw Error("先にイベントを選択してください。");
+    if([settings.backgroundImage,...(settings.images??[]).map(i=>i.src)].some(src=>src&&!src.startsWith('data:image/')))throw Error("背景や追加画像をファイルから読み込み直してください。端末へ保存できる画像が必要です。");
+    const selected=ids.map(id=>tickets.find(t=>t.id===id));
+    if(selected.some(t=>!t||!t.valid||t.status!=="unused"))throw Error("予備に指定できないチケットがあります。");
+    const first=selected[0]!;
+    const host=document.createElement('div');
+    host.innerHTML=renderToStaticMarkup(<PrintableTicket ticket={first} settings={settings} value={qrValue(first)} immediate/>);
+    const card=host.querySelector<HTMLElement>('.ticket-print-card');
+    if(!card)throw Error("印刷デザインを保存できませんでした。");
+    card.querySelector('.ticket-design-qr')!.innerHTML='';card.querySelector('.ticket-design-number')!.textContent='';
+    const entries:ReservePackage['tickets']=[];
+    for(let i=0;i<selected.length;i++){
+      const ticket=selected[i]!,value=qrValue(ticket);if(!value)throw Error("QRの情報が不足しています。");
+      entries.push({id:ticket.id,number:ticket.qrNumber,svg:renderToStaticMarkup(<QRCodeSVG value={value} size={500} level="M" marginSize={1}/>)});
+      if(i%20===19)await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    return {eventId,eventName,preparedAt:new Date().toISOString(),template:card.outerHTML,css:TICKET_PRINT_CSS,
+      sheetStyle:Object.entries(printSheetStyle).map(([key,value])=>`${key}:${value}`).join(';'),columns:Math.max(1,Math.min(4,settings.cardsPerRow)),tickets:entries,confirmed:[],pending:null};
+  };
+
   const printTickets = () => {
+    if(!reserveReady){alert(reserveNotice||"予備の印刷設定を確認しています。少し待ってから印刷してください。");return;}
     if (selectedTickets.length === 0) {
       alert("印刷できるチケットがありません。");
       return;
@@ -687,93 +850,7 @@ function TicketDesigner({
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>チケット - 印刷</title>
-<style>
-  @page { size: auto; margin: 8mm; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
-  .ticket-print-sheet {
-    display: block;
-    width: 100%;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: #fff;
-    font-size: 0;
-    line-height: 0;
-    text-align: left;
-  }
-  .ticket-print-row {
-    display: flex;
-    flex-flow: row nowrap;
-    align-items: flex-start;
-    gap: var(--ticket-print-gap, 4mm);
-    width: max-content;
-    max-width: 100%;
-    margin: 0 0 var(--ticket-print-gap, 4mm);
-    break-inside: avoid;
-    page-break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-  }
-  .ticket-print-card {
-    position: relative;
-    display: block;
-    flex: 0 0 var(--ticket-print-width, 90mm);
-    width: var(--ticket-print-width, 90mm);
-    height: var(--ticket-print-height, 50.625mm);
-    min-width: var(--ticket-print-width, 90mm);
-    min-height: var(--ticket-print-height, 50.625mm);
-    max-width: var(--ticket-print-width, 90mm);
-    max-height: var(--ticket-print-height, 50.625mm);
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    overflow: hidden;
-    background-color: #fff;
-    background-position: center;
-    background-size: contain;
-    background-repeat: no-repeat;
-    break-inside: avoid;
-    page-break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-  .ticket-design-qr, .ticket-design-number, .ticket-design-title { position: absolute; }
-  .ticket-design-title { transform:translate(-50%,-50%); font-weight:700; white-space:pre-wrap; max-width:95%; line-height:1.2; }
-  .ticket-design-qr {
-    z-index: 3;
-    aspect-ratio: 1 / 1;
-    box-sizing: border-box;
-    padding: .8%;
-    background: #fff;
-    transform: translate(-50%, -50%);
-    transform-origin: center center;
-  }
-  .ticket-design-qr svg {
-    display: block;
-    width: 100%;
-    height: 100%;
-    max-width: none;
-  }
-  .ticket-design-number {
-    z-index: 2;
-    max-width: 65%;
-    color: #000;
-    font-weight: bold;
-    line-height: 1.1;
-    white-space: nowrap;
-    transform: translate(-50%, -50%);
-    transform-origin: center center;
-  }
-  @media print {
-    html, body { margin: 0; padding: 0; width: auto; height: auto; overflow: visible; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .ticket-print-sheet { break-inside: auto; page-break-inside: auto; }
-    .ticket-print-row { break-inside: avoid; page-break-inside: avoid; }
-    .ticket-print-card { break-inside: avoid; page-break-inside: avoid; }
-  }
-</style>
+<style>${TICKET_PRINT_CSS}</style>
 </head>
 <body></body>
 </html>`);
@@ -912,7 +989,7 @@ function TicketDesigner({
           <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
           <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
           <button type="button" className="studio-primary" onClick={saveDesign}>保存</button>
-          <button type="button" onClick={printTickets}>印刷</button>
+          <button type="button" onClick={printTickets}>印刷</button><button type="button" disabled={!eventId} onClick={()=>togglePanel("reserve")}>予備印刷</button>
           <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
         <main className="studio-workspace">
@@ -967,6 +1044,7 @@ function TicketDesigner({
               </div>
             </FloatingPanel>;
           })}
+          {panels.includes("reserve")&&eventId&&<FloatingPanel title="予備チケット・緊急印刷" className="studio-inspector" offset={28} onClose={()=>closePanel("reserve")}><ReserveConfiguration eventId={eventId} tickets={tickets} build={prepareReserve} onSaved={ids=>{setReservedIds(ids);setReserveReady(true);setReserveNotice("");}}/></FloatingPanel>}
           {panels.includes("layers")&&<FloatingPanel title="レイヤー" className="studio-inspector" onClose={()=>closePanel("layers")} offset={0}><div className="studio-layers"><label><input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)}/>吸着・整列ガイド</label><p>上の項目ほど手前に表示されます</p>{[...layers].reverse().filter(id=>id!=="title"||settings.title).map(id=><div key={id} className={activeLayer===id?"active":""}><button type="button" onClick={()=>selectLayer(id)}>{id==="qr"?"QRコード":id==="number"?"チケット番号":id==="title"?"文字":images.find(i=>i.id===id)?.name??"画像"}</button><button type="button" aria-label={`${id}をロック切替`} aria-pressed={Boolean(settings.locked?.[id])} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{settings.locked?.[id]?"固定":"自由"}</button><button type="button" aria-label={`${id}を前へ`} disabled={layers.indexOf(id)===layers.length-1} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i+1]]=[order[i+1],order[i]];updateSetting("layerOrder",order);}}>↑</button><button type="button" aria-label={`${id}を後ろへ`} disabled={layers.indexOf(id)===0} onClick={()=>{checkpoint();const order=[...layers],i=order.indexOf(id);[order[i],order[i-1]]=[order[i-1],order[i]];updateSetting("layerOrder",order);}}>↓</button></div>)}<p>背景画像は常に最背面に固定されます。</p></div></FloatingPanel>}
           {panels.includes("settings")&&<FloatingPanel title="配置・サイズ" className="studio-inspector" onClose={()=>closePanel("settings")} offset={28}><div className="ticket-designer-settings" onPointerDownCapture={checkpoint}>            <div className="ticket-setting-group">
               <h4>
@@ -1490,7 +1568,7 @@ function TicketDesigner({
                 </span>
               </div>
 </div></FloatingPanel>}
-          <div className="studio-status"><span>{safePrintWidth.toFixed(1)} × {printHeightMm.toFixed(1)} mm</span><span>印刷対象 {selectedTickets.length}枚</span></div>
+          <div className="studio-status">{reservedIds.length>0&&<span>通常印刷から予備 {reservedIds.length}枚を除外</span>}{reserveNotice&&<span role="alert">{reserveNotice}</span>}<span>{safePrintWidth.toFixed(1)} × {printHeightMm.toFixed(1)} mm</span><span>印刷対象 {selectedTickets.length}枚</span></div>
         </main>
       </section>
 
@@ -1559,44 +1637,7 @@ function TicketDesigner({
                   (rowIndex + 1) * Math.max(1, Math.min(4, settings.cardsPerRow))
                 )
                 .map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    className="ticket-print-card"
-                    style={{
-                      backgroundImage:
-                        settings.backgroundImage === ""
-                          ? undefined
-                          : `url("${settings.backgroundImage}")`,
-                    }}
-                  >
-                    <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
-                    <div
-                      className="ticket-design-qr"
-                      style={{
-                        ...layerStyle(settings,"qr"), left: `${settings.qrX}%`,
-                        top: `${settings.qrY}%`,
-                        width: `${settings.qrSize}%`,
-                      }}
-                    >
-                      <LazyQrCode
-                        value={qrValue(ticket)}
-                        size={500}
-                        level="M"
-                        marginSize={1}
-                      />
-                    </div>
-
-                    <div
-                      className="ticket-design-number"
-                      style={{
-                        ...layerStyle(settings,"number"), left: `${settings.numberX}%`,
-                        top: `${settings.numberY}%`,
-                        fontSize: `${settings.numberSize}px`,
-                      }}
-                    >
-                      {ticket.qrNumber}
-                    </div>
-                  </div>
+                  <PrintableTicket key={ticket.id} ticket={ticket} settings={settings} value={qrValue(ticket)}/>
                 ))}
             </div>
           )
