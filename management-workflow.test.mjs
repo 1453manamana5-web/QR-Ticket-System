@@ -361,3 +361,33 @@ test('analysis page includes the occupancy line chart from current reception sub
     assert.ok(h.renderer.root.findAllByType('svg').some(node=>String(node.props['aria-label']).includes('会場内人数の折れ線グラフ')));
   }finally{await h.close();}
 });
+
+test('new issuance appends reserve tickets after regular tickets and opens reserve preparation',async()=>{
+  let issued;const h=await harness({loadNextTicketNumber:async()=>101,appendTickets:async(_id,items)=>{issued=items;}});
+  try{
+    await h.nav('チケット管理');
+    const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
+    await act(async()=>h.renderer.root.findAllByType('button').find(n=>label(n).includes('チケットを新規発行')).props.onClick());
+    const set=async(name,value)=>{await act(async()=>h.renderer.root.findByProps({'aria-label':name}).props.onChange({target:{value}}));};
+    await set('通常分の枚数','3');await set('予備分の枚数','2');
+    await h.click('QR・チケットを発行');
+    assert.deepEqual(issued.map(t=>t.basicInfo.ticketNumber),[101,102,103,104,105]);
+    assert.deepEqual(issued.map(t=>t.basicInfo.reserve===true),[false,false,false,true,true]);
+    assert.ok(issued.every(t=>t.valid&&t.currentStatus==='unused'));
+    assert.ok(h.renderer.root.findAll(n=>n.props.initialReserveOpen===true).length);
+    await act(async()=>h.ticketCallbacks.get('event-a')(issued));await h.flush();
+    assert.equal(h.renderer.root.findAll(n=>n.props.initialReserveOpen===true)[0].props.tickets.filter(t=>t.reserve).length,2);
+  }finally{await h.close();}
+});
+
+test('issuance validates the combined count and supports issuing only reserves',async()=>{
+  let calls=0,issued;const h=await harness({appendTickets:async(_id,items)=>{calls++;issued=items;}});
+  try{
+    await h.nav('チケット管理');const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
+    await act(async()=>h.renderer.root.findAllByType('button').find(n=>label(n).includes('チケットを新規発行')).props.onClick());
+    const set=async(name,value)=>{await act(async()=>h.renderer.root.findByProps({'aria-label':name}).props.onChange({target:{value}}));};
+    await set('通常分の枚数','5000');await set('予備分の枚数','1');await h.click('QR・チケットを発行');assert.equal(calls,0);
+    await set('通常分の枚数','0');await set('予備分の枚数','1.5');await h.click('QR・チケットを発行');assert.equal(calls,0);
+    await set('予備分の枚数','2');await h.click('QR・チケットを発行');assert.equal(calls,1);assert.equal(issued.length,2);assert.ok(issued.every(t=>t.basicInfo.reserve===true));
+  }finally{await h.close();}
+});

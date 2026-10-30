@@ -230,6 +230,8 @@ export default function App() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [ticketCount, setTicketCount] = useState(500);
+  const [reserveTicketCount,setReserveTicketCount]=useState(0);
+  const [ticketDesignReserveOpen,setTicketDesignReserveOpen]=useState(false);
   const [ticketPrefix, setTicketPrefix] = useState("TKT");
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
   const [savedEventName, setSavedEventName] = useState("");
@@ -1042,9 +1044,9 @@ export default function App() {
       setError("先にイベントを選択してください。");
       return;
     }
-    const count = Math.floor(ticketCount);
-    if (!Number.isFinite(count) || count < 1 || count > 5000) {
-      setError("発行枚数は1〜5000枚で指定してください。");
+    const count = ticketCount+reserveTicketCount;
+    if (![ticketCount,reserveTicketCount].every(n=>Number.isSafeInteger(n)&&n>=0) || count < 1 || count > 5000) {
+      setError("通常分と予備分は0以上の整数で、合計1〜5000枚にしてください。");
       return;
     }
     if (ticketGenerating) return;
@@ -1058,7 +1060,7 @@ export default function App() {
       const startNumber = await loadNextTicketNumber(event.eventId,prefix);
       if(!Number.isSafeInteger(startNumber+count-1))throw new Error("TICKET_NUMBER_OVERFLOW");
 
-      const generated = createTickets(event.eventId, count, startNumber, prefix);
+      const generated = createTickets(event.eventId, count, startNumber, prefix).map((ticket,index)=>index<ticketCount?ticket:{...ticket,basicInfo:{...ticket.basicInfo,reserve:true}});
 
       // 保存と件数同期が成功してから画面を更新し、失敗時に成功したように見せない。
       await appendTickets(event.eventId, generated, true);
@@ -1066,6 +1068,7 @@ export default function App() {
       // Subscription owns the current inventory, including concurrent reception changes.
       setTicketStatusFilter("all");
       setTicketCreateModalOpen(false);
+      if(reserveTicketCount>0){setTicketDesignReserveOpen(true);setTicketDesignModalOpen(true);}
     } catch (reason) {
       console.error("Ticket generation/save failed", reason);
       setError("チケットをFirebaseへ保存できませんでした。接続・権限・他端末の発行状況を確認してください。一部だけ発行済みの場合があるため、一覧の枚数を確認してから再試行してください。");
@@ -1986,7 +1989,7 @@ export default function App() {
             <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
-                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}</strong></div>
+                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（予備）</small>}</strong></div>
                 <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
@@ -2008,13 +2011,15 @@ export default function App() {
           <small>CREATE TICKETS</small><h2>チケットを新規発行</h2><p>番号とQRコードをまとめて生成します。</p>
           <div className="ticket-modal-grid">
             <label>チケットタイトル<input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} /></label>
-            <label>発行枚数<input type="number" min="1" max="5000" value={ticketCount} onChange={e => {
+            <label>通常分の枚数<input aria-label="通常分の枚数" type="number" min="0" max="5000" value={ticketCount} onChange={e => {
               const value = e.target.value;
               setTicketCount(value === "" ? 0 : Math.min(5000, Math.max(0, Number(value) || 0)));
             }} /></label>
+            <label>予備分の枚数（通常分に追加）<input aria-label="予備分の枚数" type="number" min="0" max="5000" value={reserveTicketCount} onChange={e=>setReserveTicketCount(e.target.value===""?0:Number(e.target.value))}/></label>
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
             <label>開始番号<input type="number" value={Math.max(Number((event as Event & {lastIssuedNumber?:number}).lastIssuedNumber)||0,...tickets.map(ticket=>Number(ticket.basicInfo.ticketNumber)||0))+1} disabled /><small>発行時に最新の番号を確認します。削除済みの番号は再利用しません。</small></label>
           </div>
+          <p role="status">合計 {ticketCount+reserveTicketCount}枚（通常 {ticketCount}枚・予備 {reserveTicketCount}枚）</p><p>予備分は通常分に続く番号で発行し、通常印刷から除外します。発行後にデザインとQRを端末へ保存してください。</p>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
             <button className="ticket-modal-primary" disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
@@ -2025,19 +2030,21 @@ export default function App() {
       {ticketDesignModalOpen && <TicketDesigner
         key={event.eventId}
         eventId={event.eventId}
+        initialReserveOpen={ticketDesignReserveOpen}
         eventName={event.eventName}
         tickets={tickets.map(ticket => ({
           id: ticket.ticketId,
           qrNumber: String(ticket.basicInfo.ticketNumber).padStart(6, "0"),
           status: ticket.currentStatus,
           valid: ticket.valid,
+          reserve:ticket.basicInfo.reserve===true,
         }))}
         qrValue={ticket => {
           const source = tickets.find(item => item.ticketId === ticket.id);
           return source ? ticketQrValue(event.eventId, source) : "";
         }}
 
-        onClose={() => setTicketDesignModalOpen(false)}
+        onClose={() => {setTicketDesignModalOpen(false);setTicketDesignReserveOpen(false);}}
       />}
 
       {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>

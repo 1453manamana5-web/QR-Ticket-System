@@ -217,3 +217,23 @@ test('reserve print popup uses only pending tickets and preserves layout without
   assert.equal(sheet.children[0].children[0].qr.html,'<svg></svg>');assert.equal(doc.title,packet.eventName+' - 予備チケット');assert.equal(html.includes('<script>'),false);
   onLoad();onLoad();assert.equal(prints,1);assert.deepEqual(packet.confirmed,[]);assert.ok(packet.pending);
 });
+
+test('reserves marked at issuance are excluded before preparing local offline print data',async()=>{
+  const module=designerModule(new Map([['qr-management-ticket-design-id-issued',JSON.stringify({title:'Test'})]]));
+  const tickets=designTickets.map((t,i)=>({...t,reserve:i>=4}));
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'issued',eventName:'Test',tickets,qrValue:t=>t.id,onClose(){}}));});
+  try{assert.equal(renderer.root.findAll(n=>n.props.className==='ticket-print-card').length,4);}finally{await act(async()=>renderer.unmount());}
+});
+
+test('reserve preparation selects issuance flags across nonconsecutive batches without requiring manual ranges',async()=>{
+  let built,saved;const store={loadReservePackage:async()=>null,saveReservePackage:async p=>{saved=p;return p;}};
+  const module={};const source=readFileSync('management-app/src/ReservePrinting.tsx','utf8').replaceAll('import.meta.env.BASE_URL',JSON.stringify('/management-app/'));
+  new Function('exports','require',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(module,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):store);
+  const tickets=[{id:'a',qrNumber:'501',valid:true,status:'unused',reserve:true},{id:'b',qrNumber:'502',valid:true,status:'unused'},{id:'c',qrNumber:'701',valid:true,status:'unused',reserve:true}];
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.ReserveConfiguration,{eventId:'test',tickets,build:async ids=>{built=ids;return reservePacket();},onSaved(){}}));});
+  try{
+    assert.equal(renderer.root.findAllByProps({'aria-label':'予備の開始番号'}).length,0);
+    await act(async()=>renderer.root.findAllByType('button').find(n=>designLabel(n)==='予備のデザインとQRを端末に保存').props.onClick());
+    assert.deepEqual(built,['a','c']);assert.ok(saved);
+  }finally{await act(async()=>renderer.unmount());}
+});
