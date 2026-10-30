@@ -231,6 +231,8 @@ function TicketDesigner({
       : 0;
 
   const detectionId = useRef(0);
+  const imageReadVersion=useRef(0);
+  useEffect(()=>()=>{++detectionId.current;++imageReadVersion.current;},[]);
   type ToolPanel = "settings" | "range" | "layers";
   const [panels,setPanels]=useState<ToolPanel[]>([]);
   const togglePanel=(id:ToolPanel)=>setPanels(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
@@ -245,14 +247,16 @@ function TicketDesigner({
   const [saved,setSaved]=useState(false);
   const undo=useRef<TicketDesignSettings[]>([]),redo=useRef<TicketDesignSettings[]>([]);
   const [,refreshHistory]=useState(0);
-  const checkpoint=()=>{undo.current.push({...settings});if(undo.current.length>40)undo.current.shift();redo.current=[];refreshHistory(n=>n+1);setSaved(false);};
-  const restore=(from:typeof undo,to:typeof redo)=>{const value=from.current.pop();if(value){to.current.push(settings);setSettings(value);refreshHistory(n=>n+1);setSaved(false);}};
+  const checkpoint=()=>{undo.current.push({...settingsRef.current});if(undo.current.length>40)undo.current.shift();redo.current=[];refreshHistory(n=>n+1);setSaved(false);};
+  const restore=(from:typeof undo,to:typeof redo)=>{const value=from.current.pop();if(value){++detectionId.current;++imageReadVersion.current;to.current.push(settingsRef.current);setSettings(value);refreshHistory(n=>n+1);setSaved(false);}};
 
 
   const [settings, setSettings] =
     useState<TicketDesignSettings>(
       () => loadDesignSettings(eventName, eventId)
     );
+  const settingsRef=useRef(settings);
+  settingsRef.current=settings;
   const [showEditor, setShowEditor] = useState(
     () => {const saved=loadDesignSettings(eventName, eventId);return Boolean(saved.backgroundImage||saved.title||saved.images?.length);}
   );
@@ -507,6 +511,7 @@ function TicketDesigner({
 
       if (detectionId.current !== id) return;
       checkpoint();
+      const beforeAnalysis=settingsRef.current;
       const image = reader.result;
       setShowEditor(true);
 
@@ -531,9 +536,8 @@ function TicketDesigner({
           setSettings(
             currentSettings => ({
               ...currentSettings,
-              backgroundImage: image,
               cardRatio:
-                analysis.ratio.cardRatio,
+                currentSettings.cardRatio===beforeAnalysis.cardRatio?analysis.ratio.cardRatio:currentSettings.cardRatio,
             })
           );
           return;
@@ -554,10 +558,9 @@ function TicketDesigner({
         setSettings(
           currentSettings => ({
             ...currentSettings,
-            backgroundImage: image,
             cardRatio:
-              analysis.ratio.cardRatio,
-            qrX: round(
+              currentSettings.cardRatio===beforeAnalysis.cardRatio?analysis.ratio.cardRatio:currentSettings.cardRatio,
+            ...(!currentSettings.locked?.qr && currentSettings.qrX===beforeAnalysis.qrX && currentSettings.qrY===beforeAnalysis.qrY && currentSettings.qrSize===beforeAnalysis.qrSize ? {qrX: round(
               clamp(
                 marker.centerXPercent,
                 5,
@@ -577,7 +580,7 @@ function TicketDesigner({
                 12,
                 55
               )
-            ),
+            )}:{}),
           })
         );
       } catch (error) {
@@ -629,10 +632,12 @@ function TicketDesigner({
       return;
     }
 
+    checkpoint();
     setSettings({
       ...defaultSettings,
     });
     ++detectionId.current;
+    ++imageReadVersion.current;
 
     try {
       localStorage.setItem(createDesignStorageKey(eventName, eventId), JSON.stringify(defaultSettings));
@@ -877,7 +882,7 @@ function TicketDesigner({
     const stop=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",stop);target.removeEventListener("pointercancel",stop);};
     target.addEventListener("pointermove",move);target.addEventListener("pointerup",stop);target.addEventListener("pointercancel",stop);
   };
-  const imageUpload=(event:ChangeEvent<HTMLInputElement>)=>{const file=event.target.files?.[0];event.target.value="";if(!file)return;if(!file.type.startsWith("image/")||file.type==="image/svg+xml"){alert("PNG・JPEG・WebPなどの画像を選択してください。");return;}if(file.size>5*1024*1024){alert("追加画像は5MB以下にしてください。");return;}const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=="string")return;checkpoint();const id="image-"+crypto.randomUUID();const image={id,src:reader.result,x:50,y:50,width:30,name:file.name};setSettings(current=>({...current,images:[...(current.images??[]),image],layerOrder:[...(current.layerOrder??["number","qr","title",...(current.images??[]).map(i=>i.id)]),id]}));selectLayer(id);};reader.onerror=()=>alert("画像を読み込めませんでした。");reader.readAsDataURL(file);};
+  const imageUpload=(event:ChangeEvent<HTMLInputElement>)=>{const file=event.target.files?.[0];event.target.value="";if(!file)return;if(!file.type.startsWith("image/")||file.type==="image/svg+xml"){alert("PNG・JPEG・WebPなどの画像を選択してください。");return;}if(file.size>5*1024*1024){alert("追加画像は5MB以下にしてください。");return;}const version=imageReadVersion.current,reader=new FileReader();reader.onload=()=>{if(version!==imageReadVersion.current||typeof reader.result!=="string")return;checkpoint();const id="image-"+crypto.randomUUID();const image={id,src:reader.result,x:50,y:50,width:30,name:file.name};setSettings(current=>({...current,images:[...(current.images??[]),image],layerOrder:[...(current.layerOrder??["number","qr","title",...(current.images??[]).map(i=>i.id)]),id]}));selectLayer(id);};reader.onerror=()=>alert("画像を読み込めませんでした。");reader.readAsDataURL(file);};
   const resizePart=(part:string,e:React.PointerEvent<HTMLElement>)=>{
     e.stopPropagation();selectLayer(part);if(settings.locked?.[part])return;checkpoint();const target=e.currentTarget;target.setPointerCapture(e.pointerId);
     const image=images.find(i=>i.id===part),start=e.clientX,startY=e.clientY,radians=(settings.rotations?.[part]??0)*Math.PI/180,size=image?image.width:part==="qr"?settings.qrSize:part==="number"?settings.numberSize:settings.titleSize??28;

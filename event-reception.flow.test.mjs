@@ -215,6 +215,46 @@ test("download rejects an incomplete ticket inventory instead of marking local d
   await assert.rejects(c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION"), /EVENT_TICKET_COUNT_MISMATCH/);
 });
 
+test("stale publication cannot roll back a status changed by another manager", async () => {
+  const c = clients();
+  await createPublished(c);
+  const stale = {...makeEvent(), eventStatus: "ready"};
+  for (const status of ["active", "finalizing"]) {
+    await updateDoc(doc(c.managerDb, "events", stale.eventId), {eventStatus: status});
+    const published = await c.publisher.publishEventBundle(stale, settings, []);
+    assert.equal(published.event.eventStatus, status);
+    assert.equal((await getDocFromServer(doc(c.managerDb, "events", stale.eventId))).data().eventStatus, status);
+  }
+});
+
+test("late publication and status writes cannot recreate or reopen a deleted or finished event", async () => {
+  const c = clients();
+  const stale = makeEvent();
+  await createPublished(c, stale);
+  await c.publisher.saveEventStatus(stale.eventId, "finished");
+  await assert.rejects(c.publisher.saveEventStatus(stale.eventId, "active"), /EVENT_FINISHED/);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", stale.eventId))).data().eventStatus, "finished");
+  await c.management.deleteEvent(stale.eventId);
+  await assert.rejects(c.publisher.publishEventBundle(stale, settings, []), /EVENT_NOT_FOUND/);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", stale.eventId))).exists(), false);
+});
+
+test("deleting the last issued tickets does not block later issuance or reuse their numbers",async()=>{
+  const c=clients(),event=makeEvent('issuance-floor');
+  await c.management.saveEvent(event);
+  const tickets=[1,2,3].map(number=>({...makeTicket(event.eventId,'TKT'+String(number).padStart(6,'0')),basicInfo:{ticketNumber:number}}));
+  await c.management.appendTickets(event.eventId,tickets,true);
+  await c.management.deleteTicket(event.eventId,tickets[2].ticketId);
+  await c.management.deleteTicket(event.eventId,tickets[1].ticketId);
+  const next=await c.management.loadNextTicketNumber(event.eventId,'TKT');
+  assert.equal(next,4);
+  await c.management.appendTickets(event.eventId,[{...makeTicket(event.eventId,'TKT000004'),basicInfo:{ticketNumber:next}}],true);
+  assert.equal((await c.management.loadEventTickets(event.eventId)).length,2);
+  await c.publisher.saveEventStatus(event.eventId,'finished');
+  await assert.rejects(c.management.loadNextTicketNumber(event.eventId,'TKT'),/EVENT_FINISHED/);
+  await assert.rejects(c.management.appendTickets(event.eventId,[{...makeTicket(event.eventId,'TKT000005'),basicInfo:{ticketNumber:5}}],true),/EVENT_FINISHED/);
+});
+
 test("reception reads another terminal's current entry state and keeps record identity after cache replacement", async () => {
   const c = clients();
   await createPublished(c);
@@ -479,8 +519,9 @@ test('publication cannot switch away while reception is active, offline or has u
 
 test('republishing stale UI tickets after deletion cannot resurrect them or reset active event status',async()=>{
   const c=clients();await createPublished(c);const stale=makeTicket('flow-event');
+  await c.publisher.saveEventStatus('flow-event','active');
   await c.management.deleteTicket('flow-event','ticket-1');
-  const published=await c.publisher.publishEventBundle({...makeEvent(),eventStatus:'active'},settings,[stale]);
+  const published=await c.publisher.publishEventBundle({...makeEvent(),eventStatus:'ready'},settings,[stale]);
   assert.equal(published.ticketCount,0);assert.equal(published.event.eventStatus,'active');
   assert.equal((await c.management.loadEventTickets('flow-event')).length,0);
 });

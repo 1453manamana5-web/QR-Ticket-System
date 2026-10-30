@@ -150,6 +150,25 @@ function writeInventoryMetadata(tx: Transaction, metadata: Awaited<ReturnType<ty
   },{merge:true});
 }
 
+/** Deleted ticket numbers remain issued and must not prevent future issuance. */
+export async function loadNextTicketNumber(eventId:string,prefix:string):Promise<number>{
+  const [event,tickets]=await Promise.all([
+    getDocFromServer(doc(getFirebaseDb(),"events",eventId)),loadEventTickets(eventId),
+  ]);
+  if(!event.exists())throw new Error("EVENT_NOT_FOUND");
+  if(event.data().eventStatus==="finished")throw new Error("EVENT_FINISHED");
+  let maximum=Number(event.data().lastIssuedNumber)||0;
+  for(const ticket of tickets){
+    const number=Number(ticket.basicInfo.ticketNumber);
+    if(Number.isFinite(number))maximum=Math.max(maximum,number);
+    const suffix=ticket.ticketId.startsWith(prefix)?ticket.ticketId.slice(prefix.length):"";
+    if(/^\d+$/.test(suffix))maximum=Math.max(maximum,Number(suffix));
+  }
+  const next=Math.max(1,maximum+1);
+  if(!Number.isSafeInteger(next))throw new Error("TICKET_NUMBER_OVERFLOW");
+  return next;
+}
+
 /** Add only newly issued tickets; existing reception state is never rewritten. */
 export async function appendTickets(eventId: string, tickets: Ticket[], enforceNewNumbers = false): Promise<void> {
   const db = getFirebaseDb();
@@ -162,6 +181,7 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
     const chunk = tickets.slice(start, start + 400);
     await runTransaction(db, async tx => {
       const metadata = await readInventoryMetadata(tx,eventId);
+      if(enforceNewNumbers && metadata.data.eventStatus==="finished")throw new Error("EVENT_FINISHED");
       const numbers = chunk.map(ticket=>Number(ticket.basicInfo.ticketNumber));
       if (enforceNewNumbers && (numbers.some(number=>!Number.isSafeInteger(number)||number<1) || Math.min(...numbers) <= (Number(metadata.data.lastIssuedNumber)||0))) throw new Error("TICKET_NUMBER_CONFLICT_RETRY");
       const refs = chunk.map(ticket => doc(db,"events",eventId,"tickets",ticket.ticketId));

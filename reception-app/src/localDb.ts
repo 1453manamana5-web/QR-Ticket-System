@@ -97,22 +97,25 @@ export async function saveLocalEvent(data: LocalEventData): Promise<void> {
   }
 }
 
-export async function loadLocalEvent(): Promise<LocalEventData | null> {
+export async function loadLocalEvent(validateInventory=false): Promise<LocalEventData | null> {
   const database = await openDatabase();
-
-  const value = await new Promise<LocalEventData | undefined>((resolve, reject) => {
-    const request = database
-      .transaction(STORES.event, "readonly")
-      .objectStore(STORES.event)
-      .getAll();
-
-    request.onsuccess = () => resolve(request.result[0]);
-    request.onerror = () =>
-      reject(request.error ?? new Error("イベントデータを読み込めませんでした"));
-  });
-
-  database.close();
-  return value ?? null;
+  try{
+    return await new Promise<LocalEventData | null>((resolve,reject)=>{
+      const tx=database.transaction([STORES.event,STORES.tickets],"readonly");
+      const request=tx.objectStore(STORES.event).getAll();
+      let value:LocalEventData|null=null;
+      request.onsuccess=()=>{
+        value=request.result[0]??null;
+        if(validateInventory && value?.dataReady){
+          const count=tx.objectStore(STORES.tickets).index("eventId").count(value.event.eventId);
+          count.onsuccess=()=>{if(count.result!==value!.ticketCount){reject(new Error("LOCAL_EVENT_INCOMPLETE"));tx.abort();}};
+        }
+      };
+      tx.oncomplete=()=>resolve(value);
+      tx.onerror=()=>reject(tx.error??new Error("イベントデータを読み込めませんでした"));
+      tx.onabort=()=>reject(tx.error??new Error("イベントデータの読み込みが中断されました"));
+    });
+  }finally{database.close();}
 }
 
 export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[]): Promise<void> {
@@ -156,6 +159,9 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       );
       const eventStore = transaction.objectStore(STORES.event);
       const ticketStore = transaction.objectStore(STORES.tickets);
+      const currentEventRequest=eventStore.getAll();
+
+      const abort=(message:string)=>{reject(new Error(message));transaction.abort();};
 
       // Refresh inventory without rolling back locally accepted, unsent scans.
       const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
@@ -167,6 +173,10 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
         const pendingRecords = new Map<string, {record: ReceptionRecord; sequence?: number}>();
         let remaining = pendingIds.size;
         const storeInventory = () => {
+          const current=(currentEventRequest.result as LocalEventData[])[0];
+          if(current?.event.eventId===eventId && current.event.dataVersion>readyEvent.event.dataVersion){
+            abort("LOCAL_EVENT_VERSION_CHANGED");return;
+          }
           eventStore.clear();
           ticketStore.clear();
           eventStore.put(readyEvent);
@@ -177,6 +187,19 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
                 updatedAt: pending.timestamp}
               : ticket);
           }
+          // Verify within the same transaction. A later refresh in another tab
+          // must never make this refresh delete that tab's committed inventory.
+          const savedEvent=eventStore.get(eventId);
+          const savedTickets=ticketStore.index("eventId").getAll(eventId);
+          savedTickets.onsuccess=()=>{
+            const saved=savedEvent.result as LocalEventData|undefined;
+            const inventory=savedTickets.result as Ticket[];
+            const ids=new Set(inventory.map(ticket=>ticket.ticketId));
+            if(!saved?.dataReady || saved.ticketCount!==tickets.length || inventory.length!==tickets.length ||
+                ids.size!==ticketIds.size || [...ticketIds].some(id=>!ids.has(id))){
+              abort("イベント・チケットデータの保存後検証に失敗しました。直前の保存済みデータを保持しました");
+            }
+          };
         };
         if (!remaining) { storeInventory(); return; }
         for (const recordId of pendingIds) {
@@ -206,41 +229,6 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
     database.close();
   }
 
-  const savedEvent = await loadLocalEvent();
-  const verifyDatabase = await openDatabase();
-  let savedTickets: Ticket[];
-  try {
-    savedTickets = await new Promise<Ticket[]>((resolve, reject) => {
-      const request = verifyDatabase
-        .transaction(STORES.tickets, "readonly")
-        .objectStore(STORES.tickets)
-        .index("eventId")
-        .getAll(eventId);
-      request.onsuccess = () => resolve(request.result as Ticket[]);
-      request.onerror = () =>
-        reject(request.error ?? new Error("保存したチケットデータを再読み込みできませんでした"));
-    });
-  } finally {
-    verifyDatabase.close();
-  }
-
-  const savedTicketIds = new Set(savedTickets.map(ticket => ticket.ticketId));
-  const allTicketIdsMatch =
-    savedTickets.length === tickets.length &&
-    savedTicketIds.size === ticketIds.size &&
-    [...ticketIds].every(ticketId => savedTicketIds.has(ticketId)) &&
-    savedTickets.every(ticket => ticket.eventId === eventId);
-
-  if (
-    !savedEvent ||
-    savedEvent.event.eventId !== eventId ||
-    !savedEvent.dataReady ||
-    savedEvent.ticketCount !== tickets.length ||
-    !allTicketIdsMatch
-  ) {
-    await clearLocalEvent();
-    throw new Error("イベント・チケットデータの保存後検証に失敗しました。ローカルデータを消去しました");
-  }
 }
 
 export async function countTickets(eventId: string): Promise<number> {

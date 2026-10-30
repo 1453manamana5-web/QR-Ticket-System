@@ -48,7 +48,13 @@ export async function saveEventMetadata(event: Event, onlyIfMissing = false): Pr
 }
 
 export async function saveEventStatus(eventId: string, status: Event["eventStatus"]): Promise<void> {
-  await updateDoc(doc(getFirebaseDb(),"events",eventId),{eventStatus:status,updatedAt:new Date().toISOString(),...(status==="finished"?{receptionTarget:false}:{})});
+  const db=getFirebaseDb(),ref=doc(db,"events",eventId);
+  await runTransaction(db,async tx=>{
+    const saved=await tx.get(ref);
+    if(!saved.exists())throw new Error("EVENT_NOT_FOUND");
+    if(saved.data().eventStatus==="finished" && status!=="finished")throw new Error("EVENT_FINISHED");
+    tx.update(ref,{eventStatus:status,updatedAt:new Date().toISOString(),...(status==="finished"?{receptionTarget:false}:{})});
+  });
 }
 
 export function createAuthToken(): string {
@@ -82,9 +88,11 @@ export async function publishEventBundle(
     const terminalData=terminals.filter(item=>item.exists()).map(item=>({...item.data(),terminalId:item.id}) as ReceptionTerminalState);
     if(previousTargets.some(previous=>!receptionDataCollected(terminalData,previous.id)))throw new Error("RECEPTION_DATA_NOT_COLLECTED");
     const storedEvent=events.find(item=>item.id===event.eventId)?.data();
+    if(!storedEvent)throw new Error("EVENT_NOT_FOUND");
     if(storedEvent?.eventStatus==="finished")throw new Error("EVENT_FINISHED");
     const savedVersion=Number.isSafeInteger(storedEvent?.dataVersion)?Number(storedEvent?.dataVersion):1;
-    const publishedEvent:Event={eventId:event.eventId,eventName:event.eventName,eventDate:event.eventDate,startTime:event.startTime,endTime:event.endTime,dataVersion:Math.max(1,event.dataVersion,savedVersion)+(storedEvent?.authToken?1:0),eventStatus:event.eventStatus==="active"||event.eventStatus==="finalizing"?event.eventStatus:"ready"};
+    const savedStatus=storedEvent.eventStatus;
+    const publishedEvent:Event={eventId:event.eventId,eventName:event.eventName,eventDate:event.eventDate,startTime:event.startTime,endTime:event.endTime,dataVersion:Math.max(1,event.dataVersion,savedVersion)+(storedEvent?.authToken?1:0),eventStatus:savedStatus==="active"||savedStatus==="finalizing"?savedStatus:"ready"};
     const ticketCount=Number.isSafeInteger(storedEvent?.ticketCount)?Number(storedEvent?.ticketCount):publishedTickets.length;
     const result:PublishedEventBundle={event:publishedEvent,settings,tickets:publishedTickets,ticketCount,authToken,publishedAt:new Date().toISOString()};
     for(const previous of previousTargets)tx.update(previous.ref,{receptionTarget:false,updatedAt:result.publishedAt});

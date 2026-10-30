@@ -3,7 +3,7 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import QrScanner from "./QrScanner";
 import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
-import {countTickets,getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
+import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {registerReceptionTerminal,requestReceptionEventReapproval,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,getLatestReceptionTicket,syncReceptionErrorLog} from "./receptionSync";
 
@@ -93,6 +93,10 @@ export default function App(){
   const eventLoadingRef=useRef(false);
   const eventAuthenticationRequiredRef=useRef(false);
   const scanProcessingRef=useRef(false);
+  const registrationActiveRef=useRef(false);
+  const registrationVersionRef=useRef(0);
+  const pendingRemoteModeRef=useRef<Mode|null>(null);
+  const registrationIsCurrent=(version:number)=>registrationActiveRef.current&&version===registrationVersionRef.current;
   const lastRemoteCommandRef=useRef("");
   const receptionAllowedRef=useRef(false);
   receptionAllowedRef.current=terminalRegistration?.approved===true&&!remoteStopped&&screen==="reception";
@@ -138,6 +142,9 @@ export default function App(){
       // オフライン時にFirebaseのキャッシュが空でも、オンラインで承認済みだった端末は
       // ローカルの承認記録を使う。オンラインで承認取消が確認できた場合は従来どおり停止する。
       const value=(!navigator.onLine&&!incoming?.approved)?readCachedApproval():incoming;
+      const approved=value?.approved===true;
+      if(registrationActiveRef.current!==approved)++registrationVersionRef.current;
+      registrationActiveRef.current=approved;
       setTerminalRegistration(value);
       if(value?.name)setTerminalRegistrationName(value.name);
       if(value?.approved){
@@ -156,6 +163,7 @@ export default function App(){
           setScreen("auth");
         }
       }else{
+        pendingRemoteModeRef.current=null;
         receptionAllowedRef.current=false;
         if(navigator.onLine){
           try{localStorage.removeItem("qr-ticket-reception-approved");}catch{}
@@ -183,18 +191,25 @@ export default function App(){
     const handleOffline=()=>applyRegistration(null);
     window.addEventListener("offline",handleOffline);
     return()=>{
+      registrationActiveRef.current=false;
+      ++registrationVersionRef.current;
       unsubscribe?.();
       window.removeEventListener("offline",handleOffline);
     };
   },[]);
 
   const requireApprovalForNewEvent=useCallback(async(eventId:string)=>{
+    const registrationVersion=registrationVersionRef.current;
     const saved=await loadLocalEvent();
+    if(!registrationIsCurrent(registrationVersion))return true;
     if(!saved?.dataReady||saved.event.eventId===eventId)return false;
     eventAuthenticationRequiredRef.current=true;
     const name=terminalRegistrationName.trim()||"受付端末";
     const pending=await requestReceptionEventReapproval(name);
     if(!pending)return false; // Management owners keep their management grant.
+    registrationActiveRef.current=false;
+    ++registrationVersionRef.current;
+    pendingRemoteModeRef.current=null;
     await clearLocalEvent(); // Queue/history remain durable.
     setLocalEvent(null);
     setAuthPayload(null);
@@ -212,18 +227,22 @@ export default function App(){
       return;
     }
     eventLoadingRef.current=true;
+    const registrationVersion=registrationVersionRef.current;
     setBusy(true);
     setError("");
     try{
       const downloaded=await downloadCurrentFirebaseEventData(getTerminalId());
+      if(!registrationIsCurrent(registrationVersion))return;
       if(!downloaded)throw new Error("NO_PUBLISHED_EVENT");
       if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
+      if(!registrationIsCurrent(registrationVersion))return;
       const eventData:LocalEventData={
         ...downloaded.localEvent,
         ticketCount:downloaded.tickets.length,
         dataReady:false,
       };
       await prepareLocalEventData(eventData,downloaded.tickets);
+      if(!registrationIsCurrent(registrationVersion))return;
       eventData.dataReady=true;
       eventAuthenticationRequiredRef.current=false;
       setLocalEvent(eventData);
@@ -238,6 +257,7 @@ export default function App(){
       setScreen("ready");
     }catch(reason){
       console.error("通信によるイベントデータ受信に失敗しました",reason);
+      if(!registrationIsCurrent(registrationVersion))return;
       const code=reason instanceof Error?reason.message:"";
       if(code==="NO_PUBLISHED_EVENT"){
         setError("管理アプリで受付対象イベントを公開してください。");
@@ -256,16 +276,12 @@ export default function App(){
     if(!terminalRegistration?.approved)return;
 
     let cancelled=false;
+    const registrationVersion=registrationVersionRef.current;
     let cachedEvent:LocalEventData|null=null;
 
     const restoreCachedEvent=async()=>{
-      const saved=await loadLocalEvent();
-      if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||eventAuthenticationRequiredRef.current)return null;
-      const ticketCount=await countTickets(saved.event.eventId);
-      if(ticketCount!==saved.ticketCount){
-        await clearLocalEvent();
-        throw new Error("LOCAL_EVENT_INCOMPLETE");
-      }
+      const saved=await loadLocalEvent(true);
+      if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||!registrationIsCurrent(registrationVersion)||eventAuthenticationRequiredRef.current)return null;
       if(cancelled||!["auth","ready","registration"].includes(screenRef.current))return null;
       cachedEvent=saved;
       setLocalEvent(saved);
@@ -298,14 +314,15 @@ export default function App(){
             }
           }
         }
-        if(cancelled||!navigator.onLine)return;
+        if(cancelled||!registrationIsCurrent(registrationVersion)||!navigator.onLine)return;
 
         // Poll only the small publication document. Downloading every ticket on
         // every 10-second check could exhaust Firestore reads during reception.
         const payload=await getCurrentFirebaseEventAuthPayload();
-        if(cancelled)return;
+        if(cancelled||!registrationIsCurrent(registrationVersion))return;
 
         const existing=await loadLocalEvent();
+        if(cancelled||!registrationIsCurrent(registrationVersion))return;
         // Event authentication is reset without overwriting the approved terminal
         // or deleting its unsent records. A fresh event must be selected explicitly.
         if(existing?.dataReady && existing.event.eventId!==payload.eventId){
@@ -346,7 +363,7 @@ export default function App(){
         }
 
         const downloaded=await downloadEventData(payload,getTerminalId());
-        if(cancelled||!["ready","auth","registration","reception"].includes(screenRef.current))return;
+        if(cancelled||!registrationIsCurrent(registrationVersion)||!["ready","auth","registration","reception"].includes(screenRef.current))return;
         const nextEvent:LocalEventData={
           ...downloaded.localEvent,
           ticketCount:downloaded.tickets.length,
@@ -354,7 +371,7 @@ export default function App(){
         };
         await prepareLocalEventData(nextEvent,downloaded.tickets);
         nextEvent.dataReady=true;
-        if(cancelled)return;
+        if(cancelled||!registrationIsCurrent(registrationVersion))return;
         cachedEvent=nextEvent;
         setLocalEvent(nextEvent);
         setAuthPayload({
@@ -450,12 +467,14 @@ export default function App(){
         if(updatedAt&&manualChangedAt&&new Date(updatedAt).getTime()<=new Date(manualChangedAt).getTime())return;
         const nextMode=remoteMode==="入口受付"?"entry":remoteMode==="出口受付"?"exit":mode;
         if(remoteMode==="停止"){
+          pendingRemoteModeRef.current=null;
           receptionAllowedRef.current=false;
           setRemoteStopped(true);
           setResult({kind:"error",title:"受付が停止されています",detail:"管理画面から受付停止の指示を受けています。"});
           return;
         }
         setRemoteStopped(false);
+        if(scanProcessingRef.current){pendingRemoteModeRef.current=nextMode;return;}
         setMode(nextMode);
         setResult(null);
       },reason=>console.error("端末リモート操作の購読に失敗しました",reason));
@@ -535,11 +554,15 @@ export default function App(){
     setError("");
     if(eventLoadingRef.current){setBusy(false);return;}
     eventLoadingRef.current=true;
+    const registrationVersion=registrationVersionRef.current;
     try{
       const downloaded=await downloadEventData(authPayload,getTerminalId());
+      if(!registrationIsCurrent(registrationVersion))return;
       if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
+      if(!registrationIsCurrent(registrationVersion))return;
       const event:LocalEventData={...downloaded.localEvent,dataReady:false};
       await prepareLocalEventData(event,downloaded.tickets);
+      if(!registrationIsCurrent(registrationVersion))return;
       event.dataReady=true;
       eventAuthenticationRequiredRef.current=false;
       setLocalEvent(event);
@@ -548,6 +571,7 @@ export default function App(){
       setAuthCode("");
       setAuthCodeMode(false);
     }catch{
+      if(!registrationIsCurrent(registrationVersion))return;
       setError("イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
     }finally{eventLoadingRef.current=false;setBusy(false);}
@@ -558,13 +582,16 @@ export default function App(){
     if(!token||busy)return;
     setBusy(true);
     setError("");
+    const registrationVersion=registrationVersionRef.current;
     try{
       const payload=await getEventAuthPayloadByToken(token);
+      if(!registrationIsCurrent(registrationVersion))return;
       if(!payload)throw new Error("EVENT_DATA_NOT_FOUND");
       setAuthPayload(payload);
       setAuthCodeMode(false);
       setScreen("confirm");
     }catch{
+      if(!registrationIsCurrent(registrationVersion))return;
       setError("イベント連携コードが正しくないか、イベントデータが見つかりません。");
     }finally{setBusy(false);}
   };
@@ -680,6 +707,9 @@ export default function App(){
     }finally{
       scanProcessingRef.current=false;
       setBusy(false);
+      const nextMode=pendingRemoteModeRef.current;
+      pendingRemoteModeRef.current=null;
+      if(nextMode && registrationActiveRef.current && !eventAuthenticationRequiredRef.current){setMode(nextMode);setResult(null);}
       // カメラは連続稼働するため、受付のたびに再生成しない。
     }
   },[localEvent,mode,busy,remoteStopped,syncPendingRecords]);
