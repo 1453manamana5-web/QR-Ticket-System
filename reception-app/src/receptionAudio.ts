@@ -1,5 +1,5 @@
-type Sound = "detected" | "success" | "error";
-const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav"};
+type Sound = "detected" | "success" | "error" | "entryGuidance";
+const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav",entryGuidance:"entry_osusumi_voice_d_v1.mp3"};
 const players=new Map<Sound,HTMLAudioElement>();
 const objectUrls=new Map<Sound,string>();
 const generations=new Map<Sound,number>();
@@ -37,7 +37,7 @@ function unlockRecordedSounds(){
   // Like the old receptionSound.ts, prime each reusable media element inside
   // the gesture. Never await network/cache preparation before calling play().
   for(const kind of Object.keys(files) as Sound[]){
-    if(unlocked.has(kind)||(kind==="success"&&!preferences.successSound))continue;
+    if(unlocked.has(kind)||(kind==="success"&&!preferences.successSound)||(kind==="entryGuidance"&&!preferences.voiceGuidance))continue;
     const audio=player(kind),version=next(kind);
     try{
       audio.pause();audio.currentTime=0;audio.volume=.01;
@@ -61,11 +61,17 @@ export function getReceptionAudioSettings(){
     return {volume:typeof value?.volume === "number" && Number.isFinite(value.volume)?Math.max(0,Math.min(100,value.volume))/100:1,successSound:value?.successSound!==false,voiceGuidance:value?.voiceGuidance!==false};
   }catch{return {volume:1,successSound:true,voiceGuidance:true};}
 }
+export function stopReceptionGuidance(){
+  next("entryGuidance");
+  const audio=players.get("entryGuidance");
+  if(audio){audio.pause();audio.currentTime=0;}
+}
 export async function playReceptionAudio(kind:Sound){
   const preferences=getReceptionAudioSettings();
-  if(kind!=="detected")for(const previous of ["success","error"] as Sound[]){if(previous!==kind)next(previous);players.get(previous)?.pause();}
+  if(kind==="error")stopReceptionGuidance();
+  if(kind==="success"||kind==="error")for(const previous of ["success","error"] as Sound[]){if(previous!==kind)next(previous);players.get(previous)?.pause();}
   const version=next(kind);
-  if(preferences.volume===0||(kind==="success"&&!preferences.successSound)){players.get(kind)?.pause();return "muted";}
+  if(preferences.volume===0||(kind==="success"&&!preferences.successSound)||(kind==="entryGuidance"&&!preferences.voiceGuidance)){players.get(kind)?.pause();return "muted";}
   try{
     const audio=player(kind);audio.pause();audio.currentTime=0;audio.volume=preferences.volume;
     // HTMLAudio is the primary legacy playback path, even if AudioContext exists.

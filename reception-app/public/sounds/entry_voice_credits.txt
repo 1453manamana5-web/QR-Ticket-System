@@ -1,0 +1,19 @@
+入口受付「お進みください。」（voice D）
+
+AI-generated speech; selected sample 04_voice_D.mp3, unchanged MP3 bytes.
+Voice preset: jf_nezumi. No new recording or training of a real person's voice.
+Model: hexgrad/Kokoro-82M v1.0 (Apache License 2.0)
+https://huggingface.co/hexgrad/Kokoro-82M
+ONNX conversion: onnx-community/Kokoro-82M-v1.0-ONNX
+https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX
+Official voice/source list:
+https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+
+CC BY source credit as identified by the model author:
+Koniwa / tnc — ねずみの嫁入り
+https://github.com/koniwa/koniwa/blob/master/source/tnc/tnc__nezuminoyomeiri.txt
+https://creativecommons.org/licenses/by/3.0/
+
+Changes during generation: fixed phoneme durations and local F0 conditioning
+for the approved accent, silence padding, volume normalization, MP3 encoding.
+No endorsement by the source contributors is implied.

@@ -3,7 +3,7 @@ import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticke
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
-import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings} from "./receptionAudio";
+import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
@@ -457,7 +457,7 @@ export default function App(){
 
   useEffect(()=>{
     if(!result)return;
-    if(result.kind==="error")void playReceptionAudio("error");
+    if(result.kind==="error"){cancelReceptionSpeech();void playReceptionAudio("error");}
     const timer=window.setTimeout(()=>setResult(null),result.kind==="success"?1100:1800);
     return()=>window.clearTimeout(timer);
   },[result]);
@@ -904,7 +904,7 @@ export default function App(){
             <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音の確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("entry");speakReception("entry");void playSuccessSound();}}>入口結果</button>
             <button type="button" className="secondary" onClick={()=>{setTestResultKind("exit");speakReception("exit");void playSuccessSound();}}>出口結果</button>
-            <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");void playReceptionAudio("error");window.speechSynthesis?.cancel();}}>エラー結果</button>
+            <button type="button" className="secondary" onClick={()=>{setTestResultKind("error");cancelReceptionSpeech();void playReceptionAudio("error");}}>エラー結果</button>
           </div>
           <button type="button" className="secondary reception-test-close" onClick={()=>{setResult(null);setScreen("auth");}}>試験を終了</button>
         </section>
@@ -1192,19 +1192,23 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
 }
 
 let speechVersion=0;
+function cancelReceptionSpeech(){
+  ++speechVersion;
+  window.speechSynthesis?.cancel();
+  stopReceptionGuidance();
+}
 function speakReception(type:ReceptionType){
-  if(!("speechSynthesis" in window))return;
-
-  const synth=window.speechSynthesis;
-  synth.cancel();
-  const version=++speechVersion;
+  cancelReceptionSpeech();
+  const version=speechVersion;
   const preferences=getReceptionAudioSettings();
   if(!preferences.voiceGuidance||preferences.volume===0)return;
+  // Entry and re-entry use the approved recorded voice, including offline and
+  // devices without speech synthesis. Exit retains its own existing greeting.
+  if(type!=="exit"){void playReceptionAudio("entryGuidance");return;}
+  if(!("speechSynthesis" in window))return;
+  const synth=window.speechSynthesis;
   let spoken=false;
-
-  const message=type==="exit"
-    ?"ご来場ありがとうございました。"
-    :"ご来場ありがとうございます。";
+  const message="ご来場ありがとうございました。";
 
   const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang="ja-JP";
