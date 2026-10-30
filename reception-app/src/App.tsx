@@ -74,9 +74,10 @@ export default function App(){
   const checkReceptionSound=async()=>{
     cancelReceptionSpeech();
     if(!enableReceptionVoice()){setAudioNotice("音声設定を保存できません。ブラウザーの端末保存設定を確認してください。");return;}
-    const status=await playReceptionAudio("entrySuccess");
+    const exit=screen==="test"?testResultKind==="exit":mode==="exit";
+    const status=await playReceptionAudio(exit?"exitSuccess":"entrySuccess");
     reportAudioStatus(status);
-    if(status==="played")setAudioNotice("音声案内を有効にしました。Dの声で「お進みください」を再生しています。");
+    if(status==="played")setAudioNotice(`音声案内を有効にしました。Dの声で「${exit?"ご来場ありがとうございました":"お進みください"}」を再生しています。`);
   };
   const announceReception=(type:ReceptionType)=>{void speakReception(type).then(reportAudioStatus);};
   useEffect(()=>prepareReceptionAudio(),[]);
@@ -1198,52 +1199,18 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
   return null;
 }
 
-let speechVersion=0;
 function cancelReceptionSpeech(){
-  ++speechVersion;
   window.speechSynthesis?.cancel();
   stopReceptionGuidance();
 }
 function speakReception(type:ReceptionType){
   cancelReceptionSpeech();
-  const version=speechVersion;
   const preferences=getReceptionAudioSettings();
-  // Entry and re-entry use the approved recorded voice, including offline and
-  // devices without speech synthesis. Exit retains its own existing greeting.
-  if(type!=="exit")return playReceptionAudio(preferences.voiceGuidance?(preferences.successSound?"entrySuccess":"entryGuidance"):"success");
-  const playback=playReceptionAudio("success");
-  if(!preferences.voiceGuidance||preferences.volume===0||!("speechSynthesis" in window))return playback;
-  const synth=window.speechSynthesis;
-  let spoken=false;
-  const message="ご来場ありがとうございました。";
-
-  const utterance=new SpeechSynthesisUtterance(message);
-  utterance.lang="ja-JP";
-  utterance.rate=0.9;
-  utterance.pitch=0.96;
-  utterance.volume=preferences.volume;
-
-  const speakWithJapaneseVoice=()=>{
-    if(spoken||version!==speechVersion)return;
-    spoken=true;
-    const voices=synth.getVoices();
-    const japaneseVoice=voices.find(voice=>voice.lang.toLowerCase()==="ja-jp")
-      ??voices.find(voice=>voice.lang.toLowerCase().startsWith("ja"));
-    if(japaneseVoice)utterance.voice=japaneseVoice;
-    synth.speak(utterance);
-  };
-
-  const voices=synth.getVoices();
-  if(voices.length){
-    speakWithJapaneseVoice();
-  }else{
-    synth.addEventListener("voiceschanged",speakWithJapaneseVoice,{once:true});
-    window.setTimeout(()=>{
-      synth.removeEventListener("voiceschanged",speakWithJapaneseVoice);
-      speakWithJapaneseVoice();
-    },500);
-  }
-  return playback;
+  // Both gates use the approved recordings through one reusable media element.
+  // The combined result sound prevents the chime from interrupting the voice.
+  if(!preferences.voiceGuidance)return playReceptionAudio("success");
+  if(type==="exit")return playReceptionAudio(preferences.successSound?"exitSuccess":"exitGuidance");
+  return playReceptionAudio(preferences.successSound?"entrySuccess":"entryGuidance");
 }
 function getTerminalId():string{
   const key="qr-ticket-terminal-id";

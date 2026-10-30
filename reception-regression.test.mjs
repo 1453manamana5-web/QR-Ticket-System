@@ -460,7 +460,7 @@ test("offline shell preloads the original chimes and recorded entry guidance at 
     addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},
   },URL,{open:async()=>({put:async url=>stored.push(url)})},async()=>response);
   listeners.install({waitUntil:promise=>{installed=promise;}});await installed;
-  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3","entry_success_voice_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
+  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3","entry_success_voice_d_v1.mp3","exit_thank_you_voice_d_v1.mp3","exit_success_voice_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
   assert.ok(stored.includes("https://example.test/QR-Ticket-System/assets/app.js"));
 });
 
@@ -608,20 +608,17 @@ function receptionSpeechHarness({synthesis=true,voiceGuidance=true,volume=1,succ
   return {out,spoken,recorded,flush(){[...callbacks].forEach(fn=>fn());timers.forEach(fn=>fn());},get stops(){return stops;}};
 }
 
-test('entry and reentry use recorded D without device TTS, while exit retains its own greeting',()=>{
-  const h=receptionSpeechHarness();h.out.speakReception('entry');h.out.speakReception('reentry');
-  assert.deepEqual(h.recorded,['entrySuccess','entrySuccess']);assert.deepEqual(h.spoken,[]);
-  h.out.speakReception('exit');h.flush();assert.deepEqual(h.spoken,['ご来場ありがとうございました。']);assert.equal(h.stops,3);
-  const offline=receptionSpeechHarness({synthesis:false});offline.out.speakReception('entry');assert.deepEqual(offline.recorded,['entrySuccess']);
-  for(const preferences of [{voiceGuidance:false},{volume:0}]){
-    const muted=receptionSpeechHarness(preferences);muted.out.speakReception('entry');muted.out.speakReception('exit');muted.flush();assert.deepEqual(muted.spoken,[]);assert.ok(muted.recorded.every(kind=>kind==="success"||preferences.volume===0));
-  }
+test('entry, reentry and exit use their approved recordings without device TTS',()=>{
+  const h=receptionSpeechHarness();h.out.speakReception('entry');h.out.speakReception('reentry');h.out.speakReception('exit');h.flush();
+  assert.deepEqual(h.recorded,['entrySuccess','entrySuccess','exitSuccess']);assert.deepEqual(h.spoken,[]);assert.equal(h.stops,3);
+  const offline=receptionSpeechHarness({synthesis:false});offline.out.speakReception('entry');offline.out.speakReception('exit');assert.deepEqual(offline.recorded,['entrySuccess','exitSuccess']);
+  const voiceOnly=receptionSpeechHarness({successSound:false});voiceOnly.out.speakReception('exit');assert.deepEqual(voiceOnly.recorded,['exitGuidance']);
+  const chimeOnly=receptionSpeechHarness({voiceGuidance:false});chimeOnly.out.speakReception('entry');chimeOnly.out.speakReception('exit');assert.deepEqual(chimeOnly.recorded,['success','success']);
 });
 
-test('delayed exit voice never speaks twice or revives after a newer entry or error',()=>{
-  const h=receptionSpeechHarness();h.out.speakReception('exit');h.out.speakReception('exit');h.flush();assert.deepEqual(h.spoken,['ご来場ありがとうございました。']);
-  const entry=receptionSpeechHarness();entry.out.speakReception('exit');entry.out.speakReception('entry');entry.flush();assert.deepEqual(entry.spoken,[]);assert.deepEqual(entry.recorded,['success','entrySuccess']);
-  const error=receptionSpeechHarness();error.out.speakReception('exit');error.out.cancelReceptionSpeech();error.flush();assert.deepEqual(error.spoken,[]);
+test('recorded exit never queues device speech after switching to entry or cancelling an error',()=>{
+  const h=receptionSpeechHarness();h.out.speakReception('exit');h.out.speakReception('entry');h.out.cancelReceptionSpeech();h.flush();
+  assert.deepEqual(h.spoken,[]);assert.deepEqual(h.recorded,['exitSuccess','entrySuccess']);assert.equal(h.stops,3);
 });
 
 test('slow server reads have a bounded read-only deadline so downloaded inventory can be used',async()=>{
@@ -776,5 +773,29 @@ test('reception voice check enables and auditions D directly on the actual recep
   const h=await harness();try{
     await h.click('音声を有効にして確認');assert.deepEqual(h.audioRequests,['entrySuccess']);assert.match(h.text(),/音声案内を有効にしました/);
     await h.click('受付結果を試験表示');assert.equal(h.audioRequests.at(-1),'entrySuccess');
+  }finally{await h.close();}
+});
+
+test('recorded exit is the approved revised D sample and reuses the single offline audio player',async()=>{
+  const bytes=readFileSync(new URL('./reception-app/public/sounds/exit_thank_you_voice_d_v1.mp3',import.meta.url));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'641e24f3f9ade1eba8f5a84559f8da3d8309597000fe9ca074c3fcf028072a2b');
+  const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
+  h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();
+  assert.equal(await h.audio.playReceptionAudio('entrySuccess'),'played');
+  assert.equal(await h.audio.playReceptionAudio('exitSuccess'),'played');assert.equal(h.players.length,1);assert.match(h.players[0].src,/^blob:/);
+  h.audio.stopReceptionGuidance();assert.equal(h.players[0].paused,true);
+  const voiceOnly=recordedAudioHarness({voiceGuidance:true,successSound:false});
+  assert.equal(await voiceOnly.audio.playReceptionAudio('exitSuccess'),'played');assert.match(voiceOnly.players[0].src,/exit_thank_you_voice_d_v1\.mp3$/);
+  const disabled=recordedAudioHarness();assert.equal(await disabled.audio.playReceptionAudio('exitGuidance'),'muted');assert.equal(await disabled.audio.playReceptionAudio('exitSuccess'),'muted');
+});
+
+test('voice activation auditions exit in exit mode and follows the result shown in the preview',async()=>{
+  const h=await harness();try{
+    await h.control('出口受付','2026-10-27T01:00:00.000Z');await h.click('音声を有効にして確認');
+    assert.equal(h.audioRequests.at(-1),'exitSuccess');assert.match(h.text(),/ご来場ありがとうございました/);
+    await h.click('受付結果を試験表示');assert.equal(h.audioRequests.at(-1),'exitSuccess');
+    await h.click('入口結果');assert.equal(h.audioRequests.at(-1),'entrySuccess');
+    await h.click('音声を有効にして確認');assert.equal(h.audioRequests.at(-1),'entrySuccess');
+    await h.click('出口結果');await h.click('音声を有効にして確認');assert.equal(h.audioRequests.at(-1),'exitSuccess');
   }finally{await h.close();}
 });
