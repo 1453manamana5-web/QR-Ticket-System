@@ -35,3 +35,8 @@ export function csvCell(value: unknown): string {
   if(/^[\s]*[=+@-]/.test(text))text="'"+text;
   return '"'+text.replace(/"/g,'""')+'"';
 }
+
+/** Prepared reserve QR data is inventory, not an issued paper ticket. */
+export function isCountedTicket(ticket:{ticketId:string;basicInfo:Record<string,unknown>},confirmed:readonly string[]=[],reserved:readonly string[]=[]){
+  return (ticket.basicInfo.reserve!==true&&!reserved.includes(ticket.ticketId))||ticket.basicInfo.reservePrinted===true||confirmed.includes(ticket.ticketId);
+}

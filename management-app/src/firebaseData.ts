@@ -779,3 +779,27 @@ export async function loadReceptionSettings(eventId: string): Promise<ReceptionS
   const snapshot = await getDoc(doc(db, "events", eventId, "settings", "reception"));
   return snapshot.exists() ? snapshot.data() as ReceptionSettings : null;
 }
+
+/** Idempotent print confirmation; never overwrites reception status or validity. */
+export async function markReserveTicketsPrinted(eventId:string,ids:string[]):Promise<void>{
+  if(!eventId||ids.some(id=>!id||id.includes('/')))throw Error('INVALID_RESERVE_IDS');
+  const db=getFirebaseDb(),unique=[...new Set(ids)];
+  for(let start=0;start<unique.length;start+=200){
+    const chunk=unique.slice(start,start+200);
+    await runTransaction(db,async tx=>{
+      const metadata=await readInventoryMetadata(tx,eventId);
+      const refs=chunk.map(id=>doc(db,'events',eventId,'tickets',id));
+      const snapshots=await Promise.all(refs.map(ref=>tx.get(ref)));
+      let changed=false;
+      snapshots.forEach((snapshot,index)=>{
+        if(!snapshot.exists())return;
+        const ticket=snapshot.data();
+        if(ticket.basicInfo?.reserve===true&&ticket.basicInfo?.reservePrinted!==true){
+          tx.update(refs[index],{'basicInfo.reservePrinted':true,updatedAt:new Date().toISOString()});changed=true;
+        }
+      });
+      // ticketCount is the transfer inventory size, including reserve QR data.
+      if(changed)writeInventoryMetadata(tx,metadata,0);
+    });
+  }
+}

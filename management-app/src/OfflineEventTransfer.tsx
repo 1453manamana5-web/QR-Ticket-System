@@ -6,7 +6,7 @@ import {encodeOfflineEvent,type OfflineEventData} from '../../shared/src/offline
 export default function OfflineEventTransfer({data}:{data:OfflineEventData}){
   const [frames,setFrames]=useState<string[]>([]),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [label,setLabel]=useState('');
-  const prepare=async()=>{if(busy)return;setBusy(true);setError('');try{const snapshot=data;setFrames(await encodeOfflineEvent(snapshot));setLabel(`${snapshot.event.eventName}・版 ${snapshot.event.dataVersion}・${snapshot.tickets.length}枚・${new Date().toLocaleString('ja-JP')}`);setIndex(0);}catch(e){setError(e instanceof Error?e.message:'QRを作成できませんでした。');}finally{setBusy(false);}};
+  const prepare=async()=>{if(busy)return;setBusy(true);setError('');try{const snapshot=data;setFrames(await encodeOfflineEvent(snapshot));setLabel(`${snapshot.event.eventName}・版 ${snapshot.event.dataVersion}・QRデータ${snapshot.tickets.length}件（予備を含む）・${new Date().toLocaleString('ja-JP')}`);setIndex(0);}catch(e){setError(e instanceof Error?e.message:'QRを作成できませんでした。');}finally{setBusy(false);}};
   const save=()=>{
     const escapedLabel=label.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
     const svgs=frames.map(value=>renderToStaticMarkup(<QRCodeSVG value={value} size={480} level="M" marginSize={4}/>));

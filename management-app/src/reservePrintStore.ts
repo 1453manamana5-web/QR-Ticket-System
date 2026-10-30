@@ -1,11 +1,11 @@
 export type ReserveTicket={id:string;number:string;svg:string};
-export type ReservePackage={eventId:string;eventName:string;preparedAt:string;template:string;css:string;sheetStyle:string;columns:number;tickets:ReserveTicket[];confirmed:string[];pending:{id:string;ids:string[]}|null};
+export type ReservePackage={eventId:string;eventName:string;preparedAt:string;template:string;css:string;sheetStyle:string;columns:number;tickets:ReserveTicket[];confirmed:string[];synced?:string[];pending:{id:string;ids:string[]}|null};
 const databaseName='qr-ticket-reserve-print';
 function validate(value:ReservePackage,eventId:string):ReservePackage{
   if(!value||value.eventId!==eventId||typeof value.eventName!=='string'||typeof value.preparedAt!=='string'||typeof value.template!=='string'||typeof value.css!=='string'||typeof value.sheetStyle!=='string'||
     !Number.isInteger(value.columns)||value.columns<1||value.columns>4||!Array.isArray(value.tickets)||!value.tickets.length||value.tickets.length>5000||
     value.tickets.some(t=>!t||typeof t.id!=='string'||!t.id||typeof t.number!=='string'||typeof t.svg!=='string')||new Set(value.tickets.map(t=>t.id)).size!==value.tickets.length||
-    !Array.isArray(value.confirmed)||value.confirmed.some(id=>typeof id!=='string'))throw Error('保存済みの予備印刷データが不完全です。オンラインの管理画面で確認してください。');
+    !Array.isArray(value.confirmed)||value.confirmed.some(id=>typeof id!=='string')||(value.synced!==undefined&&(!Array.isArray(value.synced)||value.synced.some(id=>typeof id!=='string'))))throw Error('保存済みの予備印刷データが不完全です。オンラインの管理画面で確認してください。');
   if(value.pending){const ids=new Set(value.tickets.map(t=>t.id));if(typeof value.pending.id!=='string'||!Array.isArray(value.pending.ids)||!value.pending.ids.length||new Set(value.pending.ids).size!==value.pending.ids.length||value.pending.ids.some(id=>!ids.has(id)||value.confirmed.includes(id)))throw Error('予備印刷の確認待ち記録が不正です。');}
   return value;
 }
@@ -28,7 +28,7 @@ export function saveReservePackage(value:ReservePackage){
   if(!value.eventId||!value.tickets.length||value.tickets.length>5000||ids.size!==value.tickets.length||!Number.isInteger(value.columns)||value.columns<1||value.columns>4)throw Error('予備チケットの指定が不正です。');
   return change(value.eventId,old=>{
     if(old?.pending)throw Error('印刷確認待ちのチケットがあります。先に印刷完了または中止を確認してください。');
-    return {...value,confirmed:old?.confirmed??[],pending:null};
+    return {...value,confirmed:old?.confirmed??[],synced:old?.synced??[],pending:null};
   });
 }
 export function claimReserveBatch(eventId:string,count:number){
@@ -51,3 +51,8 @@ export function selectReserveTickets<T extends {id:string;qrNumber:string;valid:
   if(selected.length!==end-start+1||new Set(selected.map(t=>Number(t.qrNumber))).size!==selected.length||selected.some(t=>t.valid!==true||t.status!=='unused'))throw Error('指定範囲に未発行・無効・使用済み・重複番号のチケットがあります。事前に未使用のチケットを発行してください。');
   return selected;
 }
+
+export function markReservePrintsSynced(eventId:string,ids:string[]){return change(eventId,old=>{
+  if(!old)throw Error('予備印刷の保存データがありません。');
+  return {...old,synced:[...new Set([...(old.synced??[]),...ids.filter(id=>old.confirmed.includes(id))])]};
+});}

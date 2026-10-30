@@ -6,7 +6,8 @@ import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-tick
 import { loadPublishedEventBundle, publishEventBundle, saveEventMetadata, saveEventStatus, type PublishedEventBundle } from "./eventPublisher";
 import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
 import {parseManagementBackup} from "./backup";
-import {localDateValue, receptionDataCollected, csvCell} from "./operationSafety";
+import {localDateValue, receptionDataCollected, csvCell,isCountedTicket} from "./operationSafety";
+import {useReservePrintLedger} from "./reservePrintLedger";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
 import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
@@ -472,6 +473,9 @@ export default function App() {
       (terminal.role === "management" || terminal.role === "both") &&
       terminal.approved && terminal.managementApproved === true,
   );
+  const reserveLedger=useReservePrintLedger(event.eventId,ownManagementTerminalApproved);
+  const countedTickets=useMemo(()=>tickets.filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[tickets,reserveLedger.confirmed,reserveLedger.reserved]);
+  const waitingReserveCount=tickets.length-countedTickets.length;
   const bundleLoadVersion=useRef(0);
   useEffect(() => {
     const version=++bundleLoadVersion.current;
@@ -735,11 +739,11 @@ export default function App() {
 
   const eventStatus = event.eventStatus;
   const ticketStats = useMemo(() => ({
-    total: tickets.length,
-    unused: tickets.filter(ticket => ticket.currentStatus === "unused").length,
-    inside: tickets.filter(ticket => ticket.currentStatus === "inside").length,
-    exited: tickets.filter(ticket => ticket.currentStatus === "exited").length,
-  }), [tickets]);
+    total: countedTickets.length,
+    unused: countedTickets.filter(ticket => ticket.currentStatus === "unused").length,
+    inside: countedTickets.filter(ticket => ticket.currentStatus === "inside").length,
+    exited: countedTickets.filter(ticket => ticket.currentStatus === "exited").length,
+  }), [countedTickets]);
 
 
   useEffect(() => {
@@ -1661,7 +1665,7 @@ export default function App() {
       }
       if (reentries.length > 0) insights.push({ title: "再入場を別集計", detail: "再入場記録は" + reentries.length + "件です。再入場は入場総数に重複加算せず、入場ピークの分析でも通常入場とは分けて扱っています。", priority: "good" });
     }
-    const invalidCount = tickets.filter(ticket => !ticket.valid).length;
+    const invalidCount = countedTickets.filter(ticket => !ticket.valid).length;
     if (invalidCount > 0) insights.push({ title: "無効チケット" + invalidCount + "枚を確認", detail: "意図した無効化か、誤操作や発行ミスがないかをチケット一覧で確認してください。", priority: "medium" });
     if (aiPreviousSnapshot?.source === "records" && aiPreviousSnapshot.entryRecords !== null && aiPreviousSnapshot.entryRecords > 0 && receptionRecords.length > 0) {
       const currentEntries = entries.length;
@@ -1702,7 +1706,7 @@ export default function App() {
     const peak = [...hourly.entries()].sort((a, b) => b[1].entry - a[1].entry)[0];
     const firstRecord = validTimedRecords.length ? new Date(Math.min(...validTimedRecords.map(item => item.timestamp))) : null;
     const lastRecord = validTimedRecords.length ? new Date(Math.max(...validTimedRecords.map(item => item.timestamp))) : null;
-    const invalidCount = tickets.filter(ticket => !ticket.valid).length;
+    const invalidCount = countedTickets.filter(ticket => !ticket.valid).length;
     const warnings = aiLabDiagnostics.length
       ? aiLabDiagnostics.map((item, index) => (index + 1) + ". " + item.title + "：" + item.detail).join("\n")
       : "現在読み込まれているデータでは、実装済みの基本診断項目に該当する問題は検出されていません。";
@@ -1736,7 +1740,7 @@ export default function App() {
       "",
       "■ 2. チケット状況",
       "総チケット数：" + ticketStats.total + "枚",
-      "有効チケット：" + (tickets.length - invalidCount) + "枚",
+      "有効チケット：" + (countedTickets.length - invalidCount) + "枚",
       "未使用：" + ticketStats.unused + "枚",
       "入場中：" + ticketStats.inside + "人",
       "退場済み：" + ticketStats.exited + "人",
@@ -1953,7 +1957,7 @@ export default function App() {
             </div>
             <div className="ticket-list-launch-bottom">
               <span>QR番号・状態・操作を確認</span>
-              <strong>{tickets.length || 0}<small>件</small></strong>
+              <strong>{ticketStats.total}<small>件</small></strong>
             </div>
           </button>
 
@@ -1966,9 +1970,9 @@ export default function App() {
               <div className="ticket-status-box unused"><span>未使用</span><strong>{ticketStats.unused}</strong><em>枚</em></div>
               <div className="ticket-status-box inside"><span>入場中</span><strong>{ticketStats.inside}</strong><em>枚</em></div>
               <div className="ticket-status-box used"><span>使用済み</span><strong>{ticketStats.exited}</strong><em>枚</em></div>
-              <div className="ticket-status-box invalid"><span>無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
+              <div className="ticket-status-box invalid"><span>無効</span><strong>{countedTickets.filter(ticket => !ticket.valid).length}</strong><em>枚</em></div>
             </div>
-            <div className="ticket-sync-state"><i />リアルタイム同期中</div>
+            <div className="ticket-sync-state"><i />未印刷の予備 {waitingReserveCount}枚（集計対象外）{reserveLedger.unsynced>0&&<span> ／ 印刷済み {reserveLedger.unsynced}枚は他端末へ未反映</span>}</div>
           </section>
         </main>
 
@@ -1983,13 +1987,13 @@ export default function App() {
             <div className="ticket-filter-box"><FilterIcon /><select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value as typeof ticketStatusFilter)}>
               <option value="all">すべての状態</option><option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
             </select></div>
-            <div className="ticket-list-total">全<strong>{tickets.length}</strong>件</div>
+            <div className="ticket-list-total">発行済み<strong>{ticketStats.total}</strong>枚 ／ 未印刷予備 {waitingReserveCount}枚</div>
           </div>
           {tickets.length > 0 ? <div className="ticket-screen-table ticket-full-table">
             <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
-                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（予備）</small>}</strong></div>
+                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・印刷済み":"未印刷予備"}）</small>}</strong></div>
                 <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
@@ -2019,7 +2023,7 @@ export default function App() {
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
             <label>開始番号<input type="number" value={Math.max(Number((event as Event & {lastIssuedNumber?:number}).lastIssuedNumber)||0,...tickets.map(ticket=>Number(ticket.basicInfo.ticketNumber)||0))+1} disabled /><small>発行時に最新の番号を確認します。削除済みの番号は再利用しません。</small></label>
           </div>
-          <p role="status">合計 {ticketCount+reserveTicketCount}枚（通常 {ticketCount}枚・予備 {reserveTicketCount}枚）</p><p>予備分は通常分に続く番号で発行し、通常印刷から除外します。発行後にデザインとQRを端末へ保存してください。</p>
+          <p role="status">集計対象 {ticketCount}枚 ／ 未印刷予備 {reserveTicketCount}枚（準備するQRは計 {ticketCount+reserveTicketCount}枚）</p><p>予備分は通常分に続く番号で発行し、通常印刷から除外します。発行後にデザインとQRを端末へ保存してください。</p>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
             <button className="ticket-modal-primary" disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
@@ -2452,20 +2456,21 @@ export default function App() {
         ? event
         : eventHistory.find(item => item.eventId === selectedEventId);
       const analysisTickets = isCurrentAnalysis
-        ? tickets
-        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.tickets : [];
+        ? countedTickets
+        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.tickets.filter(t=>isCountedTicket(t)) : [];
       const analysisReceptionRecords = isCurrentAnalysis
         ? receptionRecords
         : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.records : [];
+      const analysisLoaded=isCurrentAnalysis||historicalAnalysisData.eventId===selectedEventId;
       const analysisTicketStats = {
-        total: analysisTickets.length || (!isCurrentAnalysis ? selectedRecord?.total ?? 0 : 0),
-        unused: analysisTickets.length
+        total: analysisLoaded?analysisTickets.length:selectedRecord?.total??0,
+        unused: analysisLoaded
           ? analysisTickets.filter(ticket => ticket.currentStatus === "unused").length
           : (!isCurrentAnalysis ? selectedRecord?.unused ?? 0 : 0),
-        inside: analysisTickets.length
+        inside: analysisLoaded
           ? analysisTickets.filter(ticket => ticket.currentStatus === "inside").length
           : (!isCurrentAnalysis ? selectedRecord?.inside ?? 0 : 0),
-        exited: analysisTickets.length
+        exited: analysisLoaded
           ? analysisTickets.filter(ticket => ticket.currentStatus === "exited").length
           : (!isCurrentAnalysis ? selectedRecord?.exited ?? 0 : 0),
       };
@@ -2640,7 +2645,7 @@ export default function App() {
           <div className="settings-info-grid">
             <div><span>イベント履歴</span><strong>{eventHistory.length}件</strong></div>
             <div><span>分析データ</span><strong>{analysisHistory.length}件</strong></div>
-            <div><span>チケット</span><strong>{tickets.length || ticketCount}枚</strong></div>
+            <div><span>チケット</span><strong>{ticketStats.total}枚</strong></div>
             <div><span>部員データ</span><strong>{members.length}人</strong></div>
           </div>
           <div className="settings-data-actions"><button className="secondary" onClick={exportBackup}>バックアップを保存</button><button className="secondary" onClick={importBackup}>バックアップを復元</button></div>
@@ -3039,7 +3044,7 @@ function NavIcon({type}:{type:string}){
                   <div><span><i className="unused" />未使用</span><strong>{ticketStats.unused}枚</strong></div>
                   <div><span><i className="inside" />入場中</span><strong>{ticketStats.inside}枚</strong></div>
                   <div><span><i className="exited" />退場済み</span><strong>{ticketStats.exited}枚</strong></div>
-                  <div><span><i className="invalid" />無効</span><strong>{tickets.filter(ticket => !ticket.valid).length}枚</strong></div>
+                  <div><span><i className="invalid" />無効</span><strong>{countedTickets.filter(ticket => !ticket.valid).length}枚</strong></div>
                 </div>
                 <div className="ai-report-total-line"><span>受付記録合計</span><strong>{receptionRecords.length}件</strong></div>
                 <div className="ai-report-total-line"><span>時刻不備</span><strong>{receptionRecords.filter(record => !Number.isFinite(Date.parse(record.timestamp))).length}件</strong></div>
