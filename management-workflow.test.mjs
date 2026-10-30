@@ -27,7 +27,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
     loadAppSettings:async()=>({volume:25,deviceName:'Saved manager'}),saveAppSettings:async(_id,value)=>savedSettings.push({...value}),
     loadReceptionSettings:async()=>({entryEnabled:true,exitEnabled:true,reentryEnabled:true}),
     loadMembers:async()=>[],loadAnalysis:async()=>[],loadReceptionErrors:async()=>[],
-    loadEventTickets:async id=>[ticket(id)],loadEventReceptionRecords:async()=>[],
+    loadEventTickets:async id=>[ticket(id)],loadNextTicketNumber:async()=>2,loadEventReceptionRecords:async()=>[],
     deleteEvent:async id=>deleted.push(id),saveManagementTerminalHeartbeat:async()=>null,
     saveAnalysis:async()=>{},saveTicket:async()=>{},appendTickets:async()=>{},
     ...overrides,
@@ -104,6 +104,15 @@ test('all enabled management pages render, and reselecting the same event retain
   }finally{await h.close();}
 });
 
+test('terminal management displays the verified own terminal instead of a static unregistered placeholder',async()=>{
+  const h=await harness();try{
+    await h.nav('端末管理');
+    const card=h.renderer.root.findByProps({className:'terminal-own-card'});
+    assert.doesNotMatch(card.findByProps({className:'terminal-section-heading'}).findByType('span').children.join(''),/登録前/);
+    assert.equal(card.findByProps({className:'terminal-mono'}).children.join(''),manager.terminalId);
+  }finally{await h.close();}
+});
+
 test('failed event publication preserves the saved event instead of showing unsaved metadata as saved',async()=>{
   const h=await harness({publisher:{publishEventBundle:async()=>{throw Error('offline');}}});
   try{
@@ -119,11 +128,86 @@ test('failed event publication preserves the saved event instead of showing unsa
   }finally{await h.close();}
 });
 
+test('publication enables automatic start without waiting for a reload',async()=>{
+  let h;const writes=[];
+  const today=safety.localDateValue();
+  const pending={...event(),eventDate:today,startTime:'00:00',endTime:'23:59'};
+  h=await harness({subscribeEvents:cb=>{cb([pending]);return()=>{};},publisher:{
+    publishEventBundle:async e=>({event:{...e,eventStatus:'ready'},tickets:[],authToken:'published',ticketCount:0}),
+    saveEventStatus:async(id,status)=>writes.push({id,status}),
+  }});
+  try{
+    await h.nav('イベント管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'event-aを選択'}).props.onClick());await h.flush();
+    await h.click('保存してFirebaseへ公開');
+    assert.ok(writes.some(item=>item.status==='active'),'publication must retain its reception target flag for automatic start');
+  }finally{await h.close();}
+});
+
+test('issuing after deleting the highest numbers uses the server issuance floor',async()=>{
+  let issued;
+  const h=await harness({loadNextTicketNumber:async()=>501,appendTickets:async(_id,items)=>{issued=items;}});
+  try{
+    await h.nav('チケット管理');
+    const label=node=>node.children.map(c=>typeof c==='string'?c:label(c)).join('');
+    const launch=h.renderer.root.findAllByType('button').find(node=>label(node).includes('チケットを新規発行'));
+    assert.ok(launch);await act(async()=>launch.props.onClick());await h.flush();
+    const generate=h.renderer.root.findAllByType('button').find(node=>label(node).includes('QR・チケットを発行'));
+    assert.ok(generate);await act(async()=>generate.props.onClick());await h.flush();
+    assert.ok(issued?.length);assert.equal(issued[0].basicInfo.ticketNumber,501);
+  }finally{await h.close();}
+});
+
+test('a late initial bundle lookup cannot erase the QR from a successful first publication',async()=>{
+  let finish;const h=await harness({publisher:{loadPublishedEventBundle:()=>new Promise(resolve=>{finish=resolve;})}});
+  try{
+    await h.nav('イベント管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'event-aを選択'}).props.onClick());await h.flush();
+    await h.click('保存してFirebaseへ公開');
+    assert.match(h.text(),/イベントデータQR/);
+    await act(async()=>finish(null));await h.flush();
+    assert.match(h.text(),/イベントデータQR/);
+  }finally{await h.close();}
+});
+
+test('finishing an old deletion preserves a newly selected event and incoming event history',async()=>{
+  let finish;const h=await harness({deleteEvent:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    await h.nav('イベント管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'event-aを選択'}).props.onClick());await h.flush();
+    const button=h.renderer.root.findAllByType('button').find(node=>node.children.join('')==='削除');
+    await act(async()=>{button.props.onClick();});await h.flush();
+    await h.events([event(),event('event-b'),event('event-c')]);
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'event-cを選択'}).props.onClick());await h.flush();
+    await act(async()=>finish());await h.flush();
+    const heading=h.renderer.root.findByProps({className:'event-current-heading'}).findByType('h3');
+    assert.equal(heading.children.join(''),'event-c');
+    assert.equal(h.renderer.root.findAllByProps({'aria-label':'event-cを選択'}).length,1);
+    assert.equal(h.renderer.root.findAllByProps({'aria-label':'event-bを選択'}).length,1);
+    assert.equal(h.renderer.root.findAllByProps({'aria-label':'event-aを選択'}).length,0);
+  }finally{await h.close();}
+});
+
 test('backup parser rejects corrupt/cross-event data and never imports roles or publication grants',()=>{
   const parse=load('management-app/src/backup.ts').parseManagementBackup;
   const valid={version:1,eventId:'event-a',eventHistory:[{...event(),authToken:'do-not-import',receptionTarget:true}],tickets:[ticket()],members:[],appSettings:{deviceName:'Restored',volume:80,admin:true}};
   const parsed=parse(valid);assert.equal(parsed.eventHistory[0].authToken,undefined);assert.equal(parsed.appSettings.admin,undefined);
   for(const value of [null,[],{...valid,version:2},{...valid,tickets:[{...ticket(),eventId:'missing'}]},{...valid,tickets:[{...ticket(),valid:'true'}]},{...valid,tickets:[ticket(),ticket()]},{...valid,appSettings:{volume:Infinity}},{...valid,receptionSettings:{entryEnabled:'false'}}])assert.throws(()=>parse(value));
+});
+
+test('backup validation rejects missing destinations, duplicate members and impossible dates before writing',()=>{
+  const parse=load('management-app/src/backup.ts').parseManagementBackup;
+  const member={memberId:'member-1',memberNumber:1,name:'Test'};
+  const backup={version:1,eventId:'event-a',eventHistory:[event()],tickets:[ticket()],members:[member]};
+  for(const value of [
+    {...backup,eventId:'missing',members:[],receptionSettings:{entryEnabled:true,exitEnabled:true,reentryEnabled:true}},
+    {...backup,members:[member,member]},
+    {...backup,members:[member,{...member,memberId:'member-2'}]},
+    {...backup,eventHistory:[{...event(),eventDate:'2099-02-30'}]},
+    {...backup,eventHistory:[{...event(),startTime:'25:00'}]},
+    {...backup,eventHistory:[{...event(),startTime:'18:00',endTime:'17:00'}]},
+    {...backup,eventHistory:[{...event(),dataVersion:0}]},
+  ])assert.throws(()=>parse(value));
 });
 
 test('CSV exports quote data and prevent event names being interpreted as spreadsheet formulas',()=>{

@@ -50,6 +50,27 @@ test("inventory refresh preserves unsent ticket state, validity edits and queue"
   assert.equal((await local.getTicket("ticket-one")).currentStatus,"inside");
 });
 
+test("simultaneous inventory refreshes never erase a successfully committed offline inventory",async()=>{
+  const local=localDb();
+  await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  const results=await Promise.allSettled([
+    local.prepareLocalEventData(makeEvent("event-two"),[makeTicket("event-two")]),
+    local.prepareLocalEventData(makeEvent("event-three"),[makeTicket("event-three")]),
+  ]);
+  assert.ok(results.every(result=>result.status==="fulfilled"));
+  const saved=await local.loadLocalEvent();
+  assert.ok(saved?.dataReady);
+  assert.equal(await local.countTickets(saved.event.eventId),saved.ticketCount);
+});
+
+test("a delayed older inventory refresh cannot roll back a newer offline version",async()=>{
+  const local=localDb();
+  await local.prepareLocalEventData(makeEvent("event-one",4),[{...makeTicket(),valid:false}]);
+  await assert.rejects(local.prepareLocalEventData(makeEvent("event-one",2),[makeTicket()]),/LOCAL_EVENT_VERSION_CHANGED/);
+  assert.equal((await local.loadLocalEvent()).event.dataVersion,4);
+  assert.equal((await local.getTicket("ticket-one")).valid,false);
+});
+
 test("queue preserves capture order even for identical timestamps and clock rollback",async()=>{
   const local=localDb();
   for(const item of [record("z-entry"),record("a-exit","exit"),record("b-reentry","reentry","2026-10-26T23:00:00.000Z")]) {
@@ -165,6 +186,38 @@ test("event QR authentication saves the complete downloaded event and is not int
     assert.equal(saved.dataReady,true);
     assert.equal(saved.dataVersion,undefined);
     assert.match(h.text(),/受付準備完了/);
+  }finally{await h.close();}
+});
+
+test("revocation during manual authentication cannot store the late event response",async()=>{
+  let finish;
+  const h=await harness({saved:false,automatic:async()=>{throw Error("NO_PUBLISHED_EVENT");},download:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    await h.click("イベントデータQRを読み取る");
+    await h.scan(JSON.stringify({type:"qr-ticket-event-auth",...makeEvent().event,authToken:"test-token"}));
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="このイベントで認証");
+    await act(async()=>{button.props.onClick();});await h.flush();
+    assert.ok(finish);
+    await h.revoke();
+    await act(async()=>finish({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();
+    assert.equal(await h.local.loadLocalEvent(),null);
+    assert.match(h.text(),/受付端末を登録/);
+  }finally{await h.close();}
+});
+
+test("a remote gate switch waits for the current scan and applies before the next scan",async()=>{
+  let finish;
+  const h=await harness({latestTicket:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    await h.click("受付を開始する");
+    let scan;
+    await act(async()=>{scan=h.renderer.root.findByType(h.Scanner).props.onResult("ticket-one");});await h.flush();
+    await h.control("出口受付","2099-10-27T01:00:00.000Z");
+    assert.equal(h.renderer.root.findAllByType("button").find(node=>node.props.className?.includes("entry-reception-mode-switch")).props["aria-pressed"],false);
+    await act(async()=>{finish(makeTicket());await scan;});await h.flush();
+    assert.equal(h.renderer.root.findAllByType("button").find(node=>node.props.className?.includes("entry-reception-mode-switch")).props["aria-pressed"],true);
+    const items=await h.local.getPendingSyncItems();
+    assert.equal(items.length,1);assert.equal((await h.local.getReceptionRecord(items[0].recordId)).type,"entry");
   }finally{await h.close();}
 });
 

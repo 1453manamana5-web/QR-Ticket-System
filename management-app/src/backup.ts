@@ -8,10 +8,13 @@ export type ManagementBackup = {
 };
 const object=(value:unknown):value is Record<string,unknown>=>Boolean(value)&&typeof value==="object"&&!Array.isArray(value);
 const id=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=160&&!value.includes("/");
+const date=(value:unknown)=>typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&
+  Number.isFinite(Date.parse(value+"T00:00:00.000Z"))&&new Date(value+"T00:00:00.000Z").toISOString().slice(0,10)===value;
+const time=(value:unknown)=>typeof value==="string"&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 export function parseManagementBackup(value:unknown):ManagementBackup {
   if(!object(value)||value.version!==1||!Array.isArray(value.eventHistory)||!Array.isArray(value.tickets)||!Array.isArray(value.members))throw Error("バックアップの形式・バージョンが正しくありません");
   const events:Event[]=value.eventHistory.map(event=>{
-    if(!object(event)||!id(event.eventId)||typeof event.eventName!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(String(event.eventDate))||!/^\d{2}:\d{2}$/.test(String(event.startTime))||!/^\d{2}:\d{2}$/.test(String(event.endTime))||!["preparing","ready","active","finalizing","finished"].includes(String(event.eventStatus))||!Number.isSafeInteger(event.dataVersion))throw Error("イベント情報が不正です");
+    if(!object(event)||!id(event.eventId)||typeof event.eventName!=="string"||!date(event.eventDate)||!time(event.startTime)||!time(event.endTime)||String(event.startTime)>=String(event.endTime)||!["preparing","ready","active","finalizing","finished"].includes(String(event.eventStatus))||!Number.isSafeInteger(event.dataVersion)||Number(event.dataVersion)<1)throw Error("イベント情報が不正です");
     // Do not import auth tokens, publication targets or terminal grants from files.
     return {eventId:event.eventId,eventName:event.eventName,eventDate:String(event.eventDate),startTime:String(event.startTime),endTime:String(event.endTime),eventStatus:event.eventStatus as Event["eventStatus"],dataVersion:Number(event.dataVersion)};
   });
@@ -23,10 +26,14 @@ export function parseManagementBackup(value:unknown):ManagementBackup {
     const key=JSON.stringify([ticket.eventId,ticket.ticketId]);if(ticketIds.has(key))throw Error("チケットIDが重複しています");ticketIds.add(key);
     return {eventId:ticket.eventId,ticketId:ticket.ticketId,basicInfo:ticket.basicInfo,valid:ticket.valid,currentStatus:ticket.currentStatus as Ticket["currentStatus"],updatedAt:ticket.updatedAt};
   });
+  if(value.eventId!==undefined && value.eventId!=="" && (!id(value.eventId)||!eventIds.has(value.eventId)))throw Error("復元先イベントが見つかりません");
   const eventId=id(value.eventId)?value.eventId:tickets[0]?.eventId??(events.length===1?events[0].eventId:"");
   if(value.members.length&&(!eventId||!eventIds.has(eventId)))throw Error("部員の復元先イベントが特定できません");
+  const memberIds=new Set<string>(),memberNumbers=new Set<number>();
   const members:Member[]=value.members.map(member=>{
     if(!object(member)||!id(member.memberId)||!Number.isSafeInteger(member.memberNumber)||Number(member.memberNumber)<1||typeof member.name!=="string")throw Error("部員情報が不正です");
+    if(memberIds.has(member.memberId)||memberNumbers.has(Number(member.memberNumber)))throw Error("部員IDまたは部員番号が重複しています");
+    memberIds.add(member.memberId);memberNumbers.add(Number(member.memberNumber));
     return {memberId:member.memberId,memberNumber:Number(member.memberNumber),name:member.name};
   });
   let receptionSettings:ReceptionSettings|undefined;

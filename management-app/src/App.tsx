@@ -7,7 +7,7 @@ import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextS
 import {parseManagementBackup} from "./backup";
 import {localDateValue, receptionDataCollected, csvCell} from "./operationSafety";
 import TicketDesigner, { TicketQrPreview } from "./TicketDesigner";
-import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
+import { deleteEvent as deleteFirebaseEvent, deleteMember as deleteFirebaseMember, deleteTicket as deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal as approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception as releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets } from "./firebaseData";
 
 type AnalysisRecord = {
   eventId: string;
@@ -191,6 +191,8 @@ export default function App() {
       return [];
     }
   });
+  const eventHistoryRef=useRef(eventHistory);
+  eventHistoryRef.current=eventHistory;
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState("");
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(loadAnalysisHistory);
   const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState("");
@@ -228,7 +230,6 @@ export default function App() {
   const [endTime, setEndTime] = useState("");
   const [ticketCount, setTicketCount] = useState(500);
   const [ticketPrefix, setTicketPrefix] = useState("TKT");
-  const [ticketStartNumber, setTicketStartNumber] = useState(1);
   const [ticketTitle, setTicketTitle] = useState("入場チケット");
   const [savedEventName, setSavedEventName] = useState("");
   const [eventSettingsReady, setEventSettingsReady] = useState("");
@@ -468,7 +469,9 @@ export default function App() {
       (terminal.role === "management" || terminal.role === "both") &&
       terminal.approved && terminal.managementApproved === true,
   );
+  const bundleLoadVersion=useRef(0);
   useEffect(() => {
+    const version=++bundleLoadVersion.current;
     if (!ownManagementTerminalApproved || !event.eventId) {
       setBundle(null);
       return;
@@ -476,7 +479,7 @@ export default function App() {
     let cancelled = false;
     setBundle(null);
     void loadPublishedEventBundle(event.eventId).then(savedBundle => {
-      if (!cancelled) setBundle(savedBundle);
+      if (!cancelled && version===bundleLoadVersion.current) setBundle(savedBundle);
     }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
     return () => { cancelled = true; };
   }, [event.eventId, event.dataVersion, ownManagementTerminalApproved]);
@@ -863,6 +866,7 @@ export default function App() {
     };
 
     setPublishing(true);
+    ++bundleLoadVersion.current;
     setError("");
 
     try {
@@ -870,8 +874,9 @@ export default function App() {
       if (currentEventId.current !== result.event.eventId) return;
       setSavedEventName(normalizedName);
       setSelectedHistoryEventId(result.event.eventId);
-      setEvent(result.event);
-      setEventHistory(current => current.map(item => item.eventId === result.event.eventId ? result.event : item));
+      const published={...result.event,receptionTarget:true};
+      setEvent(published);
+      setEventHistory(current => current.map(item => item.eventId === result.event.eventId ? published : item));
       setBundle(result);
     } catch (reason) {
       console.error("イベント保存・公開に失敗しました", reason);
@@ -989,15 +994,15 @@ export default function App() {
     if (!target) return;
     if (!window.confirm("「" + target.eventName + "」をイベント履歴から削除しますか？")) return;
 
-    const remaining = eventHistory.filter(item => item.eventId !== eventId);
-
     setError("");
     deletedEventIdsRef.current.add(eventId);
     try {
       // Firebase側の削除完了を待ってから画面側も更新する。
       // 最後のイベントも削除可能にし、削除後は未選択状態へ戻す。
       await deleteFirebaseEvent(eventId);
-      setEventHistory(remaining);
+      const remaining=eventHistoryRef.current.filter(item=>item.eventId!==eventId);
+      setEventHistory(current=>current.filter(item=>item.eventId!==eventId));
+      if(currentEventId.current!==eventId)return;
       if (remaining.length > 0) {
         selectHistoryEvent(remaining[0]);
       } else {
@@ -1049,18 +1054,8 @@ export default function App() {
     setError("");
     try {
       // React stateは購読更新の途中で古い場合があるため、発行前にサーバーの正本を読む。
-      const savedTickets = await loadEventTickets(event.eventId);
-      const existingMaxNumber = savedTickets.reduce((max, ticket) => {
-        const number = Number(ticket.basicInfo.ticketNumber);
-        return Number.isFinite(number) ? Math.max(max, number) : max;
-      }, 0);
-      const existingMaxId = savedTickets.reduce((maximum,ticket)=>{
-        const suffix=ticket.ticketId.startsWith(prefix)?ticket.ticketId.slice(prefix.length):"";
-        return /^\d+$/.test(suffix)?Math.max(maximum,Number(suffix)):maximum;
-      },0);
-      const startNumber = Math.max(1, existingMaxNumber + 1, existingMaxId + 1);
+      const startNumber = await loadNextTicketNumber(event.eventId,prefix);
       if(!Number.isSafeInteger(startNumber+count-1))throw new Error("TICKET_NUMBER_OVERFLOW");
-      setTicketStartNumber(startNumber);
 
       const generated = createTickets(event.eventId, count, startNumber, prefix);
 
@@ -2016,7 +2011,7 @@ export default function App() {
               setTicketCount(value === "" ? 0 : Math.min(5000, Math.max(0, Number(value) || 0)));
             }} /></label>
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
-            <label>開始番号<input type="number" value={tickets.length ? Math.max(...tickets.map(ticket => Number(ticket.basicInfo.ticketNumber) || 0)) + 1 : 1} disabled /></label>
+            <label>開始番号<input type="number" value={Math.max(Number((event as Event & {lastIssuedNumber?:number}).lastIssuedNumber)||0,...tickets.map(ticket=>Number(ticket.basicInfo.ticketNumber)||0))+1} disabled /><small>発行時に最新の番号を確認します。削除済みの番号は再利用しません。</small></label>
           </div>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
@@ -2141,16 +2136,16 @@ export default function App() {
 
         <section className="terminal-own-card">
           <div className="terminal-section-heading">
-            <div><small>MY TERMINAL</small><h3>自分の端末</h3><p>この端末を受付端末として登録します。登録後、管理者の承認を受けて運用を開始します。</p></div>
-            <span className="terminal-state-badge pending">登録前</span>
+            <div><small>MY TERMINAL</small><h3>自分の端末</h3><p>このブラウザに登録されている端末の情報です。</p></div>
+            <span className={ownTerminal.approved ? "terminal-state-badge online" : "terminal-state-badge pending"}>{ownTerminal.approved ? "承認済み" : "承認待ち"}</span>
           </div>
           <div className="terminal-own-grid">
             <label className="terminal-name-editor">
               <span>端末名</span>
               <input value={appSettings.deviceName} onChange={e => updateOwnTerminalName(e.target.value)} />
             </label>
-            <div><span>端末種別</span><strong>Web / iPad</strong></div>
-            <div><span>端末ID</span><strong className="terminal-mono">この端末</strong></div>
+            <div><span>端末種別</span><strong>{ownTerminal.type}</strong></div>
+            <div><span>端末ID</span><strong className="terminal-mono">{ownTerminal.terminalId}</strong></div>
             <div><span>接続状態</span><strong className="terminal-state-text online">ブラウザ動作中</strong></div>
           </div>
         </section>

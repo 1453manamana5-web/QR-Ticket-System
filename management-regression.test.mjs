@@ -24,9 +24,9 @@ test('print title treats event names as text and prints only once',async()=>{
   }finally{await act(async()=>renderer.unmount());}
 });
 
-function designerModule(storage){
+function designerModule(storage,{globals={},detection={}}={}){
   const out={};
-  new Function('exports','require','localStorage','window','alert',ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./LazyQrCode'?{default:()=>null}:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{});
+  new Function('exports','require','localStorage','window','alert',...Object.keys(globals),ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./LazyQrCode'?{default:()=>null}:n==='./pinkQrMarkerDetection'?detection:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{},...Object.values(globals));
   return out;
 }
 const designTickets=Array.from({length:6},(_,i)=>({id:String(i),qrNumber:String(i+1),valid:true,status:'unused'}));
@@ -66,4 +66,41 @@ test('pink marker detection and containment mapping preserve the intended QR pos
   assert.equal(out.findClosestTicketRatio(1600,900).cardRatio,'16:9');
   const mapped=out.mapMarkerToTicketRatio(marker,100,60,{width:16,height:9});assert.equal(mapped.centerXPercent,73.4375);
   assert.equal(out.detectPinkQrMarker(new Uint8ClampedArray(4),100,60),null);
+});
+
+test('undoing a background while analysis is pending cannot revive the undone background',async()=>{
+  let finish;const storage=new Map();
+  const module=designerModule(storage,{globals:{FileReader:class{readAsDataURL(){this.result='data:image/png;base64,new';this.onload();}}},detection:{analyzeTicketBackgroundFromDataUrl:()=>new Promise(resolve=>{finish=resolve;})}});
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'undo-background',eventName:'Test',tickets:designTickets,qrValue:t=>t.id,onClose(){}}));});
+  const click=async name=>{const node=renderer.root.findAllByType('button').find(node=>designLabel(node)===name||node.props['aria-label']===name);assert.ok(node,name);await act(async()=>node.props.onClick());};
+  try{
+    const upload=renderer.root.findAllByType('input').find(node=>node.props.type==='file');
+    await act(async()=>upload.props.onChange({target:{files:[{name:'background.png',type:'image/png'}],value:''}}));
+    await click('元に戻す');
+    await act(async()=>finish({marker:null,ratio:{cardRatio:'4:3'}}));
+    await click('保存');
+    const saved=JSON.parse(storage.get('qr-management-ticket-design-id-undo-background'));
+    assert.equal(saved.backgroundImage,'');assert.equal(saved.cardRatio,'16:9');
+  }finally{await act(async()=>renderer.unmount());}
+});
+
+test('late background detection preserves a manual QR adjustment and locked QR placement',async()=>{
+  for(const locked of [false,true]){
+    let finish;const storage=new Map([['qr-management-ticket-design-id-position',JSON.stringify({title:'Existing',locked:{qr:locked}})]]);
+    const module=designerModule(storage,{globals:{FileReader:class{readAsDataURL(){this.result='data:image/png;base64,new';this.onload();}}},detection:{analyzeTicketBackgroundFromDataUrl:()=>new Promise(resolve=>{finish=resolve;})}});
+    let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'position',eventName:'Test',tickets:designTickets,qrValue:t=>t.id,onClose(){}}));});
+    const click=async name=>{const node=renderer.root.findAllByType('button').find(node=>designLabel(node)===name);assert.ok(node,name);await act(async()=>node.props.onClick());};
+    try{
+      const upload=renderer.root.findAllByType('input').find(node=>node.props.accept==='image/*');
+      await act(async()=>upload.props.onChange({target:{files:[{name:'background.png',type:'image/png'}],value:''}}));
+      if(!locked){
+        await click('▦QR');await click('パーツ設定を開く');
+        await act(async()=>renderer.root.findByProps({'aria-label':'QRコードの横位置'}).props.onChange({target:{value:'25'}}));
+      }
+      await act(async()=>finish({marker:{centerXPercent:80,centerYPercent:55,sizePercent:20},ratio:{cardRatio:'4:3'}}));
+      await click('保存');
+      const saved=JSON.parse(storage.get('qr-management-ticket-design-id-position'));
+      assert.equal(saved.qrX,locked?76:25);
+    }finally{await act(async()=>renderer.unmount());}
+  }
 });
