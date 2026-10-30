@@ -2,24 +2,26 @@ import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {managementGuideSteps as steps,chapterStart,type GuideTarget} from './guideSteps';
 import GuideReceptionPractice from './GuideReceptionPractice';
 import './ManagementGuide.css';
+export const managementGuideTopics=[...new Set(steps.map(s=>s.chapter))].filter(chapter=>!['はじめに','完了'].includes(chapter)).map(chapter=>({chapter,label:chapter==='チケット'?'チケット発行・予備印刷':chapter==='端末'?'端末管理':chapter==='設定'?'設定・バックアップ':chapter,steps:steps.filter(s=>s.chapter===chapter).length}));
 export type GuideRecord={step:number;status:'active'|'paused'|'completed'};
 export function readGuideRecord(storage:Pick<Storage,'getItem'>,key:string):GuideRecord|null{
   try{const r=JSON.parse(storage.getItem(key)??'null');return r&&Number.isInteger(r.step)&&r.step>=0&&r.step<steps.length&&['active','paused','completed'].includes(r.status)?r:null;}catch{return null;}
 }
 export function useManagementGuide(terminalId:string,enabled:boolean,storage:Pick<Storage,'getItem'|'setItem'>){
-  const [open,setOpen]=useState(false),[step,setStep]=useState(0),[saveError,setSaveError]=useState(false);
+  const [open,setOpen]=useState(false),[step,setStep]=useState(0),[saveError,setSaveError]=useState(false),[topic,setTopic]=useState<string|null>(null);
   const initialized=useRef('');const key='qr-ticket-guide-management-v1:'+terminalId;
   const persist=(index:number,status:GuideRecord['status'])=>{try{storage.setItem(key,JSON.stringify({step:index,status}));setSaveError(false);}catch{setSaveError(true);}};
   useEffect(()=>{
-    if(!enabled||initialized.current===key)return;initialized.current=key;
+    if(!enabled||initialized.current===key)return;initialized.current=key;setTopic(null);
     const saved=readGuideRecord(storage,key);const index=chapterStart(saved?.step??0);setStep(index);
     if(!saved||saved.status==='active'){setOpen(true);persist(index,'active');}
   },[enabled,key]);
-  const start=(reset=false)=>{if(!enabled)return;const record=readGuideRecord(storage,key);const index=reset||record?.status==='completed'?0:chapterStart(record?.step??step);setStep(index);setOpen(true);persist(index,'active');};
-  const pause=()=>{setOpen(false);persist(step,'paused');};
-  const next=()=>{if(step===steps.length-1){setOpen(false);persist(step,'completed');return;}setStep(step+1);persist(step+1,'active');};
-  const restartChapter=()=>{const index=chapterStart(step);setStep(index);persist(index,'active');};
-  return {open,step,saveError,start,pause,next,restartChapter};
+  const start=(reset=false)=>{if(!enabled)return;setTopic(null);const record=readGuideRecord(storage,key);const index=reset||record?.status==='completed'?0:chapterStart(record?.step??step);setStep(index);setOpen(true);persist(index,'active');};
+  const startTopic=(chapter:string)=>{if(!enabled||!managementGuideTopics.some(t=>t.chapter===chapter))return;setTopic(chapter);setStep(steps.findIndex(s=>s.chapter===chapter));setOpen(true);};
+  const pause=()=>{setOpen(false);if(!topic)persist(step,'paused');};
+  const next=()=>{if(topic&&steps[step+1]?.chapter!==topic){setOpen(false);return;}if(step===steps.length-1){setOpen(false);persist(step,'completed');return;}setStep(step+1);if(!topic)persist(step+1,'active');};
+  const restartChapter=()=>{const index=chapterStart(step);setStep(index);if(!topic)persist(index,'active');};
+  return {open,step,saveError,topic,start,startTopic,pause,next,restartChapter};
 }
 export type GuideController=ReturnType<typeof useManagementGuide>;
 export function findGuideTarget(root:HTMLElement,target?:GuideTarget):HTMLElement|null{
@@ -39,6 +41,9 @@ export default function ManagementGuide({controller:c,renderWorkspace}:{controll
   const step=steps[c.step],root=useRef<HTMLDivElement>(null),dialog=useRef<HTMLElement>(null),heading=useRef<HTMLHeadingElement>(null);
   const [acted,setActed]=useState(false),[ready,setReady]=useState(false),[found,setFound]=useState(false),[epoch,setEpoch]=useState(0);
   const chapter=chapterStart(c.step);
+  const total=c.topic?steps.filter(s=>s.chapter===c.topic).length:steps.length;
+  const position=c.topic?c.step-chapter+1:c.step+1;
+  const last=c.topic?steps[c.step+1]?.chapter!==c.topic:c.step===steps.length-1;
   useEffect(()=>{setActed(false);setReady(Boolean(step.note));heading.current?.focus();},[c.step,epoch]);
   useEffect(()=>{
     const host=root.current;if(!host)return;let highlighted:HTMLElement|null=null;
@@ -71,10 +76,10 @@ export default function ManagementGuide({controller:c,renderWorkspace}:{controll
       const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
     }
   }}>
-    <header className="guide-coach"><div className="guide-progress"><strong>使い方ガイド · 練習専用</strong><span>{c.step+1} / {steps.length} · {step.chapter}</span><progress max={steps.length} value={c.step+1}/></div><h2 id="guide-heading" tabIndex={-1} ref={heading}>{step.title}</h2><p>{step.body}</p>{c.saveError&&<p role="alert">進行状況を端末に保存できません。次回は設定から開始してください。</p>}</header>
+    <header className="guide-coach"><div className="guide-progress"><strong>使い方ガイド · 練習専用</strong><span>{position} / {total} · {step.chapter}{c.topic?"（項目別）":""}</span><progress max={total} value={position}/></div><h2 id="guide-heading" tabIndex={-1} ref={heading}>{step.title}</h2><p>{step.body}</p>{c.saveError&&<p role="alert">進行状況を端末に保存できません。次回は設定から開始してください。</p>}</header>
     <div className="guide-workspace" key={chapter+':'+epoch} ref={root} onClickCapture={interact} onInputCapture={interact} onChangeCapture={interact} onPointerUpCapture={interact}>
       {step.chapter==='受付の練習'?<GuideReceptionPractice/>:renderWorkspace()}
     </div>
-    <footer className="guide-footer"><button onClick={c.pause}>中断する</button><button onClick={()=>{c.restartChapter();setEpoch(v=>v+1);}}>この章をやり直す</button><span role="status">{ready?'確認できました。次へ進めます。':!step.note&&!found?'操作する画面の準備中です。見つからない場合は章をやり直してください。':'枠で示した箇所を操作してください。'}</span>{step.target?.label==='画像を追加'&&<button onClick={sampleImage}>練習用画像を選ぶ</button>}<button className="guide-next" disabled={!ready} onClick={c.next}>{c.step===steps.length-1?'ガイドを完了する':step.note?'確認して次へ':'次へ'}</button></footer>
+    <footer className="guide-footer"><button onClick={c.pause}>中断する</button><button onClick={()=>{c.restartChapter();setEpoch(v=>v+1);}}>この章をやり直す</button><span role="status">{ready?'確認できました。次へ進めます。':!step.note&&!found?'操作する画面の準備中です。見つからない場合は章をやり直してください。':'枠で示した箇所を操作してください。'}</span>{step.target?.label==='画像を追加'&&<button onClick={sampleImage}>練習用画像を選ぶ</button>}<button className="guide-next" disabled={!ready} onClick={c.next}>{last?(c.topic?'この項目を完了する':'ガイドを完了する'):step.note?'確認して次へ':'次へ'}</button></footer>
   </section>;
 }

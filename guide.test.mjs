@@ -130,3 +130,38 @@ test('the bundled practice image has valid PNG chunks and can be decoded',async(
  while(offset<bytes.length){const length=bytes.readUInt32BE(offset),type=bytes.subarray(offset+4,offset+8).toString();assert.equal(crc(bytes.subarray(offset+4,offset+8+length)),bytes.readUInt32BE(offset+8+length),type);if(type==='IDAT')data.push(bytes.subarray(offset+8,offset+8+length));offset+=length+12;}
  assert.equal(inflateSync(Buffer.concat(data)).length,32*(1+32*4));
 });
+
+test('each management topic starts at its own chapter, stops at its end and preserves full-guide progress',async()=>{
+ const values=new Map([['qr-ticket-guide-management-v1:topics',JSON.stringify({step:2,status:'paused'})]]);
+ const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};
+ const load=loader({}, {'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),mod=load('management-app/src/ManagementGuide.tsx'),steps=load('management-app/src/guideSteps.ts').managementGuideSteps;
+ let view,renderer;function Harness(){view=mod.useManagementGuide('topics',true,storage);return null;}
+ await act(async()=>{renderer=create(React.createElement(Harness));});
+ const before=values.get('qr-ticket-guide-management-v1:topics');
+ try{
+  for(const topic of mod.managementGuideTopics){
+   await act(async()=>view.startTopic(topic.chapter));assert.equal(view.open,true);assert.equal(view.topic,topic.chapter);assert.equal(view.step,steps.findIndex(s=>s.chapter===topic.chapter));
+   for(let i=0;i<topic.steps;i++)await act(async()=>view.next());assert.equal(view.open,false,topic.chapter+' should finish without entering the next chapter');assert.equal(values.get('qr-ticket-guide-management-v1:topics'),before);
+  }
+  await act(async()=>view.startTopic('デザイン'));await act(async()=>view.pause());assert.equal(values.get('qr-ticket-guide-management-v1:topics'),before);
+  await act(async()=>view.start(false));assert.equal(view.topic,null);assert.equal(view.step,1);
+ }finally{await act(async()=>renderer.unmount());}
+});
+
+test('reception topics use the required practice scenario and preserve full-guide completion',async()=>{
+ const values=new Map([['qr-ticket-guide-reception-v1:topics',JSON.stringify({step:10,status:'completed'})]]),before=values.get('qr-ticket-guide-reception-v1:topics');
+ const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};
+ const load=loader({localStorage:storage},{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),mod=load('reception-app/src/ReceptionGuide.tsx');
+ let view,renderer;function Harness(){view=mod.useReceptionGuide('topics',true);return null;}
+ await act(async()=>{renderer=create(React.createElement(Harness));});
+ try{
+  for(const topic of mod.receptionGuideTopics){
+   await act(async()=>view.startTopic(topic.id));assert.equal(view.step,topic.start);assert.equal(view.open,true);
+   for(let i=topic.start;i<=topic.end;i++)await act(async()=>view.next());assert.equal(view.open,false);assert.equal(values.get('qr-ticket-guide-reception-v1:topics'),before);
+  }
+ }finally{await act(async()=>renderer.unmount());}
+ const Practice=load('management-app/src/GuideReceptionPractice.tsx').default;
+ await act(async()=>{renderer=create(React.createElement(Practice,{initialScenario:'inside'}));});
+ const click=async text=>{const n=renderer.root.findAllByType('button').find(n=>label(n)===text);assert.ok(n,text);await act(async()=>n.props.onClick());};
+ try{await click('出口受付へ切り替え');await click('練習QRを読み取る');assert.match(label(renderer.root),/退場を受け付け/);await click('入口受付へ切り替え');await click('練習QRを読み取る');assert.match(label(renderer.root),/再入場/);assert.match(label(renderer.root),/初回来場者 1人/);}finally{await act(async()=>renderer.unmount());}
+});
