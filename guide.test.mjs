@@ -121,3 +121,12 @@ test('reception guide waits for registration approval and can be reopened after 
  await act(async()=>renderer.unmount());await act(async()=>{renderer=create(React.createElement(Harness));});assert.equal(view.open,false);
  await act(async()=>view.start());assert.equal(view.open,true);assert.equal(view.step,0);await act(async()=>view.pause());assert.equal(view.open,false);await act(async()=>renderer.unmount());
 });
+
+test('the bundled practice image has valid PNG chunks and can be decoded',async()=>{
+ const {inflateSync}=await import('node:zlib');
+ const encoded=readFileSync('management-app/src/ManagementGuide.tsx','utf8').match(/atob\('([^']+)'\)/)[1],bytes=Buffer.from(encoded,'base64');
+ const crc=data=>{let n=0xffffffff;for(const b of data){n^=b;for(let i=0;i<8;i++)n=(n>>>1)^((n&1)?0xedb88320:0);}return (n^0xffffffff)>>>0;};
+ assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');let offset=8,data=[];
+ while(offset<bytes.length){const length=bytes.readUInt32BE(offset),type=bytes.subarray(offset+4,offset+8).toString();assert.equal(crc(bytes.subarray(offset+4,offset+8+length)),bytes.readUInt32BE(offset+8+length),type);if(type==='IDAT')data.push(bytes.subarray(offset+8,offset+8+length));offset+=length+12;}
+ assert.equal(inflateSync(Buffer.concat(data)).length,32*(1+32*4));
+});

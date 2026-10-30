@@ -61,8 +61,8 @@ export default function ManagementGuide({controller:c,renderWorkspace}:{controll
   };
   const sampleImage=()=>{
     const input=root.current?.querySelector<HTMLInputElement>('input[aria-label="画像を追加"]');if(!input)return;
-    const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='),v=>v.charCodeAt(0));
-    const transfer=new DataTransfer();transfer.items.add(new File([bytes],'練習用マーク.png',{type:'image/png'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+    const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAOElEQVR4nO3OwQ0AIAgAMXZxNedlJZ3BByGYXnL/xtp5Og8AAACAMYDXAAAAAAD+A1QNAAAA0A64qmk/F6LAAoAAAAAASUVORK5CYII='),v=>v.charCodeAt(0));
+    try{const transfer=new DataTransfer();transfer.items.add(new File([bytes],'練習用マーク.png',{type:'image/png'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}catch{input.click();}
   };
   return <section className="management-guide" role="dialog" aria-modal="true" aria-labelledby="guide-heading" ref={dialog} onKeyDown={event=>{
     if(event.key==='Escape'){event.preventDefault();c.pause();}
