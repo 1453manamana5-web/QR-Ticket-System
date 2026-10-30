@@ -21,7 +21,7 @@ test('offline manager export creates self contained QR pages and escapes the eve
     const html=await saved.text();
     assert.match(html,/<svg/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img src=x/);
     assert.doesNotMatch(html,/<script[^>]+src=|<link[^>]+href=/);
-    assert.equal((html.match(/<script>/g)??[]).length,1);
+    assert.equal((html.match(/<script>/g)??[]).length,0);
   }finally{await act(async()=>renderer.unmount());}
 });
 test('print title treats event names as text and prints only once',async()=>{
