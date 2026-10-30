@@ -3,21 +3,16 @@ import AppRoot from "./App";
 import "./styles.css";
 import "./legacy-ticket-design-overrides.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
+import OfflineReserveRoot from './ReservePrinting';
 
 const installAutomaticAppUpdate = () => {
   if (!("serviceWorker" in navigator)) return;
-  const hadController = navigator.serviceWorker.controller !== null;
-  let reloading = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!hadController || reloading) return;
-    reloading = true;
-    window.location.reload();
-  });
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.ready.then((registration) => registration.update()).catch((error) => {
+  const register=() => {
+    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`,{scope:import.meta.env.BASE_URL}).catch((error) => {
       console.warn("アプリの更新確認に失敗しました。", error);
     });
-  }, { once: true });
+  };
+  if(document.readyState==='complete')register();else window.addEventListener('load',register,{once:true});
 };
 
 function describeFirebaseStartupError(error: unknown): string {
@@ -31,9 +26,11 @@ function describeFirebaseStartupError(error: unknown): string {
 async function startApp() {
   const rootElement = document.getElementById("root");
   if (!rootElement) throw new Error("Reactの表示領域が見つかりません。");
+  installAutomaticAppUpdate();
+  const reserveEventId=new URLSearchParams(window.location.search).get('reserve-print');
+  if(reserveEventId){ReactDOM.createRoot(rootElement).render(<OfflineReserveRoot eventId={reserveEventId}/>);return;}
   try {
     await ensureFirebaseAuth();
-    installAutomaticAppUpdate();
     ReactDOM.createRoot(rootElement).render(<AppRoot />);
   } catch (error) {
     console.error("Firebase認証を開始できませんでした。", error);

@@ -4993,3 +4993,11 @@ body:has(.ticket-screen),
 .venue-occupancy-inspection output{font-size:14px;color:#243a55;min-width:135px;}
 .venue-occupancy-inspection label{display:flex;align-items:center;gap:12px;flex:1;min-width:200px;font-size:12px;color:#52627a;}
 .venue-occupancy-inspection input{flex:1;min-width:80px;min-height:40px;accent-color:#1e78db;}
+
+.reserve-print-controls{display:grid;gap:12px;min-width:0;font-size:15px;line-height:1.6}
+.reserve-print-controls p{margin:0;overflow-wrap:anywhere}.reserve-print-controls label{display:grid;gap:5px}
+.reserve-print-controls input{width:100%;min-width:0;border:1px solid #c8d2df;border-radius:10px;padding:10px;font-size:18px;background:white;color:#172033}
+.reserve-print-controls button{border:1px solid #bccbdc;border-radius:12px;padding:12px;background:#edf4fc;color:#172033;font-weight:700;font-size:15px;white-space:normal;cursor:pointer}
+.reserve-print-controls button:disabled{opacity:.5;cursor:default}.reserve-print-controls [role=alert]{color:#b42318;font-weight:600}
+.offline-reserve-root{max-width:760px;margin:auto;padding:24px;background:#fff;min-height:100dvh;color:#172033}
+.offline-reserve-root h1{font-size:28px}.offline-reserve-root h2{font-size:21px}.offline-reserve-root .reserve-print-controls{margin-top:24px}
