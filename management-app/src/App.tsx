@@ -130,7 +130,7 @@ export default function App({practice=false}:AppProps={}) {
     const sequence = pageOpeningOrigin.sequence;
     const timer = window.setTimeout(() => {
       setPageOpeningOrigin(current => current?.sequence === sequence ? null : current);
-    }, 820);
+    }, pageOpeningOrigin.bubble ? 820 : 420);
     return () => window.clearTimeout(timer);
   }, [pageOpeningOrigin]);
   const [navSwipePreview, setNavSwipePreview] = useState<string | null>(null);
@@ -173,7 +173,9 @@ export default function App({practice=false}:AppProps={}) {
     if (elapsed > 0) drag.velocity = (event.clientX - drag.lastX) / elapsed;
     drag.lastX = event.clientX;
     drag.lastTime = event.timeStamp;
-    drag.width = Math.max(drag.min, Math.min(drag.max, drag.startWidth + dx));
+    const requested=drag.startWidth+dx;
+    const bounded=Math.max(drag.min,Math.min(drag.max,requested));
+    drag.width=bounded+Math.max(-12,Math.min(12,(requested-bounded)*.16));
     setSidebarDragWidth(drag.width);
   };
   const finishSidebarDrag = (event: React.PointerEvent<HTMLElement>, cancelled = false) => {
@@ -2968,7 +2970,7 @@ function NavIcon({type}:{type:string}){
         "--page-origin-x": `${pageOpeningOrigin.x}px`,
         "--page-origin-y": `${pageOpeningOrigin.y}px`,
         "--page-bubble-radius": `${pageOpeningOrigin.radius}px`,
-        animationName:pageOpeningOrigin.bubble&&appSettings.aiLabEnabled?(pageOpeningOrigin.sequence%2?"sidebar-soap-open-a":"sidebar-soap-open-b"):undefined,
+        animationName:pageOpeningOrigin.bubble&&appSettings.aiLabEnabled?(pageOpeningOrigin.sequence%2?"sidebar-soap-open-a":"sidebar-soap-open-b"):(pageOpeningOrigin.sequence%2?"sidebar-fluid-open-a":"sidebar-fluid-open-b"),
       } as import("react").CSSProperties) : undefined}
     >
       <header className="management-header">
