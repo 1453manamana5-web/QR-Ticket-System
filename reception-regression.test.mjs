@@ -460,7 +460,7 @@ test("offline shell preloads the original chimes and recorded entry guidance at 
     addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},
   },URL,{open:async()=>({put:async url=>stored.push(url)})},async()=>response);
   listeners.install({waitUntil:promise=>{installed=promise;}});await installed;
-  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3","entry_success_voice_d_v1.mp3","exit_thank_you_voice_d_v1.mp3","exit_success_voice_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
+  for(const file of ["qr_scan_detected.wav","qr_result_chime.wav","qr_gate_error_chime_v1.wav","entry_osusumi_voice_d_v1.mp3","entry_success_voice_d_v1.mp3","exit_thank_you_voice_d_v1.mp3","exit_success_voice_d_v1.mp3","error_retry_guidance_d_v1.mp3","error_retry_result_d_v1.mp3"])assert.ok(stored.includes("https://example.test/QR-Ticket-System/sounds/"+file));
   assert.ok(stored.includes("https://example.test/QR-Ticket-System/assets/app.js"));
 });
 
@@ -739,7 +739,7 @@ test('recorded entry guidance obeys voice settings independently of chimes and s
   assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');const entry=h.players[0];
   assert.match(entry.src,/entry_osusumi_voice_d_v1\.mp3$/);assert.equal(entry.volume,.45);assert.equal(entry.paused,false);
   assert.equal(await h.audio.playReceptionAudio('success'),'muted');assert.equal(entry.paused,false);
-  await h.audio.playReceptionAudio('error');assert.equal(h.players.length,1);assert.match(entry.src,/qr_gate_error_chime_v1\.wav$/);
+  await h.audio.playReceptionAudio('error');assert.equal(h.players.length,1);assert.match(entry.src,/error_retry_result_d_v1\.mp3$/);
   await h.audio.playReceptionAudio('entryGuidance');h.audio.stopReceptionGuidance();assert.equal(entry.paused,true);
 });
 
@@ -798,4 +798,32 @@ test('voice activation auditions exit in exit mode and follows the result shown 
     await h.click('音声を有効にして確認');assert.equal(h.audioRequests.at(-1),'entrySuccess');
     await h.click('出口結果');await h.click('音声を有効にして確認');assert.equal(h.audioRequests.at(-1),'exitSuccess');
   }finally{await h.close();}
+});
+
+test('error guidance reuses one player, respects voice and volume settings, and remains audible with success chime disabled',async()=>{
+  const enabled=recordedAudioHarness({voiceGuidance:true,successSound:false});
+  await enabled.audio.playReceptionAudio('exitSuccess');
+  assert.equal(await enabled.audio.playReceptionAudio('error'),'played');assert.equal(enabled.players.length,1);assert.match(enabled.players[0].src,/error_retry_result_d_v1\.mp3$/);
+  enabled.audio.stopReceptionGuidance();assert.equal(enabled.players[0].paused,true);
+  await enabled.audio.playReceptionAudio('entryGuidance');assert.match(enabled.players[0].src,/entry_osusumi_voice_d_v1\.mp3$/);
+  const disabled=recordedAudioHarness({voiceGuidance:false,successSound:false});assert.equal(await disabled.audio.playReceptionAudio('error'),'played');assert.match(disabled.players[0].src,/qr_gate_error_chime_v1\.wav$/);
+  const muted=recordedAudioHarness({voiceGuidance:true,volume:0});assert.equal(await muted.audio.playReceptionAudio('error'),'muted');assert.equal(muted.players.length,0);
+});
+
+test('error D is available offline and the generated standalone sample is unchanged',async()=>{
+  const bytes=readFileSync(new URL('./reception-app/public/sounds/error_retry_guidance_d_v1.mp3',import.meta.url));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'d03b4f629181a15f35586dd85e36ae1f979ef22983d909b728eedc6fdd3ee3ad');
+  const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
+  h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('error'),'played');assert.match(h.players[0].src,/^blob:/);
+});
+
+test('actual reception errors and error preview both request the error sound and voice check auditions the retry prompt',async()=>{
+  const h=await harness();try{
+    await h.click('音声を有効にして確認');await h.click('受付を開始する');await h.scan('nonexistent-ticket');assert.equal(h.audioRequests.at(-1),'error');
+  }finally{await h.close();}
+  const preview=await harness();try{
+    await preview.click('受付結果を試験表示');await preview.click('エラー結果');assert.equal(preview.audioRequests.at(-1),'error');
+    await preview.click('音声を有効にして確認');assert.equal(preview.audioRequests.at(-1),'error');assert.match(preview.text(),/やり直してください/);
+    await preview.click('入口結果');assert.equal(preview.audioRequests.at(-1),'entrySuccess');
+  }finally{await preview.close();}
 });
