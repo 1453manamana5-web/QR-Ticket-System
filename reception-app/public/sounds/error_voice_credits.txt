@@ -1,0 +1,20 @@
+エラー時「やり直してください。」（Dの声）
+
+AI-generated speech; voice jf_nezumi. Kokoro-82M v1.0 (Apache License 2.0).
+https://huggingface.co/hexgrad/Kokoro-82M
+ONNX conversion: https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX
+Official voice/source list: https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+CC BY source credit as identified by the model author: Koniwa / tnc — ねずみの嫁入り
+https://github.com/koniwa/koniwa/blob/master/source/tnc/tnc__nezuminoyomeiri.txt
+https://creativecommons.org/licenses/by/3.0/
+
+No additional recording or training of a real person's voice. No endorsement.
+Generation: Japanese phonemes; speed 1.0; phrase accent nucleus 4 of 10 moras
+from local OpenJTalk analysis. F0 follows phoneme timing and descends after
+「やりなお」, retaining the low tail through 「してください」.
+Modified local F0 conditioning, silence padding, volume normalization, MP3 encoding.
+Standalone SHA-256: d03b4f629181a15f35586dd85e36ae1f979ef22983d909b728eedc6fdd3ee3ad
+
+error_retry_result_d_v1.mp3 is a derived mix: original qr_gate_error_chime_v1.wav
+at 35% volume plus D voice delayed 220ms, limited to avoid clipping, MP3 encoded.
+The original chime and all entry/exit recordings remain unchanged.
