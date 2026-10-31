@@ -1,0 +1,52 @@
+/* Shared surface motion: animate composited properties, never form geometry. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root { --surface-spring: cubic-bezier(.22,1.08,.36,1); }
+  :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop) {
+    animation: surface-backdrop-in 180ms ease-out backwards;
+  }
+  :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,.member-registration-modal,.member-qr-modal) {
+    animation: surface-dialog-in 360ms var(--surface-spring) backwards;
+    transform-origin: 50% 65%;
+  }
+  :is(.settings-toast,.terminal-notice,.notice.success,.notice.error) {
+    animation: surface-notice-in 260ms cubic-bezier(.2,.8,.3,1) backwards;
+  }
+  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close) {
+    transition: transform 220ms var(--surface-spring),background-color 160ms ease,box-shadow 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close):active:not(:disabled) {
+    transform: scale(.975);
+    transition-duration: 80ms;
+  }
+  :is(.modal-close,.ticket-modal-close,.ticket-list-close):active:not(:disabled) { transform: scale(.9); }
+  /* Cards keep their layout stable; only their entry is animated. */
+  .home-quick-grid > button { animation: surface-card-in 340ms cubic-bezier(.2,.8,.3,1) backwards; }
+  .home-quick-grid > button:nth-child(2) { animation-delay: 35ms; }
+  .home-quick-grid > button:nth-child(3) { animation-delay: 70ms; }
+  .home-quick-grid > button:nth-child(n+4) { animation-delay: 105ms; }
+}
+@keyframes surface-backdrop-in { from {opacity:0} to {opacity:1} }
+@keyframes surface-dialog-in {
+  from {opacity:0;transform:translate3d(0,22px,0) scale(.975)}
+  to {opacity:1;transform:translate3d(0,0,0) scale(1)}
+}
+@keyframes surface-notice-in {
+  from {opacity:0;transform:translate3d(0,8px,0)}
+  to {opacity:1;transform:translate3d(0,0,0)}
+}
+@keyframes surface-card-in {
+  from {opacity:.4;transform:translate3d(0,8px,0)}
+  to {opacity:1;transform:translate3d(0,0,0)}
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop,
+    .new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,
+    .member-registration-modal,.member-qr-modal,.settings-toast,.terminal-notice,.notice,.home-quick-grid > button) {
+    animation: none !important;
+  }
+  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close) {
+    transition: none !important;
+  }
+  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close):active {transform:none!important}
+}
