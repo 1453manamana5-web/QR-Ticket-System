@@ -2,6 +2,7 @@ import ReactDOM from "react-dom/client";
 import AppRoot from "./App";
 import "./styles.css";
 import "./legacy-ticket-design-overrides.css";
+import "./motion.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
 import OfflineReserveRoot from './ReservePrinting';
 

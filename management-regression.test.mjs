@@ -50,7 +50,7 @@ test('reserves require an existing unique range of valid unused tickets',()=>{
 test('the offline reserve entry opens before Firebase authentication',async()=>{
   let authentication=0,rendered;
   function Offline(){}function App(){}
-  const deps={'react-dom/client':{default:{createRoot:()=>({render:element=>{rendered=element;}})}},'react/jsx-runtime':require('react/jsx-runtime'),'./App':{default:App},'./styles.css':{},'./legacy-ticket-design-overrides.css':{},'./ReservePrinting':{default:Offline},'./firebaseClient':{ensureFirebaseAuth:()=>{authentication++;throw Error('No network');}}};
+  const deps={'react-dom/client':{default:{createRoot:()=>({render:element=>{rendered=element;}})}},'react/jsx-runtime':require('react/jsx-runtime'),'./App':{default:App},'./styles.css':{},'./legacy-ticket-design-overrides.css':{},'./motion.css':{},'./ReservePrinting':{default:Offline},'./firebaseClient':{ensureFirebaseAuth:()=>{authentication++;throw Error('No network');}}};
   const source=readFileSync('management-app/src/main.tsx','utf8').replaceAll('import.meta.env.BASE_URL','"/QR-Ticket-System/management-app/"');
   new Function('exports','require','document','navigator','window',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:false}}).outputText)({},n=>deps[n],{getElementById:()=>({})},{},{location:{search:'?reserve-print=reserve-event'}});
   assert.equal(authentication,0);assert.equal(rendered.type,Offline);assert.equal(rendered.props.eventId,'reserve-event');
