@@ -319,7 +319,7 @@ test('experimental navigation bubble starts at the selected item and restarts on
 test('normal mode and reduced-motion preference do not show experimental soap bubbles',async()=>{
   for(const [enabled,motion] of [[false,false],[true,true]]){
     const h=await harness({loadAppSettings:async()=>({aiLabEnabled:enabled})},{geometry:bubbleGeometry(),motion});
-    try{await h.nav('イベント管理');assert.equal(h.renderer.root.findAllByProps({className:'sidebar-soap-bubble'}).length,0);if(motion)assert.equal(h.renderer.root.findByType('main').props.style,undefined);}
+    try{await h.nav('イベント管理');assert.equal(h.renderer.root.findAllByProps({className:'sidebar-soap-bubble'}).length,0);if(motion)assert.equal(h.renderer.root.findByType('main').props.style,undefined);else{const first=h.renderer.root.findByType('main').props.style.animationName;assert.match(first,/^sidebar-fluid-open-[ab]$/);await h.nav('設定');assert.notEqual(h.renderer.root.findByType('main').props.style.animationName,first);}}
     finally{await h.close();}
   }
 });
