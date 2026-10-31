@@ -1,3 +1,4 @@
+import { loadPendingReceptionEventApprovals, approveReceptionEvent, type ReceptionEventApproval } from "./firebaseData";
 import { useEffect, useMemo, useRef, useState } from "react";
 import VenueOccupancyChart from "./VenueOccupancyChart";
 import OfflineEventTransfer from "./OfflineEventTransfer";
@@ -464,6 +465,8 @@ export default function App({practice=false}:AppProps={}) {
   const [terminals, setTerminals] = useState<ManagedTerminal[]>(defaultTerminals);
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalNotice, setTerminalNotice] = useState("");
+  const [receptionEventApprovals, setReceptionEventApprovals] = useState<ReceptionEventApproval[]>([]);
+  const [approvingEventTerminal, setApprovingEventTerminal] = useState<string | null>(null);
   const [forceTerminalRegistration, setForceTerminalRegistration] = useState(false);
   const [terminalDataHydrated, setTerminalDataHydrated] = useState(false);
   const [firebaseDeviceId, setFirebaseDeviceId] = useState(() => {
@@ -723,6 +726,27 @@ export default function App({practice=false}:AppProps={}) {
   }, []);
 
 
+
+  useEffect(() => {
+    if (!ownManagementTerminalApproved) { setReceptionEventApprovals([]); return; }
+    let active = true;
+    const refresh = () => { void loadPendingReceptionEventApprovals().then(items => { if (active) setReceptionEventApprovals(items); })
+      .catch(reason => console.error("イベント受付申請の取得に失敗しました", reason)); };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [ownManagementTerminalApproved]);
+
+  const approveEventReception = async (item: ReceptionEventApproval) => {
+    setApprovingEventTerminal(item.terminalId);
+    try {
+      await approveReceptionEvent(item.eventId, item.terminalId);
+      setReceptionEventApprovals(current => current.filter(value => value.eventId !== item.eventId || value.terminalId !== item.terminalId));
+      setTerminalNotice("このイベントの受付利用を承認しました。受付アプリに自動反映されます。");
+    } catch (reason) {
+      setTerminalNotice("イベントの受付承認に失敗しました（" + (reason instanceof Error ? reason.message : String(reason)) + "）。");
+    } finally { setApprovingEventTerminal(null); }
+  };
 
   useEffect(() => {
     if (!terminalDataHydrated || !ownManagementTerminalApproved) return;
@@ -2184,6 +2208,18 @@ export default function App({practice=false}:AppProps={}) {
             <div><span>端末ID</span><strong className="terminal-mono">{ownTerminal.terminalId}</strong></div>
             <div><span>接続状態</span><strong className="terminal-state-text online">ブラウザ動作中</strong></div>
           </div>
+        </section>
+
+        <section className="terminal-list-card terminal-pending-card">
+          <div className="terminal-section-heading"><div><h3>イベントごとの受付承認</h3>
+            <p>イベントが変わるたびに受付利用の承認が必要です。このiPad自身の申請もここで承認できます。</p></div></div>
+          {receptionEventApprovals.length ? receptionEventApprovals.map(item => (
+            <article className="managed-terminal-card pending-card" key={item.eventId + item.terminalId}>
+              <div><strong>{item.name}</strong><p>{item.eventName} ／ {item.terminalId}</p></div>
+              <button className="primary-action" disabled={!canManageTerminals || approvingEventTerminal !== null}
+                onClick={() => void approveEventReception(item)}>{approvingEventTerminal === item.terminalId ? "承認中…" : "このイベントの受付を承認"}</button>
+            </article>
+          )) : <p>イベントの受付承認待ちはありません。受付アプリを開くと申請が表示されます。</p>}
         </section>
 
         <section className="terminal-list-card terminal-pending-card">

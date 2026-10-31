@@ -86,7 +86,7 @@ export default function App(){
   const screenRef=useRef<Screen>(screen);
   screenRef.current=screen;
   const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
-  const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null>(null);
+  const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null>(null);
   const guide=useReceptionGuide(getTerminalId(),terminalRegistration?.approved===true);
   const [guideSettingsOpen,setGuideSettingsOpen]=useState(false);
   const [mode,setMode]=useState<Mode>("entry");
@@ -147,16 +147,17 @@ export default function App(){
       try{
         const raw=localStorage.getItem("qr-ticket-reception-approved");
         if(!raw)return null;
-        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown};
+        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:string};
         if(saved.approved!==true||saved.terminalId!==getTerminalId())return null;
         return {
           approved:true,
+          eventId:saved.eventId,
           status:"offline" as const,
           name:typeof saved.name==="string"&&saved.name.trim()?saved.name:"受付端末"
         };
       }catch{return null;}
     };
-    const applyRegistration=(incoming:{approved:boolean;status:"online"|"offline"|"pending";name:string}|null)=>{
+    const applyRegistration=(incoming:{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null)=>{
       // オフライン時にFirebaseのキャッシュが空でも、オンラインで承認済みだった端末は
       // ローカルの承認記録を使う。オンラインで承認取消が確認できた場合は従来どおり停止する。
       const value=(!navigator.onLine&&!incoming?.approved)?readCachedApproval():incoming;
@@ -172,6 +173,7 @@ export default function App(){
               approved:true,
               name:value.name,
               terminalId:getTerminalId(),
+              eventId:value.eventId,
               savedAt:new Date().toISOString()
             }));
           }catch(reason){console.warn("受付承認状態を端末に保存できませんでした",reason);}
@@ -217,26 +219,17 @@ export default function App(){
   },[]);
 
   const requireApprovalForNewEvent=useCallback(async(eventId:string)=>{
-    const registrationVersion=registrationVersionRef.current;
-    const saved=await loadLocalEvent();
-    if(!registrationIsCurrent(registrationVersion))return true;
-    if(!saved?.dataReady||saved.event.eventId===eventId)return false;
-    eventAuthenticationRequiredRef.current=true;
-    const name=terminalRegistrationName.trim()||"受付端末";
-    const pending=await requestReceptionEventReapproval(name);
-    if(!pending)return false; // Management owners keep their management grant.
+    const registration=await getTerminalRegistration();
+    if(registration?.approved && registration.eventId===eventId)return false;
     registrationActiveRef.current=false;
     ++registrationVersionRef.current;
     pendingRemoteModeRef.current=null;
-    await clearLocalEvent(); // Queue/history remain durable.
-    setLocalEvent(null);
-    setAuthPayload(null);
-    setResult(null);
-    setTerminalRegistration({approved:false,status:"pending",name});
+    setLocalEvent(null); setAuthPayload(null); setResult(null);
+    setTerminalRegistration(registration);
     setScreen("registration");
-    setError("イベントが切り替わりました。新しいイベントの受付申請を送信しました。管理者の承認をお待ちください。");
+    setError("このイベントの受付承認が必要です。管理画面の「イベントごとの受付承認」から承認してください。");
     return true;
-  },[terminalRegistrationName]);
+  },[]);
 
   const receiveEventByCommunication=useCallback(async()=>{
     if(busy||eventLoadingRef.current)return;
@@ -299,6 +292,7 @@ export default function App(){
 
     const restoreCachedEvent=async()=>{
       const saved=await loadLocalEvent(true);
+      if(terminalRegistration?.eventId && saved?.event.eventId!==terminalRegistration.eventId)return null;
       if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||!registrationIsCurrent(registrationVersion)||eventAuthenticationRequiredRef.current)return null;
       if(cancelled||!["auth","ready","registration"].includes(screenRef.current))return null;
       cachedEvent=saved;
@@ -444,7 +438,7 @@ export default function App(){
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
     void saveTerminalHeartbeat(getTerminalId(), "stopped").then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("起動時の通信速度測定に失敗しました",reason));
-  },[terminalRegistration?.approved]);
+  },[terminalRegistration?.approved,terminalRegistration?.eventId]);
 
   useEffect(()=>{
     void syncPendingRecords();
@@ -804,7 +798,7 @@ export default function App(){
         </> : <>
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
-          <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
+          <p className="entry-result-secondary">管理画面の「イベントごとの受付承認」で、この端末を承認してください。同じiPadから承認できます。</p>
           <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
         </>}
         {error&&<p className="entry-result-secondary">{error}</p>}
@@ -826,7 +820,7 @@ export default function App(){
           </> : <>
             <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
             <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
-            <p className="entry-result-secondary">承認されるとイベント認証画面へ自動的に進めるようになります。</p>
+            <p className="entry-result-secondary">管理画面の「イベントごとの受付承認」で、この端末を承認してください。同じiPadから承認できます。</p>
           </>}
           {error&&<p className="entry-result-secondary">{error}</p>}
         </section>

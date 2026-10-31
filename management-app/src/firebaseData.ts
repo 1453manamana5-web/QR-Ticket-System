@@ -830,3 +830,25 @@ export async function markReserveTicketsPrinted(eventId:string,ids:string[]):Pro
     });
   }
 }
+
+
+export type ReceptionEventApproval = { eventId: string; eventName: string; terminalId: string; name: string; status: string };
+export async function loadPendingReceptionEventApprovals(): Promise<ReceptionEventApproval[]> {
+  await ensureFirebaseAuth();
+  const db = getFirebaseDb();
+  const events = await getDocsFromServer(query(collection(db, "events"), where("receptionTarget", "==", true)));
+  const result: ReceptionEventApproval[] = [];
+  for (const event of events.docs) {
+    if (event.data().eventStatus === "finished") continue;
+    const approvals = await getDocsFromServer(query(collection(db, "events", event.id, "receptionApprovals"), where("status", "==", "pending")));
+    for (const item of approvals.docs) result.push({ eventId: event.id, eventName: String(event.data().eventName ?? event.id),
+      terminalId: item.id, name: String(item.data().name ?? item.id), status: String(item.data().status) });
+  }
+  return result;
+}
+export async function approveReceptionEvent(eventId: string, terminalId: string): Promise<void> {
+  await ensureFirebaseAuth();
+  await updateDoc(doc(getFirebaseDb(), "events", eventId, "receptionApprovals", terminalId), {
+    status: "approved", decidedAt: new Date().toISOString(), decidedByUid: await getFirebaseUid(),
+  });
+}
