@@ -6,14 +6,14 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
-function loadModule(file, dependencies, storage = { getItem: () => null, setItem: () => {} }) {
+function loadModule(file, dependencies, storage = { getItem: () => null, setItem: () => {} }, globals = {}) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8")
     .replace(/import\.meta\.env\.[A-Z_]+/g, '"test-config"');
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, localStorage: storage, require: name => {
+  vm.runInNewContext(compiled, { exports, ...globals, localStorage: storage, require: name => {
     if (!(name in dependencies)) throw Error("Unexpected dependency: " + name);
     return dependencies[name];
   } });
@@ -26,7 +26,7 @@ for (const app of ["management-app", "reception-app"]) {
     return loadModule("./" + app + "/src/firebaseClient.ts", {
       "firebase/app": { getApps: () => [firebaseApp], getApp: () => firebaseApp },
       "firebase/auth": { getAuth: () => auth, signInAnonymously: signIn },
-      "firebase/firestore": { getFirestore: () => ({}) },
+      "firebase/firestore": { initializeFirestore: () => ({}), persistentLocalCache: value => value, persistentMultipleTabManager: () => ({}) },
     });
   }
 
@@ -164,4 +164,20 @@ test('reserve print activation is idempotent, preserves reception state, and lea
   assert.equal(inventory.get('events/e/tickets/r').basicInfo.reservePrinted,true);assert.equal(inventory.get('events/e/tickets/r').currentStatus,'inside');assert.equal(inventory.get('events/e/tickets/r').valid,false);
   assert.equal(inventory.get('events/e').ticketCount,700);assert.equal(inventory.get('events/e/tickets/n').basicInfo.reservePrinted,undefined);
   const count=writes.length;await api.markReserveTicketsPrinted('e',['r']);assert.equal(writes.length,count);
+});
+
+for(const ownerUid of ['current-uid','another-owner'])test('offline terminal cache verifies restored identity and owner: '+ownerUid,async()=>{
+ const snap=value=>({exists:()=>true,data:()=>value});let servers=0;
+ const client=loadModule('./management-app/src/firebaseData.ts',{
+  './firebaseClient':{ensureFirebaseAuth:async()=>{},getFirebaseUid:async()=> 'current-uid',getFirebaseDb:()=>({})},
+  'firebase/firestore':{
+   doc:(_db,...p)=>p.join('/'),collection:(_db,...p)=>p.join('/'),
+   getDocFromServer:async()=>{servers++;throw Error('network');},
+   getDocsFromServer:async()=>{servers++;throw Error('network');},
+   getDocFromCache:async ref=>snap(ref.startsWith('terminalInstallations/')?{authUid:'current-uid',terminalId:'T-CACHED',approved:true}:ref.startsWith('terminalOwners/')?{ownerUid,enabled:true}:{approved:true,managementApproved:true,role:'management'}),
+   getDocsFromCache:async()=>({docs:[{id:'T-CACHED',data:()=>({approved:true,managementApproved:true,role:'management'})}]}),
+  }
+ },{getItem:()=>null,setItem(){}},{navigator:{onLine:false}});
+ assert.equal((await client.loadTerminals()).length,ownerUid==='current-uid'?1:0);assert.equal(servers,0);
+ await assert.rejects(client.saveEvent({eventId:'cached'}),/オンライン/);assert.equal(servers,0);
 });

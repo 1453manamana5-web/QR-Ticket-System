@@ -5000,3 +5000,6 @@ body:has(.ticket-screen),
   .app-shell .sidebar nav button:active{transform:none!important}
   .management-main.page-opening{animation:none!important;transform:none;opacity:1;will-change:auto}
 }
+
+.management-offline-notice{padding:12px 16px;background:#fff3cd;color:#583e00;border-radius:12px;font-size:14px}
+@media print{.management-offline-notice{display:none}}

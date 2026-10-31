@@ -81,6 +81,12 @@ export default function App({practice=false}:AppProps={}) {
   const {deleteEvent: deleteFirebaseEvent, deleteMember: deleteFirebaseMember, deleteTicket: deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal: approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception: releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets}=practice?practiceBackend.api:liveData;
   const {loadPublishedEventBundle,publishEventBundle,saveEventMetadata,saveEventStatus}=practice?practiceBackend.publisher:livePublisher;
 
+  const [isOffline,setIsOffline]=useState(()=>navigator.onLine===false);
+  useEffect(()=>{
+    const update=()=>setIsOffline(navigator.onLine===false);
+    window.addEventListener('online',update);window.addEventListener('offline',update);
+    return ()=>{window.removeEventListener('online',update);window.removeEventListener('offline',update);};
+  },[]);
   const [page, setPage] = useState("ホーム");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return appStorage.getItem("qr-ticket-sidebar-collapsed") === "true"; }
@@ -2973,6 +2979,7 @@ function NavIcon({type}:{type:string}){
         animationName:pageOpeningOrigin.bubble&&appSettings.aiLabEnabled?(pageOpeningOrigin.sequence%2?"sidebar-soap-open-a":"sidebar-soap-open-b"):(pageOpeningOrigin.sequence%2?"sidebar-fluid-open-a":"sidebar-fluid-open-b"),
       } as import("react").CSSProperties) : undefined}
     >
+      {isOffline && <p role="status" className="management-offline-notice">オフライン：保存済みデータを表示しています。人数・受付記録は最新ではありません。閲覧・印刷・デザイン編集を利用できます。発行・承認・イベント更新には接続が必要です。</p>}
       <header className="management-header">
         <div><small>管理画面</small><h1>{page}</h1></div>
         <div className="header-actions"><span className={bundle ? "pill ok" : "pill"}>{bundle ? "公開済み" : statusLabel[eventStatus]}</span></div>

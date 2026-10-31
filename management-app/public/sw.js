@@ -1,4 +1,4 @@
-const CACHE='qr-ticket-management-shell-v1';
+const CACHE='qr-ticket-management-shell-v2';
 const BASE=new URL('./',self.location.href).pathname;
 const INDEX=new URL('index.html',self.location.href).href;
 async function saveShell(cache,response){
@@ -7,6 +7,13 @@ async function saveShell(cache,response){
   await Promise.all([...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(async match=>{
     const url=new URL(match[1],INDEX);if(url.origin!==self.location.origin||!url.pathname.startsWith(BASE))return;
     const asset=await fetch(url.href,{cache:'reload'});if(!asset.ok)throw Error('印刷画面のファイルを取得できませんでした');await cache.put(url.href,asset);
+  }));
+  const manifest=await fetch(new URL('offline-assets.json',INDEX),{cache:'reload'});
+  if(!manifest.ok)throw Error('オフライン用ファイル一覧を取得できませんでした');
+  await Promise.all((await manifest.json()).map(async path=>{
+    const url=new URL(path,INDEX);const asset=await fetch(url.href,{cache:'reload'});
+    if(!asset.ok)throw Error('オフライン用ファイルを取得できませんでした');
+    await cache.put(url.href,asset);
   }));
   await cache.put(INDEX,response.clone());
 }
@@ -17,7 +24,7 @@ self.addEventListener('fetch',event=>{
   if(req.method!=='GET'||url.origin!==self.location.origin||!url.pathname.startsWith(BASE))return;
   if(req.mode==='navigate'){
     if(url.pathname!==BASE&&url.pathname!==BASE+'index.html')return;
-    event.respondWith((async()=>{const cache=await caches.open(CACHE);try{const response=await fetch(req);await saveShell(cache,response);return response;}catch{return await cache.match(INDEX)||new Response('オンラインで一度、予備印刷画面を開いて準備してください。',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8'}});}})());return;
+    event.respondWith((async()=>{const cache=await caches.open(CACHE);try{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),3000);let response;try{response=await fetch(req,{signal:controller.signal});}finally{clearTimeout(timer);}event.waitUntil(saveShell(cache,response.clone()).catch(()=>{}));return response;}catch{return await cache.match(INDEX)||new Response('オンラインで一度、管理アプリを開いて準備してください。',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8'}});}})());return;
   }
   event.respondWith((async()=>{const cache=await caches.open(CACHE),saved=await cache.match(req);if(saved)return saved;try{const response=await fetch(req);if(response.ok)await cache.put(req,response.clone());return response;}catch{return new Response('',{status:503});}})());
 });
