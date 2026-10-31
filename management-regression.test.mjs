@@ -61,11 +61,11 @@ test('management offline shell preserves its last complete shell and serves the 
   const base='https://test.example/QR-Ticket-System/management-app/';
   const cache={put:async(k,v)=>entries.set(k,v.clone()),match:async k=>entries.get(typeof k==='string'?k:k.url)?.clone()};
   const caches={open:async()=>cache,keys:async()=>[],delete:async()=>true};
-  const fetch=async url=>{if(offline)throw Error('offline');return new Response(String(url).endsWith('index.html')?'<script src="./assets/app.js"></script>':fail?'failed':'app',{status:fail&&!String(url).endsWith('index.html')?503:200});};
+  const fetch=async url=>{if(offline)throw Error('offline');if(String(url).endsWith('offline-assets.json'))return Response.json(['assets/app.js','assets/lazy.js']);return new Response(String(url).endsWith('index.html')?'<script src="./assets/app.js"></script>':fail?'failed':'app',{status:fail&&!String(url).endsWith('index.html')?503:200});};
   const self={location:{href:base+'sw.js',origin:'https://test.example'},addEventListener:(name,fn)=>listeners.set(name,fn),skipWaiting:async()=>{},clients:{claim:async()=>{}}};
   new Function('self','caches','fetch','Response','URL',readFileSync('management-app/public/sw.js','utf8'))(self,caches,fetch,Response,URL);
   let install;listeners.get('install')({waitUntil:p=>{install=p;}});await install;
-  assert.ok(entries.has(base+'assets/app.js'));const saved=await entries.get(base+'index.html').clone().text();
+  assert.ok(entries.has(base+'assets/app.js'));assert.ok(entries.has(base+'assets/lazy.js'));const saved=await entries.get(base+'index.html').clone().text();
   fail=true;listeners.get('install')({waitUntil:p=>{install=p;}});await assert.rejects(install);assert.equal(await entries.get(base+'index.html').clone().text(),saved);
   offline=true;let response;
   listeners.get('fetch')({request:{url:base+'?reserve-print=reserve-event',method:'GET',mode:'navigate'},respondWith:p=>{response=p;}});

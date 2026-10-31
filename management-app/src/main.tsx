@@ -35,7 +35,7 @@ async function startApp() {
     ReactDOM.createRoot(rootElement).render(<AppRoot />);
   } catch (error) {
     console.error("Firebase認証を開始できませんでした。", error);
-    rootElement.textContent = "Firebase接続エラー: " + describeFirebaseStartupError(error) +
+    rootElement.textContent = navigator.onLine === false ? "オフラインで初回登録はできません。オンラインで一度、管理端末の承認を完了して管理画面を開いてください。" : "Firebase接続エラー: " + describeFirebaseStartupError(error) +
       "。GitHub ActionsのFirebase設定値とFirebase Authenticationの匿名認証設定を確認してください。";
   }
 }

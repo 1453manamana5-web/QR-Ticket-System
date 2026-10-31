@@ -1,5 +1,5 @@
 import type {Transaction} from "firebase/firestore";
-import { collection, doc, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocFromCache, getDocsFromCache, getDoc, getDocs, getDocsFromServer, getDocFromServer, limit, onSnapshot, query, runTransaction, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
@@ -8,6 +8,7 @@ export type TerminalRecord = { terminalId: string; name: string; type: "Web / iP
 export type AnalysisRecord = { eventId: string; eventName: string; eventDate: string; total: number; unused: number; inside: number; exited: number; savedAt: string; };
 
 export async function deleteEvent(eventId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
   const eventRef = doc(db, "events", eventId);
@@ -47,6 +48,7 @@ export async function deleteEvent(eventId: string): Promise<void> {
   await deleteDoc(eventRef);
 }
 export async function saveEvent(event: Event): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", event.eventId), { ...event, updatedAt: new Date().toISOString() }, { merge: true });
 }
@@ -91,6 +93,7 @@ async function syncPublishedTicketInventory(eventId: string, tickets: Ticket[]):
 }
 
 export async function saveTickets(eventId: string, tickets: Ticket[]): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   // この関数は一覧全体の保存として扱い、一覧から消えた古いドキュメントも同期する。
   // 既存データをサーバーから取得してから更新し、オフラインキャッシュで削除対象を誤判定しない。
@@ -171,6 +174,7 @@ export async function loadNextTicketNumber(eventId:string,prefix:string):Promise
 
 /** Add only newly issued tickets; existing reception state is never rewritten. */
 export async function appendTickets(eventId: string, tickets: Ticket[], enforceNewNumbers = false): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const ids = new Set<string>();
   for (const ticket of tickets) {
@@ -195,6 +199,7 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
 }
 
 export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array<"basicInfo" | "valid" | "currentStatus">): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   if (ticket.eventId !== eventId || !ticket.ticketId || ticket.ticketId.includes("/")) throw new Error("TICKET_EVENT_ID_MISMATCH");
   const db = getFirebaseDb();
   const ref = doc(db,"events",eventId,"tickets",ticket.ticketId);
@@ -222,6 +227,7 @@ export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array
 }
 
 export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const ref = doc(db,"events",eventId,"tickets",ticketId);
   await runTransaction(db,async tx=>{
@@ -248,25 +254,30 @@ export function subscribeReceptionRecords(eventId: string, onChange: (records: R
 }
 
 export async function saveAnalysis(record: AnalysisRecord): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", record.eventId, "analysis", record.eventId), record, { merge: true });
 }
 
 export async function saveMember(eventId: string, member: MemberRecord): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true });
 }
 export async function deleteMember(eventId: string, memberId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const { deleteDoc } = await import("firebase/firestore");
   await deleteDoc(doc(db, "events", eventId, "members", memberId));
 }
 export async function saveMembers(eventId: string, members: MemberRecord[]): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await Promise.all(members.map(member => setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true })));
 }
 
 export async function deleteTerminal(terminalId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const managerTerminalId = getManagerTerminalId();
@@ -324,16 +335,22 @@ type OwnTerminalState = {
   pendingApplication: Record<string, unknown> | null;
 };
 
+// Only Firestore's persisted documents for the restored Firebase identity are used.
+// LocalStorage roles never grant access. Offline access is to already cached data.
+const offline = () => typeof navigator !== "undefined" && navigator.onLine === false;
+const readTerminalDocument: typeof getDocFromServer = (ref) => offline() ? getDocFromCache(ref) : getDocFromServer(ref);
+const readTerminalQuery: typeof getDocsFromServer = (ref) => offline() ? getDocsFromCache(ref) : getDocsFromServer(ref);
+
 async function readOwnTerminalState(): Promise<OwnTerminalState> {
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
-  const installationSnapshot = await getDocFromServer(doc(db, "terminalInstallations", uid));
+  const installationSnapshot = await readTerminalDocument(doc(db, "terminalInstallations", uid));
   if (installationSnapshot.exists()) {
     const grant = installationSnapshot.data();
     if (grant.authUid === uid && grant.approved === true &&
         typeof grant.terminalId === "string") {
-      const terminalSnapshot = await getDocFromServer(doc(db, "terminals", grant.terminalId));
+      const terminalSnapshot = await readTerminalDocument(doc(db, "terminals", grant.terminalId));
       if (terminalSnapshot.exists()) {
         return {
           terminalId: grant.terminalId,
@@ -344,7 +361,7 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
     }
   }
 
-  const applications = await getDocsFromServer(query(
+  const applications = await readTerminalQuery(query(
     collection(db, "terminalApplications"),
     where("requestedByUid", "==", uid),
     limit(5),
@@ -393,6 +410,7 @@ export async function getOwnTerminalStatus(): Promise<{
   return { approved: false, terminalId: null };
 }
 export async function requestTerminalRegistration(input: { terminalId: string; name: string; type: "Web / iPad" | "Web / PC"; role: "management" | "reception" | "both" }): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
@@ -419,6 +437,7 @@ export async function requestTerminalRegistration(input: { terminalId: string; n
 }
 
 export async function approveTerminal(targetTerminalId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const managerTerminalId = getManagerTerminalId();
@@ -480,6 +499,7 @@ export async function approveTerminal(targetTerminalId: string): Promise<void> {
 }
 
 export async function setManagedTerminalMode(targetTerminalId: string, mode: "入口受付" | "出口受付" | "停止"): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const managerTerminalId = getManagerTerminalId();
   if (!managerTerminalId || !targetTerminalId || managerTerminalId === targetTerminalId) {
@@ -495,6 +515,7 @@ export async function setManagedTerminalMode(targetTerminalId: string, mode: "�
   });
 }
 export async function setManagedSubAdmin(targetTerminalId: string, enabled: boolean): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const managerTerminalId = getManagerTerminalId();
@@ -534,6 +555,7 @@ export async function setManagedSubAdmin(targetTerminalId: string, enabled: bool
 }
 
 export async function releaseOwnReception(): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const terminalId = getManagerTerminalId();
@@ -570,6 +592,7 @@ export async function releaseOwnReception(): Promise<void> {
 }
 
 export async function revokeManagedReception(targetTerminalId: string): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
   const managerTerminalId = getManagerTerminalId();
@@ -607,6 +630,7 @@ export async function revokeManagedReception(targetTerminalId: string): Promise<
 }
 
 export async function saveTerminal(terminal: TerminalRecord): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const ownTerminalId = localStorage.getItem("qr-ticket-terminal-id") ?? localStorage.getItem("qr-ticket-device-id") ?? "";
   if(!ownTerminalId || terminal.terminalId!==ownTerminalId)throw new Error("OWN_TERMINAL_ONLY");
@@ -627,6 +651,7 @@ function getManagementBrowserDownlink(): number | null {
 }
 
 export async function saveManagementTerminalHeartbeat(terminalId: string): Promise<number | null> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   await ensureFirebaseAuth();
   const networkMbps = getManagementBrowserDownlink();
   const timestamp = new Date().toISOString();
@@ -644,6 +669,7 @@ export async function saveManagementTerminalHeartbeat(terminalId: string): Promi
 }
 
 export async function saveReceptionSettings(eventId: string, settings: ReceptionSettings): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await setDoc(doc(db, "events", eventId, "settings", "reception"), settings, { merge: true });
 }
@@ -654,13 +680,14 @@ export async function loadAppSettings(deviceId: string): Promise<Record<string, 
   return snapshot.exists() ? snapshot.data() : null;
 }
 export async function saveAppSettings(deviceId: string, settings: Record<string, unknown>): Promise<void> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   await setDoc(doc(db, "devices", deviceId), { ...settings, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
 export async function loadEventTickets(eventId: string): Promise<Ticket[]> {
   const db = getFirebaseDb();
-  const snapshot = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
+  const snapshot = await readTerminalQuery(collection(db, "events", eventId, "tickets"));
   return snapshot.docs.map(item => item.data() as Ticket);
 }
 
@@ -762,10 +789,10 @@ export async function loadTerminals(): Promise<TerminalRecord[]> {
   if (own.approved && own.managementApproved &&
       (own.role === "management" || own.role === "both")) {
     const uid = await getFirebaseUid();
-    const owner = await getDocFromServer(doc(getFirebaseDb(), "terminalOwners", state.terminalId));
+    const owner = await readTerminalDocument(doc(getFirebaseDb(), "terminalOwners", state.terminalId));
     // A handed-off reception installation never inherits the owner's management role.
     if (owner.exists() && owner.data().enabled === true && owner.data().ownerUid === uid) {
-      const snapshot = await getDocsFromServer(collection(getFirebaseDb(), "terminals"));
+      const snapshot = await readTerminalQuery(collection(getFirebaseDb(), "terminals"));
       localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
       localStorage.setItem("qr-ticket-device-id", state.terminalId);
       return snapshot.docs.map(item => terminalFromDocument(item.id, item.data()));

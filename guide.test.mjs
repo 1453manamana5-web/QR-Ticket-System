@@ -69,7 +69,7 @@ test('practice backend changes only its own inventory, settings and terminal rec
 test('every management guide action can be performed on the real practice screens without live services or persistent storage',async()=>{
  const storage={getItem:()=>assert.fail('practice must not read live storage'),setItem:()=>assert.fail('practice must not write live storage'),removeItem:()=>assert.fail('practice must not remove live storage')};
  const timers=new Map();let seq=0;
- const window={setInterval:fn=>{timers.set(++seq,fn);return seq;},clearInterval:id=>timers.delete(id),setTimeout:()=>++seq,clearTimeout(){},matchMedia:()=>({matches:false}),confirm:()=>true,prompt:()=> '42',print:()=>assert.fail('practice must not print'),open:()=>assert.fail('practice must not open windows')};
+ const window={addEventListener(){},removeEventListener(){},setInterval:fn=>{timers.set(++seq,fn);return seq;},clearInterval:id=>timers.delete(id),setTimeout:()=>++seq,clearTimeout(){},matchMedia:()=>({matches:false}),confirm:()=>true,prompt:()=> '42',print:()=>assert.fail('practice must not print'),open:()=>assert.fail('practice must not open windows')};
  const document={querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>{
    let html='';const qr={set innerHTML(v){}},number={set textContent(v){}};
    const card={querySelector:s=>s==='.ticket-design-qr'?qr:number,get outerHTML(){return html;}};

@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, setDoc, updateDoc, runTransaction } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromCache, getDocsFromServer, setDoc, updateDoc, runTransaction } from "firebase/firestore";
 import type { Event, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import {receptionDataCollected, type ReceptionTerminalState} from "./operationSafety";
 import { getFirebaseDb } from "./firebaseClient";
@@ -25,7 +25,7 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
       typeof data.ticketCount !== "number") return null;
 
   // チケット一覧はサイズ制限のある単一バンドルではなく、イベント配下の一覧を正本にする。
-  const savedTickets = await getDocsFromServer(collection(db, "events", eventId, "tickets"));
+  const savedTickets = await (typeof navigator !== "undefined" && navigator.onLine === false ? getDocsFromCache : getDocsFromServer)(collection(db, "events", eventId, "tickets"));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
   // 旧形式のバンドルだけにチケットが残っている場合は互換用に復元する。
   if (tickets.length === 0 && data.ticketCount !== 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
@@ -35,6 +35,7 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
 }
 
 export async function saveEventMetadata(event: Event, onlyIfMissing = false): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("この操作にはオンライン接続が必要です。");
   const db = getFirebaseDb();
   const ref = doc(db,"events",event.eventId);
   await runTransaction(db,async tx=>{
@@ -48,6 +49,7 @@ export async function saveEventMetadata(event: Event, onlyIfMissing = false): Pr
 }
 
 export async function saveEventStatus(eventId: string, status: Event["eventStatus"]): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("この操作にはオンライン接続が必要です。");
   const db=getFirebaseDb(),ref=doc(db,"events",eventId);
   await runTransaction(db,async tx=>{
     const saved=await tx.get(ref);
@@ -68,6 +70,7 @@ export async function publishEventBundle(
   settings: ReceptionSettings,
   _tickets: Ticket[],
 ): Promise<PublishedEventBundle> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("この操作にはオンライン接続が必要です。");
   if (event.eventStatus === "finished") throw new Error("EVENT_FINISHED");
   const db = getFirebaseDb();
   const authToken = createAuthToken();

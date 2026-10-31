@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, type Auth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -43,8 +43,11 @@ export function ensureFirebaseAuth(): Promise<Auth> {
   return authReady;
 }
 
+let database: ReturnType<typeof initializeFirestore> | undefined;
 export function getFirebaseDb() {
-  return getFirestore(getFirebaseApp());
+  return database ??= initializeFirestore(getFirebaseApp(), {
+    localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()}),
+  });
 }
 
 export async function getFirebaseUid(): Promise<string> {
