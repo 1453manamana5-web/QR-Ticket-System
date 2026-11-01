@@ -110,7 +110,7 @@ test("one upload worker serializes concurrent triggers and blocks dependent reco
   const worker=load("./reception-app/src/syncQueue.ts",{
     "./localDb":local,
     "./receptionSync":{
-      getTerminalRegistration:async()=>{let eventId="event-one";try{eventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}return initialRegistration ? {...initialRegistration,eventId,approved:initialRegistration.approved && eventId===approvedEventId}:null;},syncReceptionRecord:async item=>{
+syncReceptionRecord:async item=>{
       maxActive=Math.max(maxActive,++active);
       try{await nextTurn();if(fail&&item.recordId==="entry")throw Error("simulated network error");uploaded.push(item.recordId);}
       finally{active--;}
@@ -157,6 +157,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
       getEventAuthPayloadByToken:async()=>bundle.authPayload,
     },
     "./receptionSync":{
+      getTerminalRegistration:async()=>{let eventId="event-one";try{eventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}return initialRegistration ? {...initialRegistration,eventId,approved:initialRegistration.approved && eventId===approvedEventId}:null;},
       subscribeTerminalRegistration:(cb,onError)=>{registrationCallback=cb;registrationError=onError;cb(initialRegistration);return()=>{};},
       subscribeTerminalControl:(_id,cb)=>{controlCallback=cb;cb("停止",null);return()=>{};},
       registerReceptionTerminal:async()=>{registerCalls++;},
@@ -230,11 +231,9 @@ test('offline event transfer cannot replace another event or bypass its reapprov
   const h=await harness({automatic:async()=>({localEvent:makeEvent(switched?'event-two':'event-one'),tickets:[makeTicket(switched?'event-two':'event-one')],authPayload:{authToken:'token'}})});
   try{
     switched=true;await h.poll();h.navigator.onLine=false;
-    await h.click('イベントデータQRを読み取る');
-    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent('event-two').event,settings:makeEvent().settings,tickets:[makeTicket('event-two')]});
-    for(const frame of frames)await h.scan(frame);
-    await h.click('このイベントで認証');
-    assert.match(h.text(),/再承認が必要/);assert.equal((await h.local.loadLocalEvent()).event.eventId,'event-one');
+    assert.match(h.text(),/受付.*承認/);
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,'event-one');
+    assert.equal(h.renderer.root.findAllByType('button').some(button=>button.children.includes('イベントデータQRを読み取る')),false);
     assert.throws(()=>offlineProtocol().validateOfflineEvent({event:{...makeEvent().event,eventStatus:'finished'},settings:makeEvent().settings,tickets:[]}),/形式/);
   }finally{await h.close();}
 });
