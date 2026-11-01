@@ -129,7 +129,7 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,save,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
@@ -146,7 +146,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":local,
+    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,saveReceptionTransaction:async(...args)=>{await local.saveReceptionTransaction(...args);if(save)await save();}},
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -938,3 +938,40 @@ test("obsolete registration rejection cannot display an error after newer approv
     assert.doesNotMatch(h.text(),/登録申請を送信できませんでした/);
   }finally{await h.close();}
 });
+
+test("offline event data must match the approved event even when no previous inventory exists",async()=>{
+  const h=await harness({saved:false,initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>{throw Error("NO_PUBLISHED_EVENT");}});
+  try{
+    h.navigator.onLine=false;
+    await h.click("イベントデータQRを読み取る");
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent("event-two").event,settings:makeEvent().settings,tickets:[makeTicket("event-two")]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal(await h.local.loadLocalEvent(),null);
+    assert.match(h.text(),/再承認が必要/);
+    assert.equal((await h.local.getPendingSyncItems()).length,0);
+  }finally{await h.close();}
+});
+
+for(const interruption of ["stop","revoke"]){
+  test("a committed scan awaiting completion cannot announce success after "+interruption,async()=>{
+    let finish;
+    const h=await harness({save:()=>new Promise(resolve=>{finish=resolve;})});
+    try{
+      await h.click("受付を開始する");
+      let scan;
+      await act(async()=>{scan=h.renderer.root.findByType(h.Scanner).props.onResult("ticket-one");});await h.flush();
+      assert.ok(finish);
+      assert.equal((await h.local.getTicket("ticket-one")).currentStatus,"inside");
+      if(interruption==="stop")await h.control("停止","2099-11-01T00:00:00.000Z");
+      else await h.revoke();
+      const sounds=h.audioRequests.length;
+      await act(async()=>{finish();await scan;});await h.flush();
+      assert.equal(h.audioRequests.length,sounds);
+      assert.doesNotMatch(h.text(),/入場OK/);
+      if(interruption==="stop")assert.match(h.text(),/受付が停止されています/);
+      else assert.match(h.text(),/受付端末を登録/);
+      assert.equal((await h.local.getPendingSyncItems()).length,1);
+    }finally{await h.close();}
+  });
+}

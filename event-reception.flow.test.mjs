@@ -647,3 +647,28 @@ test("deleting an event removes its reception approvals and prevents grant reuse
   const reception = loadClientModule("./reception-app/src/receptionSync.ts",c.managerDb,"flow-manager","T-FLOW-MANAGER");
   assert.equal((await reception.getTerminalRegistration()).approved,false);
 });
+
+for (const mutation of ["append","delete"]) {
+  test("publication rejects a ticket inventory that changes after its snapshot: " + mutation,async()=>{
+    const c=clients();
+    const first=await createPublished(c);
+    let changed=false;
+    const racing=loadClientModule("./management-app/src/eventPublisher.ts",c.managerDb,"flow-manager","T-FLOW-MANAGER",{},{
+      getDocsFromServer:async ref=>{
+        const snapshot=await firestore.getDocsFromServer(ref);
+        if(!changed && ref.path==="events/flow-event/tickets"){
+          changed=true;
+          if(mutation==="append")await c.management.appendTickets("flow-event",[makeTicket("flow-event","concurrent-ticket")]);
+          else await c.management.deleteTicket("flow-event","ticket-1");
+        }
+        return snapshot;
+      },
+    });
+    await assert.rejects(racing.publishEventBundle(makeEvent(),settings,[]),/EVENT_INVENTORY_CHANGED_RETRY/);
+    assert.equal(changed,true);
+    assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event"))).data().authToken,first.authToken);
+    const retried=await c.publisher.publishEventBundle(makeEvent(),settings,[]);
+    assert.equal(retried.tickets.length,mutation==="append"?2:0);
+    assert.equal(retried.ticketCount,retried.tickets.length);
+  });
+}
