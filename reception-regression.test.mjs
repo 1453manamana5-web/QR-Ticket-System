@@ -129,7 +129,7 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
@@ -162,6 +162,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
       subscribeTerminalRegistration:(cb,onError)=>{registrationCallback=cb;registrationError=onError;cb(initialRegistration);return()=>{};},
       subscribeTerminalControl:(_id,cb)=>{controlCallback=cb;cb("停止",null);return()=>{};},
       registerReceptionTerminal:async()=>{registerCalls++;if(register)await register();},
+      resetReceptionTerminalRegistration:async()=>reset?reset():null,
       requestReceptionEventReapproval:async()=>reapprove,
       saveTerminalHeartbeat:async()=>null,
       syncReceptionErrorLog:async()=>{},
@@ -171,7 +172,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   const App=load("./reception-app/src/App.tsx",dependencies,{
     navigator,window,crypto:webcrypto,
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
-    console:{error:()=>{},warn:()=>{}},
+    console:{error:()=>{},warn:()=>{},info:()=>{}},
   }).default;
   let renderer;
   await act(async()=>{renderer=create(React.createElement(App));});
@@ -185,6 +186,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   };
   return {local,renderer,Scanner,click,flush,navigator,audioRequests,
     text:()=>JSON.stringify(renderer.toJSON()),
+    terminalId:()=>storage.get("qr-ticket-terminal-id"),
     get registerCalls(){return registerCalls;},
     get inventoryDownloads(){return inventoryDownloads;},
     scan:async value=>{await act(async()=>{await renderer.root.findByType(Scanner).props.onResult(value);});await flush();},
@@ -908,5 +910,31 @@ test("late approval check cannot replace a newer revoke-and-approve cycle",async
     await act(async()=>finish(null));await h.flush();
     assert.doesNotMatch(h.text(),/受付端末を登録|受付端末の承認待ち/);
     assert.equal(h.renderer.root.findAll(node=>node.props["data-reception-phase"]==="preparing").length>0,true);
+  }finally{await h.close();}
+});
+
+test("late reset completion preserves the newly approved terminal ID and event",async()=>{
+  let finish;
+  const h=await harness({saved:false,initialRegistration:{approved:false,status:"pending",name:"Test terminal"},reset:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="申請をリセット");
+    assert.ok(button);await act(async()=>{button.props.onClick();});await h.flush();assert.ok(finish);
+    await h.approve();
+    const id=h.terminalId();assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    await act(async()=>finish(null));await h.flush();
+    assert.equal(h.terminalId(),id);
+    assert.match(h.text(),/受付準備完了/);
+  }finally{await h.close();}
+});
+test("obsolete registration rejection cannot display an error after newer approval",async()=>{
+  let reject;
+  const h=await harness({saved:false,initialRegistration:null,register:()=>new Promise((_resolve,fail)=>{reject=fail;})});
+  try{
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="受付端末を登録申請");
+    await act(async()=>{button.props.onClick();});await h.flush();
+    await h.approve();
+    await h.click("イベントQRを読み直す");
+    await act(async()=>reject(Error("old request failed")));await h.flush();
+    assert.doesNotMatch(h.text(),/登録申請を送信できませんでした/);
   }finally{await h.close();}
 });
