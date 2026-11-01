@@ -20,6 +20,7 @@ function load(file, dependencies={}, globals={}) {
   const exports={};
   new Function("exports","require",...Object.keys(globals),compiled)(exports,name=>{
     if(name in dependencies)return dependencies[name];
+    if(name==="./receptionState")return load("./reception-app/src/receptionState.ts");
     if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
     if(name==="react"||name==="react/jsx-runtime")return require(name);
     throw Error("Unexpected dependency: "+name);
@@ -828,4 +829,55 @@ test('actual reception errors and error preview both request the error sound and
     await preview.click('音声を有効にして確認');assert.equal(preview.audioRequests.at(-1),'error');assert.match(preview.text(),/やり直してください/);
     await preview.click('入口結果');assert.equal(preview.audioRequests.at(-1),'entrySuccess');
   }finally{await preview.close();}
+});
+
+test("reception state requires approval and matching ready data before starting",()=>{
+  const {initialReceptionState,receptionReducer:r,receptionPhase,canReceive}=load("./reception-app/src/receptionState.ts");
+  let state=initialReceptionState;
+  assert.equal(receptionPhase(state),"unregistered");
+  state=r(state,{type:"screen",value:"reception"});assert.equal(canReceive(state),false);
+  state=r(state,{type:"registration",value:{approved:false,status:"pending",name:"Test",eventId:"event-one"}});
+  assert.equal(receptionPhase(state),"approval-pending");
+  state=r(state,{type:"registration",value:{approved:true,status:"online",name:"Test",eventId:"event-one"}});
+  assert.equal(receptionPhase(state),"preparing");
+  state=r(state,{type:"event",value:{...makeEvent("wrong-event"),dataReady:true}});
+  state=r(state,{type:"screen",value:"reception"});assert.equal(canReceive(state),false);
+  state=r(state,{type:"event",value:{...makeEvent(),dataReady:true}});
+  state=r(state,{type:"screen",value:"ready"});assert.equal(receptionPhase(state),"ready");
+  state=r(state,{type:"screen",value:"reception"});assert.equal(receptionPhase(state),"receiving");
+  state=r(state,{type:"screen",value:"ready"});assert.equal(receptionPhase(state),"stopped");
+  state=r(state,{type:"screen",value:"reception"});assert.equal(canReceive(state),true);
+  state=r(state,{type:"remote-stop",value:true});assert.equal(receptionPhase(state),"stopped");assert.equal(canReceive(state),false);
+});
+
+test("revocation and a changed approved event invalidate late event completion and restart",()=>{
+  const {initialReceptionState,receptionReducer:r,canReceive}=load("./reception-app/src/receptionState.ts");
+  const approved={approved:true,status:"online",name:"Test",eventId:"event-one"};
+  let state=r(initialReceptionState,{type:"registration",value:approved});
+  state=r(state,{type:"event",value:{...makeEvent(),dataReady:true}});
+  state=r(state,{type:"screen",value:"ready"});
+  state=r(state,{type:"screen",value:"reception"});
+  state=r(state,{type:"registration",value:null});
+  state=r(state,{type:"event",value:{...makeEvent(),dataReady:true}});
+  state=r(state,{type:"screen",value:"reception"});
+  assert.equal(state.localEvent,null);assert.equal(state.screen,"registration");assert.equal(canReceive(state),false);
+  state=r(state,{type:"registration",value:{...approved,eventId:"event-two"}});
+  state=r(state,{type:"event",value:{...makeEvent(),dataReady:true}});
+  assert.equal(state.localEvent,null);assert.equal(state.screen,"auth");
+});
+
+test("repeated approval polling keeps the running event and arbitrary transitions preserve reception invariants",()=>{
+  const {initialReceptionState,receptionReducer:r,canReceive}=load("./reception-app/src/receptionState.ts");
+  const approved={approved:true,status:"online",name:"Test",eventId:"event-one"};
+  let state=r(initialReceptionState,{type:"registration",value:approved});
+  state=r(state,{type:"event",value:{...makeEvent(),dataReady:true}});
+  state=r(state,{type:"screen",value:"ready"});state=r(state,{type:"screen",value:"reception"});
+  state=r(state,{type:"registration",value:{...approved}});
+  assert.equal(canReceive(state),true);
+  const actions=[{type:"registration",value:null},{type:"registration",value:approved},{type:"registration",value:{...approved,approved:false}},{type:"registration",value:{...approved,eventId:"event-two"}},{type:"event",value:{...makeEvent(),dataReady:true}},{type:"event",value:null},{type:"screen",value:"ready"},{type:"screen",value:"reception"},{type:"remote-stop",value:true},{type:"remote-stop",value:false}];
+  let seed=12345;
+  for(let i=0;i<10000;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;state=r(state,actions[seed%actions.length]);
+    if(state.screen==="reception"){assert.equal(state.registration?.approved,true);assert.equal(state.localEvent?.dataReady,true);assert.equal(state.localEvent.event.eventId,state.registration.eventId);}
+    if(canReceive(state))assert.equal(state.remoteStopped,false);
+  }
 });
