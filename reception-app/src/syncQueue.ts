@@ -28,6 +28,11 @@ export function syncPendingReceptionRecords(): Promise<void> {
         }
       }
     }
-  })().finally(() => { running = null; });
+  })().finally(() => {
+    running = null;
+    // A new caller can join after the drain loop returns but before this finalizer.
+    // Keep its promise pending until that newly requested work has drained too.
+    if (requested && navigator.onLine) return syncPendingReceptionRecords();
+  });
   return running;
 }

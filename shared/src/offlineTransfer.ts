@@ -7,7 +7,7 @@ const validId=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length
 export function validateOfflineEvent(value:unknown):OfflineEventData{
   const v=value as OfflineEventData;
   if(!v||!v.event||!validId(v.event.eventId)||typeof v.event.eventName!=='string'||v.event.eventName.length>300||
-    typeof v.event.eventDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v.event.eventDate)||!Number.isFinite(Date.parse(v.event.eventDate))||
+    typeof v.event.eventDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v.event.eventDate)||!Number.isFinite(Date.parse(v.event.eventDate))||new Date(v.event.eventDate).toISOString().slice(0,10)!==v.event.eventDate||
     !/^([01]\d|2[0-3]):[0-5]\d$/.test(v.event.startTime)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(v.event.endTime)||v.event.startTime>=v.event.endTime||
     !Number.isSafeInteger(v.event.dataVersion)||v.event.dataVersion<1||!['ready','active'].includes(v.event.eventStatus)||
     !v.settings||![v.settings.entryEnabled,v.settings.exitEnabled,v.settings.reentryEnabled].every(x=>typeof x==='boolean')||
@@ -42,9 +42,9 @@ export async function encodeOfflineEvent(value:OfflineEventData):Promise<string[
   return Array.from({length:total},(_,index)=>JSON.stringify({type:'qr-ticket-offline-v1',id,index,total,data:encoded.slice(index*1000,(index+1)*1000)} satisfies Part));
 }
 export class OfflineEventCollector{
-  private parts=new Map<number,string>();private id='';private total=0;
+  private parts=new Map<number,string>();private id='';private total=0;private generation=0;
   get progress(){return {received:this.parts.size,total:this.total};}
-  reset(){this.parts.clear();this.id='';this.total=0;}
+  reset(){++this.generation;this.parts.clear();this.id='';this.total=0;}
   async add(text:string):Promise<OfflineEventData|null>{
     if(text.length>1400)throw Error('QRデータが大きすぎます。');
     const p=JSON.parse(text) as Part;
@@ -56,9 +56,15 @@ export class OfflineEventCollector{
     this.parts.set(p.index,p.data);if(this.parts.size!==this.total)return null;
     const encoded=Array.from({length:this.total},(_,i)=>this.parts.get(i)!).join('');
     const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
-    if(await hash(bytes)!==this.id){this.reset();throw Error('読み取ったデータが一致しません。最初から読み直してください。');}
+    const generation=this.generation,id=this.id;
+    let digest:string;
+    try{digest=await hash(bytes);}catch(error){if(generation!==this.generation)return null;throw error;}
+    if(generation!==this.generation)return null;
+    if(digest!==id){this.reset();throw Error('読み取ったデータが一致しません。最初から読み直してください。');}
     if(typeof DecompressionStream==='undefined')throw Error('この端末はオフラインQRに未対応です。OSを更新してください。');
-    const raw=await readBounded(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
+    let raw:Uint8Array;
+    try{raw=await readBounded(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));}catch(error){if(generation!==this.generation)return null;throw error;}
+    if(generation!==this.generation)return null;
     return validateOfflineEvent(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw)));
   }
 }

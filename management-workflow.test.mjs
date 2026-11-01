@@ -525,3 +525,30 @@ test('deleting a member waits for an in-flight rename so the rename cannot resur
     assert.deepEqual(order,['rename','delete']);assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,0);
   }finally{await h.close();}
 });
+
+test('a failed latest rename restores the last confirmed preceding write',async()=>{
+  let finish,calls=0;
+  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>{calls++;if(calls===1)return new Promise(resolve=>{finish=resolve;});return Promise.reject(Error('latest rename failed'));}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Confirmed first'}}));await h.flush();
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Failed latest'}}));await h.flush();
+    await act(async()=>finish());await h.flush();
+    assert.equal(calls,2);assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Confirmed first');
+    assert.match(h.text(),/部員情報をFirebaseへ保存できませんでした/);
+  }finally{await h.close();}
+});
+
+test('backup missing-member restore uses create-only mode and reports a concurrent collision',async()=>{
+  const calls=[],member={memberId:'MBR-0001',memberNumber:1,name:'Backup member'};
+  const backup={version:1,eventId:'event-a',eventHistory:[event()],tickets:[],members:[member]};
+  const h=await harness({loadMembers:async()=>[],saveMember:async(id,value,mode)=>{calls.push({id,value,mode});throw Error('MEMBER_ALREADY_EXISTS');}},{fileText:JSON.stringify(backup)});
+  try{
+    await h.nav('設定');
+    const restore=h.renderer.root.findAllByType('button').find(node=>node.children.some(child=>typeof child==='string'&&child.includes('復元')));
+    await act(async()=>restore.props.onClick());await h.flush();
+    assert.equal(calls.length,1);assert.equal(calls[0].mode,'create');
+    assert.match(h.text(),/バックアップを復元できませんでした/);
+    assert.doesNotMatch(h.text(),/不足するデータをFirebaseへ復元しました/);
+  }finally{await h.close();}
+});

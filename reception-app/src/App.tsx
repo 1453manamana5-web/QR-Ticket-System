@@ -606,6 +606,8 @@ export default function App(){
       const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
       if(!registrationIsCurrent(registrationVersion))return;
       if(offlineData){
+        const approvedEventId=workflowRef.current.registration?.eventId;
+        if(approvedEventId && approvedEventId!==offlineData.event.eventId)throw Error("別イベントへの切替にはオンラインで受付端末の再承認が必要です。");
         const saved=await loadLocalEvent();
         if(saved&&saved.event.eventId!==offlineData.event.eventId)throw Error("別イベントへの切替にはオンラインで受付端末の再承認が必要です。");
       }else if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
@@ -649,6 +651,7 @@ export default function App(){
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
     if(!localEvent||busy||!receptionAllowedRef.current||!canReceive(workflowRef.current)||scanProcessingRef.current)return;
+    const scanVersion=registrationVersionRef.current;
     let ticketId=rawText.trim();
     let qrEventId:string|null=null;
     if(!ticketId)return;
@@ -704,7 +707,7 @@ export default function App(){
           }
         }
       }
-      if(!receptionAllowedRef.current||eventAuthenticationRequiredRef.current)return;
+      if(!registrationIsCurrent(scanVersion)||!receptionAllowedRef.current||!canReceive(workflowRef.current)||eventAuthenticationRequiredRef.current)return;
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
         void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
         setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});
@@ -740,6 +743,8 @@ export default function App(){
 
       await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket);
       void syncPendingRecords();
+      // A completed local write remains durable, but an obsolete screen must not announce admission.
+      if(!registrationIsCurrent(scanVersion)||!receptionAllowedRef.current||!canReceive(workflowRef.current)||eventAuthenticationRequiredRef.current)return;
       setResult({
         kind:"success",
         title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",
@@ -747,6 +752,7 @@ export default function App(){
       });
       announceReception(receptionType);
     }catch(reason){
+      if(!registrationIsCurrent(scanVersion)||!receptionAllowedRef.current||!canReceive(workflowRef.current)||eventAuthenticationRequiredRef.current)return;
       console.error("受付処理に失敗しました",reason);
       void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed");
       setResult({

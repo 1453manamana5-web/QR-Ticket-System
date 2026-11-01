@@ -672,3 +672,33 @@ for (const mutation of ["append","delete"]) {
     assert.equal(retried.ticketCount,retried.tickets.length);
   });
 }
+
+
+test("concurrent member creation cannot silently overwrite the same cached member ID", async () => {
+  const c=clients();await createPublished(c);
+  const attempts=await Promise.allSettled([
+    c.management.saveMember("flow-event",{memberId:"MBR-0001",memberNumber:1,name:"First manager"},"create"),
+    c.management.saveMember("flow-event",{memberId:"MBR-0001",memberNumber:1,name:"Second manager"},"create"),
+  ]);
+  assert.equal(attempts.filter(item=>item.status==="fulfilled").length,1);
+  const failed=attempts.find(item=>item.status==="rejected");
+  assert.match(String(failed.reason),/MEMBER_ALREADY_EXISTS/);
+  const saved=(await getDocFromServer(doc(c.managerDb,"events","flow-event","members","MBR-0001"))).data();
+  assert.equal(saved.name,attempts[0].status==="fulfilled"?"First manager":"Second manager");
+});
+
+test("a stale member rename cannot recreate a member deleted by another manager", async () => {
+  const c=clients();await createPublished(c);
+  const member={memberId:"MBR-0001",memberNumber:1,name:"Original"};
+  await c.management.saveMember("flow-event",member,"create");
+  await c.management.deleteMember("flow-event",member.memberId);
+  await assert.rejects(c.management.saveMember("flow-event",{...member,name:"Late rename"},"update"),/MEMBER_NOT_FOUND/);
+  assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","members",member.memberId))).exists(),false);
+});
+
+test("member writes reject deleted event parents instead of leaving orphaned members", async () => {
+  const c=clients();await createPublished(c);
+  await c.management.deleteEvent("flow-event");
+  await assert.rejects(c.management.saveMember("flow-event",{memberId:"MBR-0001",memberNumber:1,name:"Late add"},"create"),/EVENT_NOT_FOUND/);
+  assert.equal((await getDocsFromServer(collection(c.managerDb,"events","flow-event","members"))).size,0);
+});
