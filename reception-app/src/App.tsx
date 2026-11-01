@@ -1,4 +1,5 @@
-import {useCallback, useEffect, useRef, useState} from "react";
+import {receptionReducer,initialReceptionState,receptionPhase,canReceive,type ReceptionAction,type Registration,type Screen} from "./receptionState";
+import {useCallback, useEffect, useRef, useState, useReducer} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
@@ -10,7 +11,6 @@ import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,down
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,getLatestReceptionTicket,syncReceptionErrorLog} from "./receptionSync";
 
 type Mode="entry"|"exit";
-type Screen="registration"|"auth"|"authScan"|"confirm"|"preparing"|"ready"|"reception"|"test";
 type Result={kind:"success"|"error";title:string;detail:string};
 
 function parseAuthPayload(text:string):EventAuthPayload|null{
@@ -82,11 +82,21 @@ export default function App(){
   };
   const announceReception=(type:ReceptionType)=>{void speakReception(type).then(reportAudioStatus);};
   useEffect(()=>prepareReceptionAudio(),[]);
-  const [screen,setScreen]=useState<Screen>("registration");
+  const [workflow,dispatchWorkflow]=useReducer(receptionReducer,initialReceptionState);
+  const workflowRef=useRef(workflow);
+  workflowRef.current=workflow;
+  const transition=useCallback((action:ReceptionAction)=>{
+    workflowRef.current=receptionReducer(workflowRef.current,action);
+    dispatchWorkflow(action);
+  },[]);
+  const screen=workflow.screen;
+  const setScreen=useCallback((value:Screen)=>transition({type:"screen",value}),[transition]);
+  const phase=receptionPhase(workflow);
   const screenRef=useRef<Screen>(screen);
   screenRef.current=screen;
   const [terminalRegistrationName,setTerminalRegistrationName]=useState(()=>localStorage.getItem("qr-ticket-reception-name")||"受付端末");
-  const [terminalRegistration,setTerminalRegistration]=useState<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null>(null);
+  const terminalRegistration=workflow.registration;
+  const setTerminalRegistration=useCallback((value:Registration|null)=>transition({type:"registration",value}),[transition]);
   const guide=useReceptionGuide(getTerminalId(),terminalRegistration?.approved===true);
   const [guideSettingsOpen,setGuideSettingsOpen]=useState(false);
   const [mode,setMode]=useState<Mode>("entry");
@@ -97,12 +107,14 @@ export default function App(){
   const [offlineProgress,setOfflineProgress]=useState({received:0,total:0});
   const [authCode,setAuthCode]=useState("");
   const [authCodeMode,setAuthCodeMode]=useState(false);
-  const [localEvent,setLocalEvent]=useState<LocalEventData|null>(null);
+  const localEvent=workflow.localEvent;
+  const setLocalEvent=useCallback((value:LocalEventData|null)=>transition({type:"event",value}),[transition]);
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
   const [result,setResult]=useState<Result|null>(null);
   const [testResultKind,setTestResultKind]=useState<"entry"|"exit"|"error">("entry");
-  const [remoteStopped,setRemoteStopped]=useState(false);
+  const remoteStopped=workflow.remoteStopped;
+  const setRemoteStopped=useCallback((value:boolean)=>transition({type:"remote-stop",value}),[transition]);
   const [scannerKey,setScannerKey]=useState(0);
   const [cameraFailed,setCameraFailed]=useState(false);
   const [online,setOnline]=useState(()=>navigator.onLine);
@@ -117,7 +129,7 @@ export default function App(){
   const registrationIsCurrent=(version:number)=>registrationActiveRef.current&&version===registrationVersionRef.current;
   const lastRemoteCommandRef=useRef("");
   const receptionAllowedRef=useRef(false);
-  receptionAllowedRef.current=terminalRegistration?.approved===true&&!guide.open&&!guideSettingsOpen&&!remoteStopped&&screen==="reception";
+  receptionAllowedRef.current=canReceive(workflow)&&!guide.open&&!guideSettingsOpen;
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
 
@@ -162,7 +174,7 @@ export default function App(){
       // ローカルの承認記録を使う。オンラインで承認取消が確認できた場合は従来どおり停止する。
       const value=(!navigator.onLine&&!incoming?.approved)?readCachedApproval():incoming;
       const approved=value?.approved===true;
-      if(registrationActiveRef.current!==approved)++registrationVersionRef.current;
+      if(registrationActiveRef.current!==approved || workflowRef.current.registration?.eventId!==value?.eventId)++registrationVersionRef.current;
       registrationActiveRef.current=approved;
       setTerminalRegistration(value);
       if(value?.name)setTerminalRegistrationName(value.name);
@@ -625,7 +637,7 @@ export default function App(){
   };
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
-    if(!localEvent||busy||!receptionAllowedRef.current||scanProcessingRef.current)return;
+    if(!localEvent||busy||!receptionAllowedRef.current||!canReceive(workflowRef.current)||scanProcessingRef.current)return;
     let ticketId=rawText.trim();
     let qrEventId:string|null=null;
     if(!ticketId)return;
@@ -785,7 +797,7 @@ export default function App(){
 
   const beginGuide=(topic?:string)=>{setGuideSettingsOpen(false);setResult(null);setScreen(localEvent?.dataReady?"ready":"auth");if(topic)guide.startTopic(topic);else guide.start();};
   const renderScreen=()=>{
-  if(screen==="registration")return <div className="entry-reception-page waiting reception-registration-page">
+  if(screen==="registration")return <div data-reception-phase={phase} className="entry-reception-page waiting reception-registration-page">
     <main className="entry-reception-main">
       <section className="entry-result-panel reception-registration-panel">
         <span className="entry-result-eyebrow">RECEPTION TERMINAL</span>
@@ -807,7 +819,7 @@ export default function App(){
   </div>;
 
   if(!terminalRegistration || terminalRegistration.approved!==true){
-    return <div className="entry-reception-page waiting reception-registration-page">
+    return <div data-reception-phase={phase} className="entry-reception-page waiting reception-registration-page">
       <main className="entry-reception-main">
         <section className="entry-result-panel reception-registration-panel">
           <span className="entry-result-eyebrow">RECEPTION TERMINAL</span>
@@ -828,7 +840,7 @@ export default function App(){
     </div>;
   }
 
-  if(screen==="auth")return <div className="entry-reception-page waiting event-auth-page">
+  if(screen==="auth")return <div data-reception-phase={phase} className="entry-reception-page waiting event-auth-page">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
@@ -915,7 +927,7 @@ export default function App(){
     </div>;
   }
 
-  if(screen==="authScan")return <div className="entry-reception-page waiting">
+  if(screen==="authScan")return <div data-reception-phase={phase} className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
@@ -946,7 +958,7 @@ export default function App(){
     </main>
   </div>;
 
-  if(screen==="confirm"&&authPayload)return <div className="entry-reception-page waiting">
+  if(screen==="confirm"&&authPayload)return <div data-reception-phase={phase} className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
@@ -964,7 +976,7 @@ export default function App(){
     </section></main>
   </div>;
 
-  if(screen==="preparing")return <div className="entry-reception-page waiting">
+  if(screen==="preparing")return <div data-reception-phase={phase} className="entry-reception-page waiting">
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
     <div className="entry-background-circle entry-background-circle-two" aria-hidden="true"/>
     <header className="entry-reception-header">
