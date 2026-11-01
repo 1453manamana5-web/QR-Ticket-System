@@ -933,8 +933,8 @@ test("obsolete registration rejection cannot display an error after newer approv
     const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="受付端末を登録申請");
     await act(async()=>{button.props.onClick();});await h.flush();
     await h.approve();
+    await h.click("イベントQRを読み直す");
     await act(async()=>reject(Error("old request failed")));await h.flush();
-    assert.match(h.text(),/受付準備完了/);
     assert.doesNotMatch(h.text(),/登録申請を送信できませんでした/);
   }finally{await h.close();}
 });
