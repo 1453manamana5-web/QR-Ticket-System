@@ -405,3 +405,123 @@ test('management totals and status cards exclude unprinted reserves and include 
     assert.match(label(h.renderer.root.findByProps({className:'ticket-sync-state'})),/未印刷の予備 1枚/);
   }finally{await h.close();}
 });
+
+test('failed member registration does not create a phantom row',async()=>{
+  const h=await harness({saveMember:async()=>{throw Error('network disconnected');}});
+  try{
+    await h.nav('部員管理');await h.click('＋ 部員を登録');
+    const input=h.renderer.root.findByProps({placeholder:'例：山田 太郎'});
+    await act(async()=>input.props.onChange({target:{value:'Unsaved member'}}));await h.flush();
+    await h.click('部員を登録');
+    assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,0);
+    assert.match(h.text(),/部員情報をFirebaseへ保存できませんでした/);
+  }finally{await h.close();}
+});
+
+test('failed member deletion preserves the existing member and its QR action',async()=>{
+  const member={memberId:'MBR-0001',memberNumber:1,name:'Existing member'};
+  const h=await harness({loadMembers:async()=>[member],deleteMember:async()=>{throw Error('network disconnected');}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({className:'member-delete-button'}).props.onClick());await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Existing member');
+    assert.equal(h.renderer.root.findAllByProps({className:'member-qr-button'}).length,1);
+    assert.match(h.text(),/部員情報をFirebaseから削除できませんでした/);
+  }finally{await h.close();}
+});
+
+test('same-render registration clicks issue only one member write and wait for server success',async()=>{
+  let finish,calls=0;
+  const h=await harness({saveMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
+  try{
+    await h.nav('部員管理');await h.click('＋ 部員を登録');
+    await act(async()=>h.renderer.root.findByProps({placeholder:'例：山田 太郎'}).props.onChange({target:{value:'Once'}}));await h.flush();
+    const register=h.renderer.root.findAllByType('button').find(node=>node.children.join('')==='部員を登録');
+    await act(async()=>{register.props.onClick();register.props.onClick();});await h.flush();
+    assert.equal(calls,1);assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,0);
+    await act(async()=>finish());await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,1);
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Once');
+  }finally{await h.close();}
+});
+
+test('member write completion cannot insert an old event member after switching events',async()=>{
+  let finish;const written=[];
+  const h=await harness({saveMember:(id,member)=>{written.push({id,member});return new Promise(resolve=>{finish=resolve;});}});
+  try{
+    await h.nav('部員管理');await h.click('＋ 部員を登録');
+    await act(async()=>h.renderer.root.findByProps({placeholder:'例：山田 太郎'}).props.onChange({target:{value:'Event A member'}}));await h.flush();
+    const register=h.renderer.root.findAllByType('button').find(node=>node.children.join('')==='部員を登録');
+    await act(async()=>register.props.onClick());await h.flush();
+    await h.events([event('event-b')]);
+    await act(async()=>finish());await h.flush();
+    assert.equal(written.length,1);assert.equal(written[0].id,'event-a');
+    assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,0);
+  }finally{await h.close();}
+});
+
+test('duplicate member deletion is single-flight and late completion cannot remove another event row',async()=>{
+  let finish,calls=0;
+  const h=await harness({loadMembers:async id=>[{memberId:'MBR-0001',memberNumber:1,name:id+' member'}],deleteMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
+  try{
+    await h.nav('部員管理');
+    const remove=h.renderer.root.findByProps({className:'member-delete-button'});
+    await act(async()=>{remove.props.onClick();remove.props.onClick();});await h.flush();
+    assert.equal(calls,1);
+    await h.events([event('event-b')]);
+    await act(async()=>finish());await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'event-b member');
+  }finally{await h.close();}
+});
+
+test('failed member rename restores the confirmed name and reports the failure',async()=>{
+  const member={memberId:'MBR-0001',memberNumber:1,name:'Confirmed'};
+  const h=await harness({loadMembers:async()=>[member],saveMember:async()=>{throw Error('rename failed');}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Unsaved rename'}}));await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Confirmed');
+    assert.match(h.text(),/部員情報をFirebaseへ保存できませんでした/);
+  }finally{await h.close();}
+});
+
+test('member renames preserve typing while writes are serialized',async()=>{
+  const pending=[],calls=[];
+  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:(_id,member)=>{calls.push(member.name);return new Promise(resolve=>pending.push(resolve));}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'First'}}));await h.flush();
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Latest'}}));await h.flush();
+    assert.deepEqual(calls,['First']);assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Latest');
+    await act(async()=>pending.shift()());await h.flush();assert.deepEqual(calls,['First','Latest']);
+    await act(async()=>pending.shift()());await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Latest');
+  }finally{await h.close();}
+});
+
+test('failed bulk member rename retains the dialog and confirmed names for retry',async()=>{
+  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Confirmed'}],saveMember:async()=>{throw Error('bulk failed');}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'1番を選択'}).props.onChange());await h.flush();
+    await h.click('まとめて変更');
+    await act(async()=>h.renderer.root.findByProps({className:'member-bulk-textarea'}).props.onChange({target:{value:'Unconfirmed'}}));await h.flush();
+    await act(async()=>{void h.renderer.root.findAllByType('button').find(node=>node.children.join('')==='変更を適用').props.onClick();});await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.value,'Confirmed');
+    assert.equal(h.renderer.root.findAllByProps({className:'member-registration-modal member-bulk-modal'}).length,1);
+    assert.match(h.text(),/保存できませんでした/);
+  }finally{await h.close();}
+});
+
+test('deleting a member waits for an in-flight rename so the rename cannot resurrect it',async()=>{
+  let finish;const order=[];
+  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>new Promise(resolve=>{finish=()=>{order.push('rename');resolve();};}),deleteMember:async()=>{order.push('delete');}});
+  try{
+    await h.nav('部員管理');
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Renaming'}}));await h.flush();
+    await act(async()=>{void h.renderer.root.findByProps({className:'member-delete-button'}).props.onClick();});await h.flush();
+    assert.deepEqual(order,[]);
+    await act(async()=>finish());await h.flush();
+    assert.deepEqual(order,['rename','delete']);assert.equal(h.renderer.root.findAllByProps({className:'member-row'}).length,0);
+  }finally{await h.close();}
+});
