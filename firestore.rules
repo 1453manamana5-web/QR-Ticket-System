@@ -19,43 +19,22 @@ service cloud.firestore {
     }
 
     function approvedManagementTerminal() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
-        && exists(/databases/$(database)/documents/terminalOwners/$(managementTerminalId()))
-        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.enabled == true
-        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.ownerUid == request.auth.uid
-        && exists(/databases/$(database)/documents/terminals/$(managementTerminalId()))
-        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.approved == true
-        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.managementApproved == true
-        && (
-          get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "management"
-          || get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "both"
-        );
+      let installation = get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data;
+      let terminal = get(/databases/$(database)/documents/terminals/$(installation.terminalId)).data;
+      let owner = get(/databases/$(database)/documents/terminalOwners/$(installation.terminalId)).data;
+      return signedIn() && installation.authUid == request.auth.uid && installation.approved == true
+        && owner.enabled == true && owner.ownerUid == request.auth.uid
+        && terminal.approved == true && terminal.role in ["management","both"] && terminal.managementApproved == true;
     }
 
     function approvedReceptionTerminal() {
-      // Verified management owners can use reception in the same browser.
-      return approvedManagementTerminal() || (signedIn()
-        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
-        && exists(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
-        && get(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.enabled == true
-        && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
-        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
-        && (
-          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
-          || (
-            !get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.keys().hasAny(["receptionApproved"])
-            && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
-          )
-        )
-        && (
-          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
-          || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
-        ));
+      let installation = get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data;
+      let terminal = get(/databases/$(database)/documents/terminals/$(installation.terminalId)).data;
+      let owner = get(/databases/$(database)/documents/terminalOwners/$(installation.terminalId)).data;
+      return signedIn() && installation.authUid == request.auth.uid && installation.approved == true
+        && owner.enabled == true && terminal.approved == true
+        && ((terminal.role in ["management","both"] && terminal.managementApproved == true && owner.ownerUid == request.auth.uid)
+          || (terminal.role in ["reception","both"] && (!terminal.keys().hasAny(["receptionApproved"]) || terminal.receptionApproved == true)));
     }
 
     // Event approval is independent of permanent terminal/management registration.

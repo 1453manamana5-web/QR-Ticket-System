@@ -535,7 +535,7 @@ export default function App({practice=false}:AppProps={}) {
       console.error("Firebase event subscription failed", reason);
     }
     return () => { active = false; unsubscribe?.(); };
-  }, [ownManagementTerminalApproved]);
+  }, [ownManagementTerminalApproved,practice]);
 
   useEffect(() => {
     firebaseTicketHydratedRef.current = false;
@@ -728,7 +728,7 @@ export default function App({practice=false}:AppProps={}) {
 
 
   useEffect(() => {
-    if (!ownManagementTerminalApproved) { setReceptionEventApprovals([]); return; }
+    if (practice || !ownManagementTerminalApproved) { setReceptionEventApprovals([]); return; }
     let active = true;
     const refresh = () => { void loadPendingReceptionEventApprovals().then(items => { if (active) setReceptionEventApprovals(items); })
       .catch(reason => console.error("イベント受付申請の取得に失敗しました", reason)); };
