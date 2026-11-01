@@ -129,7 +129,7 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
@@ -158,10 +158,10 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
       getEventAuthPayloadByToken:async()=>bundle.authPayload,
     },
     "./receptionSync":{
-      getTerminalRegistration:async()=>{let eventId="event-one";try{eventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}return initialRegistration ? {...initialRegistration,eventId,approved:initialRegistration.approved && eventId===approvedEventId}:null;},
+      getTerminalRegistration:async()=>{if(readRegistration)return readRegistration();let eventId="event-one";try{eventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}return initialRegistration ? {...initialRegistration,eventId,approved:initialRegistration.approved && eventId===approvedEventId}:null;},
       subscribeTerminalRegistration:(cb,onError)=>{registrationCallback=cb;registrationError=onError;cb(initialRegistration);return()=>{};},
       subscribeTerminalControl:(_id,cb)=>{controlCallback=cb;cb("停止",null);return()=>{};},
-      registerReceptionTerminal:async()=>{registerCalls++;},
+      registerReceptionTerminal:async()=>{registerCalls++;if(register)await register();},
       requestReceptionEventReapproval:async()=>reapprove,
       saveTerminalHeartbeat:async()=>null,
       syncReceptionErrorLog:async()=>{},
@@ -880,4 +880,33 @@ test("repeated approval polling keeps the running event and arbitrary transition
     if(state.screen==="reception"){assert.equal(state.registration?.approved,true);assert.equal(state.localEvent?.dataReady,true);assert.equal(state.localEvent.event.eventId,state.registration.eventId);}
     if(canReceive(state))assert.equal(state.remoteStopped,false);
   }
+});
+
+test("late registration mutation cannot clear the event loaded after server approval",async()=>{
+  let finish;
+  const h=await harness({saved:false,initialRegistration:null,register:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="受付端末を登録申請");
+    await act(async()=>{button.props.onClick();});await h.flush();assert.ok(finish);
+    await h.approve();
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    await act(async()=>finish());await h.flush();
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    assert.match(h.text(),/受付準備完了/);
+  }finally{await h.close();}
+});
+
+test("late approval check cannot replace a newer revoke-and-approve cycle",async()=>{
+  let finish;
+  const h=await harness({saved:false,automatic:async()=>{throw Error("NO_PUBLISHED_EVENT");},readRegistration:()=>new Promise(resolve=>{finish=resolve;})});
+  try{
+    await h.click("イベントデータQRを読み取る");
+    await h.scan(JSON.stringify({type:"qr-ticket-event-auth",...makeEvent().event,authToken:"test-token"}));
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="このイベントで認証");
+    await act(async()=>{button.props.onClick();});await h.flush();assert.ok(finish);
+    await h.revoke();await h.approve();
+    await act(async()=>finish(null));await h.flush();
+    assert.doesNotMatch(h.text(),/受付端末を登録|受付端末の承認待ち/);
+    assert.equal(h.renderer.root.findAll(node=>node.props["data-reception-phase"]==="preparing").length>0,true);
+  }finally{await h.close();}
 });
