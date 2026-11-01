@@ -8,7 +8,7 @@ import * as livePublisher from "./eventPublisher";
 import type {PublishedEventBundle} from "./eventPublisher";
 import {createGuidePractice} from "./guidePractice";
 import ManagementGuide,{useManagementGuide,managementGuideTopics} from "./ManagementGuide";
-import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, nextStatus, ticketQrValue } from "./eventUtils";
+import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, ticketQrValue } from "./eventUtils";
 import {parseManagementBackup} from "./backup";
 import {localDateValue, receptionDataCollected, csvCell,isCountedTicket} from "./operationSafety";
 import {useReservePrintLedger} from "./reservePrintLedger";
@@ -2803,29 +2803,11 @@ export default function App({practice=false}:AppProps={}) {
 
     </div>;
   };
-
-function RangeSetting({label,value,suffix,min,max,onChange}:{label:string;value:number;suffix:string;min:number;max:number;onChange:(value:number)=>void}) {
-  return <label className="ticket-design-range">
-    <span>{label}</span>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      value={value}
-      onChange={e => onChange(Number(e.target.value))}
-      aria-label={label}
-    />
-    <strong>{value}{suffix}</strong>
-  </label>;
-}
-
-function TicketIcon(){return <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 13h32v22H8z"/><path d="M14 13v7m0 8v7M34 13v7m0 8v7"/><path d="M21 18h8v12h-8z"/></svg>;}
 function PlusIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 7v18M7 16h18"/></svg>;}
 function PaletteIcon(){return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5C9.9 5 5 9.5 5 15.2 5 20 8.6 23 13 23h2.5c1.8 0 2.6 2.3 1.6 3.6-.4.5 0 .9.7.9C24.2 27.5 27 22.2 27 16c0-6.1-4.9-11-11-11Z"/><circle cx="10.5" cy="14" r="1.2"/><circle cx="15" cy="10.5" r="1.2"/><circle cx="21" cy="11.5" r="1.2"/><circle cx="23" cy="17" r="1.2"/></svg>;}
 function SearchIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>;}
 function FilterIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>;}
 function QrIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zM14 14h3v3h-3zm5 0h1v1h-1zm-5 5h1v1h-1zm3-2h3v3h-3z"/></svg>;}
-function BackIcon(){return <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M18 5 7 14l11 9M8 14h15"/></svg>;}
 function NavIcon({type}:{type:string}){
   if(type==="home") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>;
   if(type==="event") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M7 14h4M7 17h7"/></svg>;
@@ -3215,10 +3197,6 @@ function NavIcon({type}:{type:string}){
       </button>
     </div>}
   </div>{guide.open&&!practice&&<ManagementGuide controller={guide} renderWorkspace={()=><App practice/>}/>}</>;
-}
-
-function Metric({ title, value, sub }: { title: string; value: string; sub: string }) {
-  return <div className="metric"><small>{title}</small><strong>{value}</strong><span>{sub}</span></div>;
 }
 
 function Terminal({ name, mode, onAction }: { name: string; mode: string; onAction: () => void }) {

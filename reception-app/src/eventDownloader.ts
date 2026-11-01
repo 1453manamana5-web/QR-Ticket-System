@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, query, where } from "firebase/firestore";
+import { collection, doc, getDocFromServer, getDocsFromServer, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
 
