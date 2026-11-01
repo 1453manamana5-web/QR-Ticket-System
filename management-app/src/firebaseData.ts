@@ -24,6 +24,8 @@ export async function deleteEvent(eventId: string): Promise<void> {
 
   // 親ドキュメントの削除だけではサブコレクションは消えない。
   // 大量チケットでも安定して削除できるよう、Firestoreのバッチ上限より少ない件数で分割する。
+  // Unpublish before listing children so concurrent tabs cannot create approval grants.
+  if (eventSnapshot.exists()) await updateDoc(eventRef, { receptionTarget: false });
   const subcollections = ["receptionApprovals", "tickets", "receptionRecords", "analysis", "members", "settings"] as const;
   for (const subcollection of subcollections) {
     const snapshot = await getDocsFromServer(collection(db, "events", eventId, subcollection));
