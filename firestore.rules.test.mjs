@@ -572,6 +572,7 @@ test("reception can discover only published events and download only active tick
     await setDoc(doc(db, "terminals", "T-ACTIVE-READER"), {
       approved: true, role: "reception", receptionApproved: true,
     });
+    await setDoc(doc(db,"events","active","receptionApprovals","T-ACTIVE-READER"), {eventId:"active",terminalId:"T-ACTIVE-READER",requestedByUid:"active-reader",name:"Reader",status:"approved",requestedAt:"2026-11-01T00:00:00.000Z"});
     for (const [id, target, status] of [
       ["active", true, "ready"], ["private", false, "preparing"], ["finished", true, "finished"],
     ]) {

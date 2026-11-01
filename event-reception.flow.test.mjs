@@ -345,6 +345,7 @@ test("event reapplication preserves terminal identity, requires approval again a
 
 test("revoked reception can reapply, cancel and reapply again without deleting its owner mapping", async () => {
   const c = clients();
+  await createPublished(c);
   const r = await registeredReception(c);
   await c.management.revokeManagedReception(r.terminalId);
   assert.equal(await r.registration.getTerminalRegistration(), null);
