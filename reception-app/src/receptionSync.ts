@@ -111,13 +111,16 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
       if (active.length === 1) {
         eventId = active[0].id;
         const approvalRef = doc(getFirebaseDb(), "events", eventId, "receptionApprovals", state.terminalId);
-        const approval = await getDocFromServer(approvalRef);
-        if (!approval.exists()) {
-          await setDoc(approvalRef, { eventId, terminalId: state.terminalId, requestedByUid: await getFirebaseUid(),
-            name: typeof terminal.name === "string" ? terminal.name : "受付端末", status: "pending", requestedAt: new Date().toISOString() });
-        } else {
-          eventApproved = approval.data().status === "approved" && approval.data().requestedByUid === await getFirebaseUid();
-        }
+        const uid = await getFirebaseUid();
+        eventApproved = await runTransaction(getFirebaseDb(), async tx => {
+          const approval = await tx.get(approvalRef);
+          if (!approval.exists()) {
+            tx.set(approvalRef, { eventId, terminalId: state.terminalId, requestedByUid: uid,
+              name: typeof terminal.name === "string" ? terminal.name : "受付端末", status: "pending", requestedAt: new Date().toISOString() });
+            return false;
+          }
+          return approval.data().status === "approved" && approval.data().requestedByUid === uid;
+        });
       }
     }
     return {

@@ -625,3 +625,25 @@ test("event approval must be renewed by the same iPad manager for each event", a
   await c.management.approveReceptionEvent("second-event", "T-FLOW-MANAGER");
   assert.equal((await reception.getTerminalRegistration()).approved, true);
 });
+
+test("concurrent reception approval requests are idempotent and cannot self-approve", async () => {
+  const c = clients();
+  await createPublished(c, makeEvent(), [makeTicket("flow-event")], false);
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.receptionDb, "flow-reception", "T-FLOW-RECEPTION");
+  const results = await Promise.all([reception.getTerminalRegistration(), reception.getTerminalRegistration()]);
+  assert.equal(results.every(item => item.approved === false), true);
+  const ref = doc(c.receptionDb,"events","flow-event","receptionApprovals","T-FLOW-RECEPTION");
+  await assertFails(updateDoc(ref,{status:"approved",decidedAt:new Date().toISOString(),decidedByUid:"flow-reception"}));
+  await c.management.approveReceptionEvent("flow-event","T-FLOW-RECEPTION");
+  assert.equal((await reception.getTerminalRegistration()).approved,true);
+});
+
+test("deleting an event removes its reception approvals and prevents grant reuse after recreation", async () => {
+  const c = clients();
+  await createPublished(c);
+  await c.management.deleteEvent("flow-event");
+  assert.equal((await getDocsFromServer(collection(c.managerDb,"events","flow-event","receptionApprovals"))).size,0);
+  await createPublished(c, makeEvent(), [makeTicket("flow-event")], false);
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts",c.managerDb,"flow-manager","T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved,false);
+});
