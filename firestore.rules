@@ -19,43 +19,30 @@ service cloud.firestore {
     }
 
     function approvedManagementTerminal() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
-        && exists(/databases/$(database)/documents/terminalOwners/$(managementTerminalId()))
-        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.enabled == true
-        && get(/databases/$(database)/documents/terminalOwners/$(managementTerminalId())).data.ownerUid == request.auth.uid
-        && exists(/databases/$(database)/documents/terminals/$(managementTerminalId()))
-        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.approved == true
-        && get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.managementApproved == true
-        && (
-          get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "management"
-          || get(/databases/$(database)/documents/terminals/$(managementTerminalId())).data.role == "both"
-        );
+      let installation = get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data;
+      let terminal = get(/databases/$(database)/documents/terminals/$(installation.terminalId)).data;
+      let owner = get(/databases/$(database)/documents/terminalOwners/$(installation.terminalId)).data;
+      return signedIn() && installation.authUid == request.auth.uid && installation.approved == true
+        && owner.enabled == true && owner.ownerUid == request.auth.uid
+        && terminal.approved == true && terminal.role in ["management","both"] && terminal.managementApproved == true;
     }
 
     function approvedReceptionTerminal() {
-      // Verified management owners can use reception in the same browser.
-      return approvedManagementTerminal() || (signedIn()
-        && exists(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid))
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.approved == true
-        && exists(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
-        && get(/databases/$(database)/documents/terminalOwners/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.enabled == true
-        && exists(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId))
-        && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
-        && (
-          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.receptionApproved == true
-          || (
-            !get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.keys().hasAny(["receptionApproved"])
-            && get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.approved == true
-          )
-        )
-        && (
-          get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "reception"
-          || get(/databases/$(database)/documents/terminals/$(get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId)).data.role == "both"
-        ));
+      let installation = get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data;
+      let terminal = get(/databases/$(database)/documents/terminals/$(installation.terminalId)).data;
+      let owner = get(/databases/$(database)/documents/terminalOwners/$(installation.terminalId)).data;
+      return signedIn() && installation.authUid == request.auth.uid && installation.approved == true
+        && owner.enabled == true && terminal.approved == true
+        && ((terminal.role in ["management","both"] && terminal.managementApproved == true && owner.ownerUid == request.auth.uid)
+          || (terminal.role in ["reception","both"] && (!terminal.keys().hasAny(["receptionApproved"]) || terminal.receptionApproved == true)));
+    }
+
+    // Event approval is independent of permanent terminal/management registration.
+    function approvedReceptionForEvent(eventId) {
+      return approvedReceptionTerminal()
+        && exists(/databases/$(database)/documents/events/$(eventId)/receptionApprovals/$(receptionTerminalId()))
+        && get(/databases/$(database)/documents/events/$(eventId)/receptionApprovals/$(receptionTerminalId())).data.status == "approved"
+        && get(/databases/$(database)/documents/events/$(eventId)/receptionApprovals/$(receptionTerminalId())).data.requestedByUid == request.auth.uid;
     }
 
     function receptionTerminalId() {
@@ -81,7 +68,7 @@ service cloud.firestore {
       let recordId = request.resource.data.lastReceptionRecordId;
       let beforeStatus = resource.data.currentStatus;
       let afterStatus = request.resource.data.currentStatus;
-      return approvedReceptionTerminal()
+      return approvedReceptionForEvent(eventId)
         && activeReceptionEvent(eventId)
         && request.resource.data.eventId == eventId
         && request.resource.data.ticketId == ticketId
@@ -114,7 +101,7 @@ service cloud.firestore {
     function validReceptionRecordCreate(eventId, recordId) {
       let data = request.resource.data;
       let ticketPath = /databases/$(database)/documents/events/$(eventId)/tickets/$(data.ticketId);
-      return approvedReceptionTerminal()
+      return approvedReceptionForEvent(eventId)
         && activeReceptionEvent(eventId)
         && data.keys().hasOnly(["recordId", "eventId", "ticketId", "terminalId", "type", "timestamp"])
         && data.recordId == recordId && recordId.size() > 0 && recordId.size() <= 160
@@ -585,7 +572,7 @@ service cloud.firestore {
       match /tickets/{ticketId} {
         // Only the currently active event can be downloaded by reception.
         allow read: if approvedManagementTerminal()
-          || (approvedReceptionTerminal() && activeReceptionEvent(eventId));
+          || (approvedReceptionForEvent(eventId) && activeReceptionEvent(eventId));
         allow create, delete: if approvedManagementTerminal();
         // Reception changes are allowed only as an atomic ticket+record write.
         allow update: if approvedManagementTerminal()
@@ -602,6 +589,37 @@ service cloud.firestore {
         allow create: if validReceptionRecordCreate(eventId, recordId);
         allow delete: if approvedManagementTerminal();
         allow update: if false;
+      }
+
+      match /receptionApprovals/{terminalId} {
+        function validApproval(data) {
+          return data.keys().hasAll(["eventId", "terminalId", "requestedByUid", "name", "status", "requestedAt"])
+            && data.keys().hasOnly(["eventId", "terminalId", "requestedByUid", "name", "status", "requestedAt", "decidedAt", "decidedByUid"])
+            && data.eventId == eventId && data.terminalId == terminalId
+            && data.requestedByUid is string && data.requestedByUid.size() > 0 && data.requestedByUid.size() <= 128
+            && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+            && data.requestedAt is string && data.requestedAt.size() <= 40
+            && data.status in ["pending", "approved"];
+        }
+        allow get: if approvedManagementTerminal()
+          || (approvedOwnInstallationForTerminal(terminalId) && terminalId == receptionTerminalId());
+        allow list: if approvedManagementTerminal();
+        allow create: if approvedReceptionTerminal() && activeReceptionEvent(eventId)
+          && terminalId == receptionTerminalId() && validApproval(request.resource.data)
+          && request.resource.data.requestedByUid == request.auth.uid && request.resource.data.status == "pending"
+          && !request.resource.data.keys().hasAny(["decidedAt", "decidedByUid"]);
+        allow update: if approvedManagementTerminal() && activeReceptionEvent(eventId)
+          && (get(terminalPath(managementTerminalId())).data.admin == true
+            || get(terminalPath(managementTerminalId())).data.subAdmin == true)
+          && validApproval(request.resource.data) && resource.data.status == "pending"
+          && request.resource.data.status == "approved"
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "decidedAt", "decidedByUid"])
+          && request.resource.data.decidedByUid == request.auth.uid
+          && request.resource.data.decidedAt is string && request.resource.data.decidedAt.size() <= 40
+          && exists(ownerPath(terminalId)) && get(ownerPath(terminalId)).data.enabled == true
+          && get(installationPath(resource.data.requestedByUid)).data.approved == true
+          && get(installationPath(resource.data.requestedByUid)).data.terminalId == terminalId;
+        allow delete: if approvedManagementTerminal();
       }
 
       match /analysis/{analysisId} {

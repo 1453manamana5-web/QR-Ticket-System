@@ -367,6 +367,9 @@ async function seedApprovedReception() {
       eventId: "event-live", eventName: "公開中", eventStatus: "ready",
       dataVersion: 1, authToken: "event-live-token", receptionTarget: true,
     });
+    await setDoc(doc(trusted, "events", "event-live", "receptionApprovals", "T-RECEPTION-WRITE"), {
+      eventId:"event-live", terminalId:"T-RECEPTION-WRITE", requestedByUid:"reception-writer",name:"Reception",status:"approved",requestedAt:"2026-11-01T00:00:00.000Z",
+    });
     await setDoc(doc(trusted, "events", "event-live", "tickets", "ticket-0001"), {
       ticketId: "ticket-0001", eventId: "event-live", valid: true, currentStatus: "unused",
     });
@@ -569,6 +572,7 @@ test("reception can discover only published events and download only active tick
     await setDoc(doc(db, "terminals", "T-ACTIVE-READER"), {
       approved: true, role: "reception", receptionApproved: true,
     });
+    await setDoc(doc(db,"events","active","receptionApprovals","T-ACTIVE-READER"), {eventId:"active",terminalId:"T-ACTIVE-READER",requestedByUid:"active-reader",name:"Reader",status:"approved",requestedAt:"2026-11-01T00:00:00.000Z"});
     for (const [id, target, status] of [
       ["active", true, "ready"], ["private", false, "preparing"], ["finished", true, "finished"],
     ]) {

@@ -80,13 +80,19 @@ const makeTicket = (eventId, ticketId = "ticket-1") => ({
   eventId, ticketId, basicInfo: { number: ticketId }, currentStatus: "unused",
   valid: true, updatedAt: "2026-10-25T00:00:00.000Z",
 });
-async function createPublished(c, event = makeEvent(), tickets = [makeTicket(event.eventId)]) {
+async function createPublished(c, event = makeEvent(), tickets = [makeTicket(event.eventId)], approveForFixture = true) {
   const active = await getDocsFromServer(firestore.query(collection(c.managerDb,"events"),firestore.where("receptionTarget","==",true)));
   for (const target of active.docs) if (target.id !== event.eventId) await c.reception.saveTerminalHeartbeat("T-FLOW-RECEPTION","stopped",0,target.id);
   await c.management.saveEvent(event);
   await c.management.saveReceptionSettings(event.eventId, settings);
   await c.management.saveTickets(event.eventId, tickets);
-  return c.publisher.publishEventBundle(event, settings, tickets);
+  const bundle = await c.publisher.publishEventBundle(event, settings, tickets);
+  if (approveForFixture) await env.withSecurityRulesDisabled(async context => {
+    for (const [uid, id] of [["flow-manager","T-FLOW-MANAGER"],["flow-reception","T-FLOW-RECEPTION"]]) {
+      await setDoc(doc(context.firestore(),"events",event.eventId,"receptionApprovals",id), {eventId:event.eventId,terminalId:id,requestedByUid:uid,name:id,status:"approved",requestedAt:new Date().toISOString()});
+    }
+  });
+  return bundle;
 }
 
 test("real client flow: save, publish, download, offline entry/exit/reentry, retry, delete", async () => {
@@ -297,6 +303,8 @@ test("real reception registration can be approved by the manager and immediately
   await registration.registerReceptionTerminal("New reception");
   assert.equal((await registration.getTerminalRegistration()).approved, false);
   await c.management.approveTerminal(terminalId);
+  assert.equal((await registration.getTerminalRegistration()).approved, false);
+  await c.management.approveReceptionEvent("flow-event", terminalId);
   const approved = await registration.getTerminalRegistration();
   assert.equal(approved.approved, true);
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalOwners", terminalId))).data().ownerUid, uid);
@@ -329,12 +337,15 @@ test("event reapplication preserves terminal identity, requires approval again a
   assert.equal(pending.managementApproved, false);
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", r.uid))).data().terminalId, r.terminalId);
   await c.management.approveTerminal(r.terminalId);
+  await r.registration.getTerminalRegistration();
+  await c.management.approveReceptionEvent("flow-event", r.terminalId);
   assert.equal((await r.registration.getTerminalRegistration()).approved, true);
   assert.equal((await r.registration.getLatestReceptionTicket("flow-event", "ticket-1")).currentStatus, "unused");
 });
 
 test("revoked reception can reapply, cancel and reapply again without deleting its owner mapping", async () => {
   const c = clients();
+  await createPublished(c);
   const r = await registeredReception(c);
   await c.management.revokeManagedReception(r.terminalId);
   assert.equal(await r.registration.getTerminalRegistration(), null);
@@ -346,6 +357,8 @@ test("revoked reception can reapply, cancel and reapply again without deleting i
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalOwners", r.terminalId))).data().enabled, true);
   await r.registration.registerReceptionTerminal("Reapply again");
   await c.management.approveTerminal(r.terminalId);
+  await r.registration.getTerminalRegistration();
+  await c.management.approveReceptionEvent("flow-event", r.terminalId);
   assert.equal((await r.registration.getTerminalRegistration()).approved, true);
 });
 
@@ -589,4 +602,26 @@ test('interrupted multi-chunk issuance preserves completed chunks with matching 
   assert.equal(current.ticketCount,400);assert.equal((await getDocFromServer(doc(c.managerDb,'eventBundles',current.authToken))).data().ticketCount,400);
   await c.management.appendTickets('flow-event',tickets.slice(400),true);
   assert.equal((await c.management.loadEventTickets('flow-event')).length,451);
+});
+
+test("event approval must be renewed by the same iPad manager for each event", async () => {
+  const c = clients();
+  await createPublished(c, makeEvent(), [makeTicket("flow-event")], false);
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, false);
+  const first = await c.management.loadPendingReceptionEventApprovals();
+  assert.equal(first.some(item => item.eventId === "flow-event" && item.terminalId === "T-FLOW-MANAGER"), true);
+  await c.management.approveReceptionEvent("flow-event", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, true);
+  await createPublished(c, makeEvent("second-event"), [makeTicket("second-event")], false);
+  const next = await reception.getTerminalRegistration();
+  assert.equal(next.eventId, "second-event");
+  assert.equal(next.approved, false);
+  const grant = await getDocFromServer(doc(c.managerDb, "events", "second-event", "receptionApprovals", "T-FLOW-MANAGER"));
+  assert.equal(grant.data().status, "pending");
+  const terminal = await getDocFromServer(doc(c.managerDb, "terminals", "T-FLOW-MANAGER"));
+  assert.equal(terminal.data().admin, true);
+  assert.equal(terminal.data().managementApproved, true);
+  await c.management.approveReceptionEvent("second-event", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, true);
 });

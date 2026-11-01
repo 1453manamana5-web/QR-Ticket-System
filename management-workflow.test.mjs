@@ -23,7 +23,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
     subscribeEvents:cb=>{eventsCallback=cb;cb([event(),event('event-b')]);return()=>{};},
     subscribeTickets:(id,cb)=>{ticketCallbacks.set(id,cb);cb([ticket(id)]);return()=>{};},
     subscribeReceptionRecords:(id,cb)=>{recordCallbacks.set(id,cb);cb([]);return()=>{};},
-    subscribeTerminals:cb=>{cb([manager]);return()=>{};},loadTerminals:async()=>[manager],
+    subscribeTerminals:cb=>{cb([manager]);return()=>{};},loadTerminals:async()=>[manager],loadPendingReceptionEventApprovals:async()=>[],approveReceptionEvent:async()=>{},
     loadAppSettings:async()=>({volume:25,deviceName:'Saved manager'}),saveAppSettings:async(_id,value)=>savedSettings.push({...value}),
     loadReceptionSettings:async()=>({entryEnabled:true,exitEnabled:true,reentryEnabled:true}),
     loadMembers:async()=>[],loadAnalysis:async()=>[],loadReceptionErrors:async()=>[],

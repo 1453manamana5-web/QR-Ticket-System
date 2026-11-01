@@ -86,7 +86,7 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
   };
 }
 
-export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string}|null> {
+export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null> {
   const state = await readOwnTerminalState();
   if (state.terminal) {
     const terminal = state.terminal;
@@ -103,8 +103,26 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
       localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
       localStorage.setItem("qr-ticket-device-id", state.terminalId);
     }
+    let eventId: string | undefined;
+    let eventApproved = false;
+    if (approved && state.terminalId) {
+      const events = await getDocsFromServer(query(collection(getFirebaseDb(), "events"), where("receptionTarget", "==", true)));
+      const active = events.docs.filter(item => item.data().eventStatus !== "finished");
+      if (active.length === 1) {
+        eventId = active[0].id;
+        const approvalRef = doc(getFirebaseDb(), "events", eventId, "receptionApprovals", state.terminalId);
+        const approval = await getDocFromServer(approvalRef);
+        if (!approval.exists()) {
+          await setDoc(approvalRef, { eventId, terminalId: state.terminalId, requestedByUid: await getFirebaseUid(),
+            name: typeof terminal.name === "string" ? terminal.name : "受付端末", status: "pending", requestedAt: new Date().toISOString() });
+        } else {
+          eventApproved = approval.data().status === "approved" && approval.data().requestedByUid === await getFirebaseUid();
+        }
+      }
+    }
     return {
-      approved,
+      approved: approved && eventApproved,
+      eventId,
       status: terminal.status === "online" || terminal.status === "offline" ? terminal.status : "pending",
       name: typeof terminal.name === "string" ? terminal.name : "受付端末",
     };
@@ -245,7 +263,7 @@ export async function requestReceptionEventReapproval(name: string): Promise<boo
   return true;
 }
 
-export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string}|null) => void, onError: (error: unknown) => void): () => void {
+export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null) => void, onError: (error: unknown) => void): () => void {
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = async () => {
