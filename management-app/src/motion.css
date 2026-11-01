@@ -50,3 +50,28 @@
   }
   :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close):active {transform:none!important}
 }
+
+.surface-presence { display:contents; }
+@media screen and (prefers-reduced-motion: no-preference) {
+  .surface-closing > :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop) {
+    animation:surface-backdrop-out 180ms ease-in forwards;
+  }
+  .surface-closing :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog) {
+    animation:surface-dialog-out 180ms cubic-bezier(.4,0,.8,.4) forwards;
+  }
+  .ticket-zoom-surface { animation:none;transform-origin:center; }
+  .ticket-zoom-surface[data-zoom-ready] { animation:ticket-zoom-in 360ms var(--surface-spring) backwards; }
+  .surface-closing .ticket-zoom-surface[data-zoom-ready] { animation:ticket-zoom-out 180ms ease-in forwards; }
+}
+@keyframes surface-backdrop-out { from{opacity:1} to{opacity:0} }
+@keyframes surface-dialog-out { from{opacity:1;transform:none} to{opacity:0;transform:translate3d(0,16px,0) scale(.97)} }
+@keyframes ticket-zoom-in {
+  from {opacity:0;transform:translate3d(var(--ticket-from-x),var(--ticket-from-y),0) scale(var(--ticket-from-scale))}
+  to {opacity:1;transform:translate3d(0,0,0) scale(1)}
+}
+@keyframes ticket-zoom-out {
+  from {opacity:1;transform:translate3d(0,0,0) scale(1)}
+  to {opacity:0;transform:translate3d(var(--ticket-from-x),var(--ticket-from-y),0) scale(var(--ticket-from-scale))}
+}
+
+@media print { .surface-closing {display:none} }
