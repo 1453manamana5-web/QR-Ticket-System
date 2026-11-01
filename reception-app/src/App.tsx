@@ -537,6 +537,7 @@ export default function App(){
       setTerminalRegistration({approved:false,status:"pending",name});
     }catch(reason){
       console.error("受付端末の登録申請に失敗しました",reason);
+      if(version!==registrationVersionRef.current)return;
       setError("登録申請を送信できませんでした。");
     }finally{
       setBusy(false);
@@ -547,8 +548,11 @@ export default function App(){
     if(busy)return;
     setBusy(true);
     setError("");
+    const version=registrationVersionRef.current;
     try {
       const retainedId = await resetReceptionTerminalRegistration();
+      // A newer approval owns the current ID and screen; this old reset must not change them.
+      if(version!==registrationVersionRef.current)return;
       if (retainedId) {
         localStorage.setItem("qr-ticket-terminal-id", retainedId);
         localStorage.setItem("qr-ticket-device-id", retainedId);
@@ -562,6 +566,7 @@ export default function App(){
       if (retainedId) setError("未承認の申請を取り消しました。元の端末IDと管理権限を維持しています。受付アプリを再読み込みしてください。");
     } catch (reason) {
       console.error("受付端末登録のリセットに失敗しました", reason);
+      if(version!==registrationVersionRef.current)return;
       setError(reason instanceof Error && reason.message === "RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL"
         ? "このブラウザーには承認済みの端末登録があります。再申請は不要です。受付アプリを再読み込みしてください。"
         : "登録申請をリセットできませんでした（" + (reason instanceof Error ? reason.message : String(reason)) + "）。");
