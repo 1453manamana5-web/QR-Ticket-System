@@ -231,7 +231,10 @@ export default function App(){
   },[]);
 
   const requireApprovalForNewEvent=useCallback(async(eventId:string)=>{
+    const version=registrationVersionRef.current;
     const registration=await getTerminalRegistration();
+    // A subscription may revoke or approve another event while this read is pending.
+    if(!registrationIsCurrent(version))return true;
     if(registration?.approved && registration.eventId===eventId)return false;
     registrationActiveRef.current=false;
     ++registrationVersionRef.current;
@@ -520,11 +523,14 @@ export default function App(){
     }
     setBusy(true);
     setError("");
+    const version=registrationVersionRef.current;
     try{
       await registerReceptionTerminal(name);
+      if(version!==registrationVersionRef.current)return;
       // A manually resubmitted terminal must not restore its previous event
       // after approval and immediately request another approval for that event.
       await clearLocalEvent();
+      if(version!==registrationVersionRef.current)return;
       setLocalEvent(null);
       setAuthPayload(null);
       localStorage.setItem("qr-ticket-reception-name",name);
