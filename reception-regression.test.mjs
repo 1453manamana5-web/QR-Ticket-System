@@ -109,7 +109,8 @@ test("one upload worker serializes concurrent triggers and blocks dependent reco
   const uploaded=[];
   const worker=load("./reception-app/src/syncQueue.ts",{
     "./localDb":local,
-    "./receptionSync":{syncReceptionRecord:async item=>{
+    "./receptionSync":{
+      getTerminalRegistration:async()=>{let eventId="event-one";try{eventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}return initialRegistration ? {...initialRegistration,eventId,approved:initialRegistration.approved && eventId===approvedEventId}:null;},syncReceptionRecord:async item=>{
       maxActive=Math.max(maxActive,++active);
       try{await nextTurn();if(fail&&item.recordId==="entry")throw Error("simulated network error");uploaded.push(item.recordId);}
       finally{active--;}
@@ -131,6 +132,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
+  let approvedEventId="event-one";
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
   const navigator={onLine:true};
@@ -185,7 +187,7 @@ async function harness({saved=true,automatic,latestTicket,download,reapprove=fal
     get inventoryDownloads(){return inventoryDownloads;},
     scan:async value=>{await act(async()=>{await renderer.root.findByType(Scanner).props.onResult(value);});await flush();},
     control:async(mode,at)=>{await act(async()=>controlCallback(mode,at));},
-    approve:async()=>{await act(async()=>registrationCallback({approved:true,status:"online",name:"Test terminal"}));await flush();},
+    approve:async()=>{try{approvedEventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}await act(async()=>registrationCallback({approved:true,status:"online",name:"Test terminal",eventId:approvedEventId}));await flush();},
     revoke:async()=>{await act(async()=>registrationError({code:"permission-denied"}));await flush();},
     poll:async()=>{await act(async()=>{for(const {fn} of [...intervals.values()])await fn();});await flush();},
     close:async()=>{await act(async()=>renderer.unmount());},
@@ -297,11 +299,12 @@ test("publication switch stops reception without overwriting registration or era
     h.navigator.onLine=true;
     switched=true;
     await h.poll();
-    assert.match(h.text(),/イベントが切り替わりました/);
+    assert.match(h.text(),/受付.*承認/);
     assert.equal(h.registerCalls,0);
     assert.equal((await h.local.getPendingSyncItems()).length,1);
     await h.poll();
-    assert.match(h.text(),/イベントが切り替わりました/);
+    assert.match(h.text(),/受付.*承認/);
+    await h.approve();
     await h.click("通信でイベントデータを受信");
     assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-two");
     assert.equal((await h.local.getPendingSyncItems()).length,1);
@@ -319,7 +322,7 @@ test("a reception-only terminal returns to pending approval when publication swi
     h.navigator.onLine=true;switched=true;
     await h.poll();
     assert.match(h.text(),/受付端末の承認待ち/);
-    assert.equal(await h.local.loadLocalEvent(),null);
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
     assert.equal((await h.local.getPendingSyncItems()).length,1);
   }finally{await h.close();}
 });
