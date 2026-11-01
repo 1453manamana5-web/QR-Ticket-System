@@ -367,6 +367,9 @@ async function seedApprovedReception() {
       eventId: "event-live", eventName: "公開中", eventStatus: "ready",
       dataVersion: 1, authToken: "event-live-token", receptionTarget: true,
     });
+    await setDoc(doc(trusted, "events", "event-live", "receptionApprovals", "T-RECEPTION-WRITE"), {
+      eventId:"event-live", terminalId:"T-RECEPTION-WRITE", requestedByUid:"reception-writer",name:"Reception",status:"approved",requestedAt:"2026-11-01T00:00:00.000Z",
+    });
     await setDoc(doc(trusted, "events", "event-live", "tickets", "ticket-0001"), {
       ticketId: "ticket-0001", eventId: "event-live", valid: true, currentStatus: "unused",
     });
