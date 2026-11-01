@@ -590,3 +590,25 @@ test('interrupted multi-chunk issuance preserves completed chunks with matching 
   await c.management.appendTickets('flow-event',tickets.slice(400),true);
   assert.equal((await c.management.loadEventTickets('flow-event')).length,451);
 });
+
+test("event approval must be renewed by the same iPad manager for each event", async () => {
+  const c = clients();
+  await createPublished(c);
+  const reception = loadClientModule("./reception-app/src/receptionSync.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, false);
+  const first = await c.management.loadPendingReceptionEventApprovals();
+  assert.equal(first.some(item => item.eventId === "flow-event" && item.terminalId === "T-FLOW-MANAGER"), true);
+  await c.management.approveReceptionEvent("flow-event", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, true);
+  await createPublished(c, makeEvent("second-event"));
+  const next = await reception.getTerminalRegistration();
+  assert.equal(next.eventId, "second-event");
+  assert.equal(next.approved, false);
+  const grant = await getDocFromServer(doc(c.managerDb, "events", "second-event", "receptionApprovals", "T-FLOW-MANAGER"));
+  assert.equal(grant.data().status, "pending");
+  const terminal = await getDocFromServer(doc(c.managerDb, "terminals", "T-FLOW-MANAGER"));
+  assert.equal(terminal.data().admin, true);
+  assert.equal(terminal.data().managementApproved, true);
+  await c.management.approveReceptionEvent("second-event", "T-FLOW-MANAGER");
+  assert.equal((await reception.getTerminalRegistration()).approved, true);
+});
