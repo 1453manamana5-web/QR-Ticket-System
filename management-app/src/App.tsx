@@ -2,6 +2,7 @@ import { loadPendingReceptionEventApprovals, approveReceptionEvent, type Recepti
 import { useEffect, useMemo, useRef, useState } from "react";
 import VenueOccupancyChart from "./VenueOccupancyChart";
 import OfflineEventTransfer from "./OfflineEventTransfer";
+import {SurfacePresence,TicketZoomSurface,type TicketZoomOrigin} from './SurfaceMotion';
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import * as livePublisher from "./eventPublisher";
@@ -426,6 +427,7 @@ export default function App({practice=false}:AppProps={}) {
   const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "unused" | "inside" | "exited">("all");
   const [ticketCreateModalOpen, setTicketCreateModalOpen] = useState(false);
   const [ticketDesignModalOpen, setTicketDesignModalOpen] = useState(false);
+  const [ticketZoomOrigin,setTicketZoomOrigin]=useState<TicketZoomOrigin|null>(null);
   const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
   const [ticketListOpen, setTicketListOpen] = useState(false);
   const [members, setMembers] = useState<Array<{ memberId: string; memberNumber: number; name: string }>>([]);
@@ -2021,7 +2023,7 @@ export default function App({practice=false}:AppProps={}) {
           </section>
         </main>
 
-        {ticketListOpen && <div className="ticket-list-overlay" onMouseDown={() => setTicketListOpen(false)}>
+        <SurfacePresence>{ticketListOpen && <div className="ticket-list-overlay" onMouseDown={() => setTicketListOpen(false)}>
         <section className="ticket-list-fullscreen" onMouseDown={e => e.stopPropagation()}>
           <header className="ticket-list-fullscreen-header">
             <div><div className="ticket-home-label">ALL TICKETS</div><h2>チケット一覧</h2></div>
@@ -2043,7 +2045,11 @@ export default function App({practice=false}:AppProps={}) {
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
                 <div className="ticket-row-actions">
-                  <button className="ticket-row-view" onClick={() => setTicketQrModalTicket(ticket)}>QR表示</button>
+                  <button className="ticket-row-view" onClick={e => {
+                    const source=e.currentTarget?.closest('.ticket-screen-row')?.querySelector('.ticket-number-cell')?.getBoundingClientRect();
+                    setTicketZoomOrigin(source?{left:source.left,top:source.top,width:source.width,height:source.height}:null);
+                    setTicketQrModalTicket(ticket);
+                  }}>QR表示</button>
                   <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={event.eventStatus === "finished"}>番号変更</button>
                   <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
                   <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
@@ -2052,9 +2058,9 @@ export default function App({practice=false}:AppProps={}) {
             ))}
           </div> : <div className="ticket-list-empty"><h3>チケットがありません</h3><p>「チケットを新規発行」からQRチケットを作成してください。</p></div>}
         </section>
-      </div>}
+      </div>}</SurfacePresence>
 
-      {ticketCreateModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketCreateModalOpen(false)}>
+      <SurfacePresence>{ticketCreateModalOpen && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketCreateModalOpen(false)}>
         <div className="ticket-modal" onMouseDown={e => e.stopPropagation()}>
           <button className="ticket-modal-close" onClick={() => setTicketCreateModalOpen(false)}>×</button>
           <small>CREATE TICKETS</small><h2>チケットを新規発行</h2><p>番号とQRコードをまとめて生成します。</p>
@@ -2074,7 +2080,7 @@ export default function App({practice=false}:AppProps={}) {
             <button className="ticket-modal-primary" disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
           </div>
         </div>
-      </div>}
+      </div>}</SurfacePresence>
 
       {ticketDesignModalOpen && <TicketDesigner
         key={event.eventId}
@@ -2097,8 +2103,8 @@ export default function App({practice=false}:AppProps={}) {
         onClose={() => {setTicketDesignModalOpen(false);setTicketDesignReserveOpen(false);}}
       />}
 
-      {ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
-        <div className="ticket-modal ticket-qr-modal" onMouseDown={e => e.stopPropagation()}>
+      <SurfacePresence>{ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
+        <TicketZoomSurface origin={ticketZoomOrigin}>
           <button className="ticket-modal-close" onClick={() => setTicketQrModalTicket(null)} aria-label="閉じる">×</button>
           <div className="ticket-qr-modal-heading">
             <div className="ticket-qr-modal-icon"><QrIcon /></div>
@@ -2119,8 +2125,8 @@ export default function App({practice=false}:AppProps={}) {
           <div className="ticket-modal-actions">
             <button className="secondary ticket-qr-close-button" onClick={() => setTicketQrModalTicket(null)}>閉じる</button>
           </div>
-        </div>
-      </div>}
+        </TicketZoomSurface>
+      </div>}</SurfacePresence>
       </div>
     </>;
 
@@ -2881,13 +2887,13 @@ function NavIcon({type}:{type:string}){
   }
 
   return <><div inert={guide.open?true:undefined} className={`app-shell ${appSettings.aiLabEnabled ? "liquid-glass-enabled" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${sidebarDragWidth !== null ? "sidebar-dragging" : ""}`}>
-    {navigationNotice && <div className="navigation-notice-backdrop">
+    <SurfacePresence>{navigationNotice && <div className="navigation-notice-backdrop">
       <section className="navigation-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="navigation-notice-title">
         <h2 id="navigation-notice-title">チケット管理を開けません</h2>
         <p>{navigationNotice}</p>
         <button className="primary-action" type="button" onClick={() => setNavigationNotice("")}>確認しました</button>
       </section>
-    </div>}
+    </div>}</SurfacePresence>
 
     <aside
       className="sidebar"
@@ -3005,7 +3011,7 @@ function NavIcon({type}:{type:string}){
       {pageContent()}
     </main>
 
-    {newEventModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={closeNewEventModal}>
+    <SurfacePresence>{newEventModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={closeNewEventModal}>
       <div className="new-event-modal" role="dialog" aria-modal="true" aria-labelledby="new-event-title" onMouseDown={e => e.stopPropagation()}>
         <div className="new-event-modal-header">
           <div><small>NEW EVENT</small><h2 id="new-event-title">新しいイベントを作成</h2><p>イベントの基本情報を入力してください。</p></div>
@@ -3023,7 +3029,7 @@ function NavIcon({type}:{type:string}){
           <button className="primary-action" onClick={createNewEvent}>イベントを作成</button>
         </div>
       </div>
-    </div>}
+    </div>}</SurfacePresence>
 
     {appSettings.aiLabEnabled && <div className="ai-lab-widget">
       {aiLabPanel && <section className="ai-lab-detail" role="dialog" aria-label={aiLabPanel}>

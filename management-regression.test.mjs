@@ -269,3 +269,38 @@ test('a stalled network request cannot block later local print confirmations',as
     await act(async()=>release('manager'));await flush();await act(async()=>timer());await flush();assert.equal(view.unsynced,0);
   }finally{await act(async()=>renderer.unmount());}
 });
+
+function surfaceMotion(reduced=false){
+  const timers=new Map();let sequence=0;
+  const window={matchMedia:()=>({matches:!reduced}),setTimeout:fn=>{timers.set(++sequence,fn);return sequence;},clearTimeout:id=>timers.delete(id)};
+  const out={};new Function('exports','require','window',ts.transpileModule(readFileSync('management-app/src/SurfaceMotion.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>require(n),window);
+  return {...out,timers};
+}
+test('surface exit keeps an inert picture, rapid reopen cancels stale removal, and fallback/unmount clean up',async()=>{
+  const {SurfacePresence,timers}=surfaceMotion();let renderer;
+  const view=child=>React.createElement(SurfacePresence,null,child);
+  await act(async()=>{renderer=create(view(React.createElement('button',null,'first')));});
+  try{
+    await act(async()=>renderer.update(view(null)));
+    let shell=renderer.root.findByType('div');assert.equal(shell.props.inert,true);assert.equal(shell.props['aria-hidden'],true);assert.equal(timers.size,1);
+    await act(async()=>shell.props.onAnimationEnd({animationName:'surface-dialog-out'}));assert.notEqual(renderer.toJSON(),null);
+    await act(async()=>renderer.update(view(React.createElement('button',null,'reopened'))));
+    assert.equal(timers.size,0);assert.equal(renderer.root.findByType('button').children[0],'reopened');assert.equal(renderer.root.findByType('div').props.inert,undefined);
+    await act(async()=>renderer.update(view(false)));const finish=[...timers.values()][0];await act(async()=>finish());assert.equal(renderer.toJSON(),null);
+    await act(async()=>renderer.update(view(React.createElement('button',null,'again'))));await act(async()=>renderer.update(view(null)));
+  }finally{await act(async()=>renderer.unmount());}assert.equal(timers.size,0);
+});
+test('reduced motion removes surfaces immediately and empty notices never retain a closing surface',async()=>{
+ const {SurfacePresence,timers}=surfaceMotion(true);let renderer;
+ await act(async()=>{renderer=create(React.createElement(SurfacePresence,null,React.createElement('div',null,'notice')));});
+ try{await act(async()=>renderer.update(React.createElement(SurfacePresence,null,'')));assert.equal(renderer.toJSON(),null);assert.equal(timers.size,0);}finally{await act(async()=>renderer.unmount());}
+});
+test('ticket zoom uses source and target centers and falls back without a measured source',async()=>{
+ const {TicketZoomSurface}=surfaceMotion();let renderer;
+ const origin={left:40,top:100,width:120,height:40};
+ await act(async()=>{renderer=create(React.createElement(TicketZoomSurface,{origin},'QR'),{createNodeMock:()=>({getBoundingClientRect:()=>({left:200,top:180,width:500,height:600})})});});
+ try{
+  const node=renderer.root.findByType('div');assert.equal(node.props.style['--ticket-from-x'],'-350px');assert.equal(node.props.style['--ticket-from-y'],'-360px');assert.equal(node.props.style['--ticket-from-scale'],.24);
+  await act(async()=>renderer.update(React.createElement(TicketZoomSurface,{origin:null},'QR')));assert.equal(renderer.root.findByType('div').props.style,undefined);
+ }finally{await act(async()=>renderer.unmount());}
+});
