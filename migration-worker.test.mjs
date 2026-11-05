@@ -6,7 +6,7 @@ function worker(app,mode){
  const listeners={},timers=new Map(),background=[];let seq=0,response;
  const cache={match:async()=>new Response('cached '+app),put:async()=>{}};
  const fetch=async(url,options)=>{
-  if(String(url)===base){
+  if((typeof url==='string'?url:url.url??String(url))===base){
    if(mode==='stall')return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('timeout'))));
    if(mode==='error')return new Response('unavailable',{status:503});
    return new Response('<html>current</html>');
