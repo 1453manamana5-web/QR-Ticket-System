@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "QR Ticket System 受付",
+  "short_name": "QR受付",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#7048eb",
+  "theme_color": "#7048eb",
+  "icons": [
+    {"src": "icons/reception-v1-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/reception-v1-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}

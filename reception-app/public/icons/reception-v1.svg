@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>QR受付</title>
+  <rect width="512" height="512" fill="#7048eb"/>
+  <path d="M326 70H442V186M70 326V442H186" fill="none" stroke="#dcd2ff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="rotate(-18 256 279)">
+    <path d="M126 172H386Q406 172 406 192V257A22 22 0 0 0 406 301V366Q406 386 386 386H126Q106 386 106 366V301A22 22 0 0 0 106 257V192Q106 172 126 172Z" fill="#fff"/>
+    <!-- Decorative QR mark; this is not an admission credential. -->
+    <g transform="translate(173.5 196.5) scale(11)" fill="#7048eb">
+      <path fill-rule="evenodd" d="M0 0H5V5H0ZM1 1V4H4V1ZM10 0H15V5H10ZM11 1V4H14V1ZM0 10H5V15H0ZM1 11V14H4V11Z"/>
+      <path d="M2 2H3V3H2ZM12 2H13V3H12ZM2 12H3V13H2ZM7 0H8V2H7ZM6 3H8V4H9V6H7V5H6ZM0 7H2V6H3V8H1V9H0ZM4 6H5V7H6V9H4V8H3V7H4ZM8 7H10V8H9V10H7V9H8ZM11 6H13V7H12V8H11ZM14 7H15V9H13V8H14ZM6 11H8V12H9V14H8V13H6ZM10 10H12V12H11V13H10ZM13 11H15V12H14V14H13ZM6 14H7V15H6ZM10 14H12V15H10Z"/>
+    </g>
+  </g>
+</svg>
