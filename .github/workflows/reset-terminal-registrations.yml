@@ -1,0 +1,45 @@
+name: One-time reset of all terminal registrations
+on:
+  push:
+    branches: [ops/reset-all-terminals-20261105-a29d8e71]
+permissions:
+  contents: read
+concurrency:
+  group: firebase-production-deploy
+  cancel-in-progress: false
+jobs:
+  reset-terminals:
+    runs-on: ubuntu-latest
+    environment:
+      name: firebase-production
+    timeout-minutes: 15
+    env:
+      RESET_BACKUP_PATH: ${{ runner.temp }}/terminal-reset-encrypted.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify terminal-only reset scope and encrypted backup
+        run: node --test scripts/reset-terminal-registrations.test.cjs
+      - name: Install administrative SDK without deploying Functions
+        run: npm install --prefix functions --ignore-scripts --no-audit --no-fund
+      - name: Read target records and create encrypted recovery backup
+        id: plan
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/reset-terminal-registrations.cjs plan
+      - name: Store encrypted backup before deletion
+        if: steps.plan.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-reset-encrypted-backup
+          path: ${{ env.RESET_BACKUP_PATH }}
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove all terminal registrations and verify zero remaining
+        if: steps.plan.outputs.ready == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RESET_CONFIRM: RESET_ALL_TERMINALS
+        run: node scripts/reset-terminal-registrations.cjs apply
