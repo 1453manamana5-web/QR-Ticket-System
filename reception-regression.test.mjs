@@ -413,7 +413,7 @@ test("offline shell registration still runs when authentication completes after 
   const registered=[];
   load("./reception-app/src/main.tsx",{
     "react-dom/client":{createRoot:()=>({render:()=>{}})},
-    "./App":{default:()=>null},"./styles.css":{},
+    "./App":{default:()=>null},"./controlMotion.css":{},"../../shared/src/controlMotion.css":{},"./styles.css":{},
     "./firebaseClient":{ensureFirebaseAuth:async()=>{}},
   },{
     navigator:{serviceWorker:{register:async(...args)=>registered.push(args)}},

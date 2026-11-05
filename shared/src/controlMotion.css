@@ -1,0 +1,79 @@
+/* Press feedback is immediate; no click handler or operation waits for motion.
+   Individual scale composes with existing positioning/rotation transforms. */
+:root {
+  --control-press-duration: 65ms;
+  --control-release-duration: 190ms;
+  --control-release-curve: cubic-bezier(.22,1,.36,1);
+  --control-focus-color: #246bd1;
+  --control-transition: scale var(--control-release-duration) var(--control-release-curve), transform 190ms var(--control-release-curve), background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 180ms ease, opacity 140ms ease;
+}
+@media screen {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],.studio-upload,.ticket-image-dropzone):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"])) {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"],select):focus-visible {
+    outline: 3px solid var(--control-focus-color);
+    outline-offset: 3px;
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"]):is(:disabled,[aria-disabled="true"]) {
+    cursor: not-allowed;
+    opacity:var(--control-disabled-opacity,.48);
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"]):is(:disabled,[aria-disabled="true"]):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"])) {
+    transform:none!important;
+    filter:none!important;
+    box-shadow:none!important;
+    transition:none!important;
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"])[aria-busy="true"] { cursor: progress; }
+}
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],.studio-upload,.ticket-image-dropzone):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"])) {
+    scale: 1;
+    transition:var(--control-transition);
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],.studio-upload,.ticket-image-dropzone):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"],:disabled,[aria-disabled="true"],[aria-busy="true"],[inert] *)):active {
+    scale: var(--control-pressed-scale,.98);
+    transition-duration: var(--control-press-duration);
+  }
+  /* Native checkboxes/radios keep their platform appearance and checked state. */
+  :root input:is([type="checkbox"],[type="radio"]):not(.setting-switch) {
+    transition: scale 150ms var(--control-release-curve),outline-color 150ms ease;
+  }
+  :root input:is([type="checkbox"],[type="radio"]):not(:where(.setting-switch,:disabled,[inert] *)):active { scale: .94; }
+  :root select { transition: border-color 160ms ease,box-shadow 160ms ease; }
+}
+@media screen and (prefers-reduced-motion: no-preference) and (hover:hover) and (pointer:fine) {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],.studio-upload,.ticket-image-dropzone):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"],:disabled,[aria-disabled="true"],[aria-busy="true"],[inert] *)):hover:not(:active) {
+    scale: 1.012;
+  }
+}
+/* Busy/disabled controls never retain a pressed scale after a state change. */
+:root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"]):is(:disabled,[aria-disabled="true"],[aria-busy="true"]),
+:root [inert] :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"]) {
+  scale: 1 !important;
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"],select,.studio-upload,.ticket-image-dropzone) {
+    scale: 1 !important;
+    transition: none !important;
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"],select,.studio-upload,.ticket-image-dropzone):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,.entry-reception-mode-switch,[data-motion="off"])) { transform:none!important; }
+}
+@media (forced-colors:active) {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"],select):focus-visible {
+    outline-color: Highlight;
+  }
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"]):is(:disabled,[aria-disabled="true"]) {
+    opacity:1;color:GrayText;border-color:GrayText;
+  }
+}
+@media print {
+  :root :is(button,a[role="button"],input[type="button"],input[type="submit"],input[type="reset"],input[type="checkbox"],input[type="radio"],select,.studio-upload,.ticket-image-dropzone) {
+    animation: none !important;
+    transition: none !important;
+    scale: 1 !important;
+    outline: none !important;
+  }
+}

@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
+import "../../shared/src/controlMotion.css";
+import "./controlMotion.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
 
 function describeFirebaseStartupError(error: unknown): string {

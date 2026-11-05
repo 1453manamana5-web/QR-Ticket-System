@@ -1,25 +1,16 @@
 /* Shared surface motion: animate composited properties, never form geometry. */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root { --surface-spring: cubic-bezier(.22,1.08,.36,1); }
-  :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop) {
+  :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop,.member-registration-backdrop,.member-qr-backdrop,.ticket-designer-background) {
     animation: surface-backdrop-in 180ms ease-out backwards;
   }
-  :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,.member-registration-modal,.member-qr-modal) {
+  :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,.member-registration-modal,.member-qr-modal,.ticket-designer-window) {
     animation: surface-dialog-in 360ms var(--surface-spring) backwards;
     transform-origin: 50% 65%;
   }
   :is(.settings-toast,.terminal-notice,.notice.success,.notice.error) {
     animation: surface-notice-in 260ms cubic-bezier(.2,.8,.3,1) backwards;
   }
-  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close) {
-    transition: transform 220ms var(--surface-spring),background-color 160ms ease,box-shadow 180ms ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close):active:not(:disabled) {
-    transform: scale(.975);
-    transition-duration: 80ms;
-  }
-  :is(.modal-close,.ticket-modal-close,.ticket-list-close):active:not(:disabled) { transform: scale(.9); }
   /* Cards keep their layout stable; only their entry is animated. */
   .home-quick-grid > button { animation: surface-card-in 340ms cubic-bezier(.2,.8,.3,1) backwards; }
   .home-quick-grid > button:nth-child(2) { animation-delay: 35ms; }
@@ -41,22 +32,18 @@
 }
 @media screen and (prefers-reduced-motion: reduce) {
   :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop,
-    .new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,
-    .member-registration-modal,.member-qr-modal,.settings-toast,.terminal-notice,.notice,.home-quick-grid > button) {
+    .new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,.ticket-designer-background,.ticket-designer-window,
+    .member-registration-backdrop,.member-qr-backdrop,.member-registration-modal,.member-qr-modal,.settings-toast,.terminal-notice,.notice,.home-quick-grid > button) {
     animation: none !important;
   }
-  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close) {
-    transition: none !important;
-  }
-  :is(.primary-action,.secondary,.danger-action,.ticket-modal-primary,.modal-close,.ticket-modal-close,.ticket-list-close):active {transform:none!important}
 }
 
 .surface-presence { display:contents; }
 @media screen and (prefers-reduced-motion: no-preference) {
-  .surface-closing > :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop) {
+  .surface-closing > :is(.modal-backdrop,.ticket-modal-backdrop,.ticket-list-overlay,.navigation-notice-backdrop,.member-registration-backdrop,.member-qr-backdrop,.ticket-designer-background) {
     animation:surface-backdrop-out 180ms ease-in forwards;
   }
-  .surface-closing :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog) {
+  .surface-closing :is(.new-event-modal,.ticket-modal,.ticket-list-fullscreen,.navigation-notice-dialog,.member-registration-modal,.member-qr-modal) {
     animation:surface-dialog-out 180ms cubic-bezier(.4,0,.8,.4) forwards;
   }
   .ticket-zoom-surface { animation:none;transform-origin:center; }
@@ -75,3 +62,103 @@
 }
 
 @media print { .surface-closing {display:none} }
+
+/* Shared press scale must not multiply the earlier class-specific transforms. */
+.app-shell .sidebar { --control-focus-color:#fff; }
+.app-shell .sidebar nav button:active { transform:none!important;transition:scale var(--control-press-duration,65ms) ease,background-color 120ms ease!important; }
+:is(.home-inline-link,.home-text-button,.ticket-designer-close):active,
+.home-quick-grid > button:active,
+.home-empty .primary-action:active,
+.ticket-designer-buttons button:active { transform:none; }
+.home-event-row:active { transform:translateX(1px); }
+.ai-lab-fab:active { transform:none; }
+.ai-lab-fab.is-open:active { transform:rotate(12deg); }
+:is(.modal-close,.ticket-modal-close,.ticket-list-close,.member-registration-close,.member-qr-close,.ticket-designer-close) { --control-pressed-scale:.94; }
+@media screen and (prefers-reduced-motion:no-preference) {
+  .ticket-designer-window,.studio-panel { animation:surface-fade-in 180ms ease-out backwards; }
+  .surface-closing .ticket-designer-window { animation:none; }
+}
+@keyframes surface-fade-in { from {opacity:0} to {opacity:1} }
+
+/* Keep the native checkbox accessible; animate only its visible companion. */
+label.setting { position:relative;min-height:64px;gap:18px;cursor:pointer;box-sizing:border-box; }
+.setting-copy { flex:1;min-width:0; }
+.setting > .setting-switch {
+  position:absolute!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;
+  border:0!important;overflow:hidden;clip-path:inset(50%);white-space:nowrap;
+}
+.setting-switch-track { position:relative;display:block;flex:0 0 52px;width:52px;height:32px;box-sizing:border-box;border:1px solid #bac5d4;border-radius:18px;background:#c9d2df;pointer-events:none; }
+.setting-switch-track > span { position:absolute;top:3px;left:3px;width:24px;height:24px;box-sizing:border-box;border:1px solid rgba(0,0,0,.05);border-radius:50%;background:#fff;box-shadow:0 1px 3px #142d5129; }
+.setting-switch:checked + .setting-switch-track { background:#236bd0;border-color:#236bd0; }
+.setting-switch:checked + .setting-switch-track > span { transform:translateX(20px); }
+.setting-switch:focus-visible + .setting-switch-track { outline:3px solid var(--control-focus-color,#246bd1);outline-offset:3px; }
+.setting-switch:disabled + .setting-switch-track { opacity:.45; }
+@media screen and (prefers-reduced-motion:no-preference) {
+  .setting-switch-track { transition:background-color 180ms ease,border-color 180ms ease,scale 180ms var(--control-release-curve,cubic-bezier(.22,1,.36,1)); }
+  .setting-switch-track > span { transition:transform 230ms var(--control-release-curve,cubic-bezier(.22,1,.36,1)); }
+  .setting:active > .setting-switch:not(:disabled) + .setting-switch-track { scale:.97;transition-duration:65ms; }
+}
+/* File picking remains a real, focusable native control instead of a click proxy. */
+.studio-dock .studio-upload,.ticket-image-dropzone { position:relative;overflow:hidden; }
+.studio-dock .studio-upload input[type="file"],.ticket-image-dropzone input[type="file"] {
+  display:block!important;position:absolute!important;inset:0!important;z-index:1;
+  width:100%!important;height:100%!important;max-width:none!important;margin:0!important;opacity:0;cursor:pointer;
+}
+.studio-upload:focus-within,.ticket-image-dropzone:focus-within { outline:3px solid var(--control-focus-color,#246bd1);outline-offset:3px; }
+.ticket-studio :is(.studio-context,.studio-layers) button[aria-pressed="true"] { border-color:#8db5eb;background:#e8f1ff;color:#1559ae; }
+@media screen and (pointer:coarse) {
+  :is(.modal-close,.ticket-modal-close,.ticket-list-close,.member-registration-close,.member-qr-close),
+  .studio-panel > header > button { min-width:44px!important;min-height:44px!important;width:44px!important;height:44px!important; }
+}
+@media screen and (prefers-reduced-motion:reduce) {
+  .ticket-designer-window,.studio-panel,.setting-switch-track,.setting-switch-track > span { animation:none!important;transition:none!important; }
+  .setting:active > .setting-switch + .setting-switch-track { scale:1; }
+  .app-shell .sidebar nav button:active { transition:none!important; }
+}
+@media (forced-colors:active) {
+  .setting-switch-track { forced-color-adjust:none;background:Canvas;border-color:ButtonText; }
+  .setting-switch-track > span { background:ButtonText;border-color:ButtonText;box-shadow:none; }
+  .setting-switch:checked + .setting-switch-track { background:Highlight;border-color:Highlight; }
+  .setting-switch:checked + .setting-switch-track > span { background:HighlightText;border-color:HighlightText; }
+  .setting-switch:focus-visible + .setting-switch-track,.studio-upload:focus-within,.ticket-image-dropzone:focus-within { outline-color:Highlight; }
+  .setting-switch:disabled + .setting-switch-track { opacity:1;border-color:GrayText; }
+}
+@media print {
+  .ticket-designer-window,.studio-panel,.setting-switch-track,.setting-switch-track > span { animation:none!important;transition:none!important; }
+  .setting-switch-track,.setting-switch-track > span { box-shadow:none; }
+}
+
+/* Supersede the old ungated hover lifts: one scale response owns the control. */
+.app-shell.liquid-glass-enabled :is(button,.primary-action,.secondary,.danger-action):not(:disabled):hover,
+:is(.ticket-tool-button,.ticket-list-launch,.home-event-row,.ticket-designer-close):hover,
+.home-quick-grid > button:hover,
+.ticket-designer-glass :is(.ticket-actual-size-button,.ticket-selected-part button):hover { transform:none!important; }
+.app-shell .ai-lab-fab:hover { transform:none!important; }
+.app-shell .ai-lab-fab.is-open:hover,
+.app-shell.liquid-glass-enabled .ai-lab-fab.is-open:hover { transform:rotate(12deg)!important; }
+/* Direct manipulation handles never gain a hover transform or delayed tracking. */
+.app-shell :is(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle):hover { transform:none!important;scale:1!important;transition:none!important; }
+@media screen and (prefers-reduced-motion:no-preference) {
+  .app-shell.liquid-glass-enabled :is(button,.primary-action,.secondary,.danger-action,.ticket-list-launch,.ticket-action-button):not(:where(.studio-resize,.studio-rotate-handle,.sidebar-resize-handle,[data-motion="off"])) { transition:var(--control-transition); }
+}
+@media screen and (hover:none) {
+  :is(.home-metric-card,.home-current-event,.event-overview-card):hover { transform:none!important; }
+}
+
+@media screen and (prefers-reduced-motion:no-preference) {
+  .app-shell .sidebar nav button:not(:where(:disabled,[aria-disabled="true"],[aria-busy="true"],[inert] *)):active { scale:.985!important; }
+}
+@media screen and (prefers-reduced-motion:reduce) {
+  .app-shell .sidebar nav button:active { scale:1!important; }
+  .app-shell .ai-lab-fab:hover,.app-shell .ai-lab-fab.is-open:hover,
+  .app-shell.liquid-glass-enabled .ai-lab-fab.is-open:hover { transform:none!important; }
+}
+
+/* Legacy designer controls declared important transitions; include independent scale. */
+@media screen and (prefers-reduced-motion:no-preference) {
+  .ticket-designer-glass :is(.ticket-selected-part button,.ticket-actual-size-button) { transition:var(--control-transition)!important; }
+  .ticket-designer-glass :is(.ticket-selected-part button,.ticket-actual-size-button):not(:where(:disabled,[aria-disabled="true"],[aria-busy="true"],[inert] *)):active { transition-duration:var(--control-press-duration,65ms)!important; }
+}
+@media screen and (prefers-reduced-motion:reduce) {
+  .ticket-designer-glass :is(.ticket-selected-part button,.ticket-actual-size-button) { transition:none!important; }
+}

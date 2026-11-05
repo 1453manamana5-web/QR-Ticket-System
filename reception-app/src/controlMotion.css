@@ -1,0 +1,22 @@
+/* Reception keeps its gesture-driven Y rotation; press scale is a separate axis. */
+@media screen and (prefers-reduced-motion:no-preference) {
+  .entry-reception-mode-switch,.entry-reception-page .entry-reception-mode-switch {
+    scale:1;
+    transition:transform 700ms cubic-bezier(.16,.8,.22,1),scale var(--control-release-duration,190ms) var(--control-release-curve,cubic-bezier(.22,1,.36,1)),box-shadow 220ms ease,border-color 220ms ease;
+  }
+  .entry-reception-mode-switch:not(:where(:disabled,[aria-disabled="true"],[aria-busy="true"],[inert] *)):active { scale:.985; }
+}
+/* Avoid adding a second press transform from the older reception rules. */
+.entry-reception-footer button:active:not(:disabled),
+.entry-sound-start-button:active:not(:disabled) { transform:none; }
+@media screen and (hover:none) {
+  .entry-reception-mode-switch:hover { box-shadow:0 3px 10px rgba(24,59,93,.07); }
+  .reception-start-content button:hover,
+  .entry-sound-start-button:hover:not(:disabled) { transform:none; }
+}
+@media screen and (prefers-reduced-motion:reduce) {
+  .entry-reception-mode-switch { transition:none!important;scale:1!important; }
+}
+@media print {
+  .entry-reception-mode-switch { transition:none!important;scale:1!important; }
+}

@@ -84,8 +84,11 @@ test('every management guide action can be performed on the real practice screen
    if(step.chapter==='受付の練習'||step.chapter==='完了')continue;
    if(chapter!==step.chapter){if(renderer)await act(async()=>renderer.unmount());await act(async()=>{renderer=create(React.createElement(App,{practice:true}));});await flush();chapter=step.chapter;}
    if(step.note)continue;
-   let target=guide.findGuideTarget(virtualRoot(renderer),step.target);assert.ok(target,step.chapter+': '+step.title+' target not found');const n=target.node;
+   let target=guide.findGuideTarget(virtualRoot(renderer),step.target);assert.ok(target,step.chapter+': '+step.title+' target not found');let n=target.node;
    if(step.event==='input'){
+    // A visible upload label highlights the native file control beneath it.
+    if(n.type==='label')n=n.findAll(node=>['input','select','textarea'].includes(node.type))[0];
+    assert.ok(n,'Guide input control not found');
     let value=n.props.type==='checkbox'?!n.props.checked:n.props.type==='number'?'25':n.props.type==='date'?'2099-11-02':n.type==='select'?'exited':'練習';
     if(step.target.label==='通常分の枚数')value='3';if(step.target.label==='予備分の枚数')value='2';if(step.target.label==='予備の印刷枚数')value='1';if(step.target.selector==='.ticket-search-box input')value='1';
     await act(async()=>n.props.onChange({target:{value,checked:value,files:[{name:'練習.png',type:'image/png',size:30}]}}));

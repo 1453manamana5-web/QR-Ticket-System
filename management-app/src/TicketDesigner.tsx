@@ -1001,20 +1001,20 @@ function TicketDesigner({
           <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
           <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
           <button type="button" className="studio-primary" onClick={saveDesign}>保存</button>
-          <button type="button" onClick={printTickets}>印刷</button><button type="button" disabled={!eventId} onClick={()=>togglePanel("reserve")}>予備印刷</button>
+          <button type="button" onClick={printTickets}>印刷</button><button type="button" disabled={!eventId} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
           <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
         <main className="studio-workspace">
           <nav className="studio-dock" aria-label="編集ツール">
-            <button type="button" onClick={()=>{setPanels([]);setSelectedImage(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
-            <button type="button" onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setSelectedImage(null);setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
-            <label>▧<small>画像</small><input aria-label="画像を追加" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={imageUpload}/></label>
-            <button type="button" onClick={()=>togglePanel("layers")}>▱<small>レイヤー</small></button>
-            <label>▧<small>背景</small><input type="file" accept="image/*" onChange={handleBackgroundImage}/></label>
-            <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
-            <button type="button" onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
-            <button type="button" className={panels.includes("settings")?"active":""} onClick={()=>togglePanel("settings")}>⚙<small>設定</small></button>
-            <button type="button" className={panels.includes("range")?"active":""} onClick={()=>togglePanel("range")}>▤<small>一覧</small></button>
+            <button type="button" className={!activeLayer&&panels.length===0?"active":""} aria-pressed={!activeLayer&&panels.length===0} onClick={()=>{setPanels([]);setSelectedImage(null);setTitleSelected(false);setSelectedPart(null);}}>↖<small>選択</small></button>
+            <button type="button" className={titleSelected?"active":""} aria-pressed={titleSelected} onClick={()=>{checkpoint();if(!settings.title)updateSetting("title",eventName||"イベント名");setSelectedImage(null);setTitleSelected(true);setSelectedPart(null);}}>T<small>文字</small></button>
+            <label className="studio-upload">▧<small>画像</small><input aria-label="画像を追加" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={imageUpload}/></label>
+            <button type="button" className={panels.includes("layers")?"active":""} aria-expanded={panels.includes("layers")} onClick={()=>togglePanel("layers")}>▱<small>レイヤー</small></button>
+            <label className="studio-upload">▧<small>背景</small><input aria-label="背景画像を追加" type="file" accept="image/*" onChange={handleBackgroundImage}/></label>
+            <button type="button" className={selectedPart==="qr"?"active":""} aria-pressed={selectedPart==="qr"} onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("qr");}}>▦<small>QR</small></button>
+            <button type="button" className={selectedPart==="number"?"active":""} aria-pressed={selectedPart==="number"} onClick={()=>{setSelectedImage(null);setTitleSelected(false);setSelectedPart("number");}}>＃<small>番号</small></button>
+            <button type="button" className={panels.includes("settings")?"active":""} aria-expanded={panels.includes("settings")} onClick={()=>togglePanel("settings")}>⚙<small>設定</small></button>
+            <button type="button" className={panels.includes("range")?"active":""} aria-expanded={panels.includes("range")} onClick={()=>togglePanel("range")}>▤<small>一覧</small></button>
           </nav>
           <div className="studio-canvas" onClick={()=>{}}>
             <div className="studio-context" onPointerDownCapture={checkpoint}>
@@ -1045,7 +1045,7 @@ function TicketDesigner({
             const size=image?.width??(id==="qr"?settings.qrSize:id==="number"?settings.numberSize:settings.titleSize??28);
             return <FloatingPanel key={id} title={`${name}の設定`} className="studio-inspector studio-part-inspector" offset={56+(index%6)*24} onClose={()=>setPartPanels(current=>current.filter(item=>item!==id))}>
               <div className="studio-part-controls" data-part-settings={id}>
-                <button type="button" onClick={()=>selectLayer(id)}>このパーツを選択</button>
+                <button type="button" aria-pressed={activeLayer===id} onClick={()=>selectLayer(id)}>このパーツを選択</button>
                 <button type="button" aria-pressed={locked} onClick={()=>{checkpoint();setSettings(current=>({...current,locked:{...current.locked,[id]:!current.locked?.[id]}}));}}>{locked?"固定を解除":"パーツを固定"}</button>
                 <label>横位置（%）<input aria-label={`${name}の横位置`} disabled={locked} type="number" min="-50" max="150" step="0.1" value={x} onChange={e=>updatePart(id,"x",Number(e.target.value))}/></label>
                 <label>縦位置（%）<input aria-label={`${name}の縦位置`} disabled={locked} type="number" min="-50" max="150" step="0.1" value={y} onChange={e=>updatePart(id,"y",Number(e.target.value))}/></label>

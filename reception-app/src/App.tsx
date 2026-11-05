@@ -817,12 +817,12 @@ export default function App(){
         {!terminalRegistration ? <>
           <label className="reception-registration-field"><span>端末名</span><input value={terminalRegistrationName} onChange={e=>setTerminalRegistrationName(e.target.value)} placeholder="例：入口受付 iPad"/></label>
           <div className="reception-registration-info"><span>端末種別</span><strong>Web / iPad</strong></div>
-          <button type="button" className="primary" disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
+          <button type="button" className="primary" aria-busy={busy} disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
         </> : <>
           <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
           <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
           <p className="entry-result-secondary">管理画面の「イベントごとの受付承認」で、この端末を承認してください。同じiPadから承認できます。</p>
-          <button type="button" className="secondary" disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
+          <button type="button" className="secondary" aria-busy={busy} disabled={busy} onClick={()=>void resetTerminalRegistration()}>{busy?"リセット中…":"申請をリセット"}</button>
         </>}
         {error&&<p className="entry-result-secondary">{error}</p>}
       </section>
@@ -839,7 +839,7 @@ export default function App(){
           {!terminalRegistration ? <>
             <label className="reception-registration-field"><span>端末名</span><input value={terminalRegistrationName} onChange={e=>setTerminalRegistrationName(e.target.value)} placeholder="例：入口受付 iPad"/></label>
             <div className="reception-registration-info"><span>端末種別</span><strong>Web / iPad</strong></div>
-            <button type="button" className="primary" disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
+            <button type="button" className="primary" aria-busy={busy} disabled={busy} onClick={()=>void submitReceptionRegistration()}>{busy?"申請中…":"受付端末を登録申請"}</button>
           </> : <>
             <div className="reception-registration-info"><span>端末名</span><strong>{terminalRegistration.name}</strong></div>
             <div className="reception-registration-info"><span>状態</span><strong>管理者の承認待ち</strong></div>
@@ -876,14 +876,14 @@ export default function App(){
                 <p className="entry-result-secondary">この画面ではカメラを起動しません</p>
                 <div className="event-auth-actions">
                   <button type="button" className="primary" onClick={()=>{setError("");++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setScreen("authScan");}}>イベントデータQRを読み取る</button>
-                  <button type="button" className="primary" disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
+                  <button type="button" className="primary" aria-busy={busy} disabled={busy||!online} onClick={()=>void receiveEventByCommunication()}>{busy?"イベントデータ受信中…":"通信でイベントデータを受信"}</button>
                   <button type="button" className="secondary" onClick={()=>{setError("");setAuthCodeMode(current=>!current);}}>{authCodeMode?"QRで連携する":"コードで連携する"}</button>
                   <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
                   <button type="button" className="secondary" onClick={()=>{setError("");setTestResultKind(mode==="entry"?"entry":"exit");setScreen("test");announceReception(mode==="entry"?"entry":"exit");}}>受付結果を試験表示</button>
                 </div>
                 {authCodeMode&&<div className="reception-auth-code-form">
                   <label><span>イベント連携コード</span><input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="管理アプリに表示されたコード" autoCapitalize="none" autoCorrect="off" /></label>
-                  <button type="button" className="primary" disabled={busy||!authCode.trim()} onClick={()=>void handleAuthCodeSubmit()}>{busy?"確認中…":"コードで連携"}</button>
+                  <button type="button" className="primary" aria-busy={busy} disabled={busy||!authCode.trim()} onClick={()=>void handleAuthCodeSubmit()}>{busy?"確認中…":"コードで連携"}</button>
                 </div>}
               </div>
             </div>
@@ -982,8 +982,8 @@ export default function App(){
       <div className="entry-result-icon">?</div><span className="entry-result-eyebrow">EVENT AUTHENTICATION</span>
       <h2>このイベントで認証しますか？</h2>{offlineData&&<p className="entry-result-secondary">オフラインデータ：QR {offlineData.tickets.length}件（未印刷の予備を含む）。管理者が表示したQRであることと、イベント名を確認してください。</p>}<p className="entry-result-primary">{authPayload.eventName}</p><p className="entry-result-number">{authPayload.eventId}</p>
       {error&&<p className="entry-result-secondary">{error}</p>}
-      <button type="button" className="primary" disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"イベントデータを準備中…":"このイベントで認証"}</button>
-      <button type="button" className="secondary" disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
+      <button type="button" className="primary" aria-busy={busy} disabled={busy} onClick={()=>void authenticateEvent()}>{busy?"イベントデータを準備中…":"このイベントで認証"}</button>
+      <button type="button" className="secondary" aria-busy={busy} disabled={busy} onClick={()=>setScreen("auth")}>別のQRを読み取る</button>
     </section></main>
   </div>;
 
@@ -1128,7 +1128,7 @@ export default function App(){
                   <strong>QRコード読み取り</strong>
                 </span>
               </div>
-              <button type="button" className="secondary" disabled={busy} onClick={()=>{if(scanProcessingRef.current)return;receptionAllowedRef.current=false;setResult(null);setScreen("ready");void syncPendingRecords();}}>受付を停止</button>
+              <button type="button" className="secondary" aria-busy={busy} disabled={busy} onClick={()=>{if(scanProcessingRef.current)return;receptionAllowedRef.current=false;setResult(null);setScreen("ready");void syncPendingRecords();}}>受付を停止</button>
             </div>
             <div className="entry-scanner-wrapper">
               <div className="camera-qr-scanner">

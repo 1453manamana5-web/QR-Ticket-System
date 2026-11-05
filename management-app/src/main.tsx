@@ -3,6 +3,7 @@ import AppRoot from "./App";
 import "./styles.css";
 import "./legacy-ticket-design-overrides.css";
 import "./motion.css";
+import "../../shared/src/controlMotion.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
 import OfflineReserveRoot from './ReservePrinting';
 
