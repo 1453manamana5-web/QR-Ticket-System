@@ -362,6 +362,23 @@ test('analysis page includes the occupancy line chart from current reception sub
   }finally{await h.close();}
 });
 
+test('issuance quantities can be cleared completely and retyped without restoring zero or concatenating counts',async()=>{
+  let issued,calls=0;const h=await harness({appendTickets:async(_id,tickets)=>{calls++;issued=tickets;}});
+  try{
+    await h.nav('チケット管理');
+    const text=n=>n.children.map(c=>typeof c==='string'?c:text(c)).join('');
+    await act(async()=>h.renderer.root.findAllByType('button').find(n=>text(n).includes('チケットを新規発行')).props.onClick());
+    const input=label=>h.renderer.root.findAllByType('input').find(n=>n.props['aria-label']===label);
+    const set=async(label,value)=>{await act(async()=>input(label).props.onChange({target:{value}}));};
+    await set('通常分の枚数','');await set('予備分の枚数','');
+    assert.equal(input('通常分の枚数').props.value,'');assert.equal(input('予備分の枚数').props.value,'');
+    await h.click('QR・チケットを発行');assert.equal(calls,0);assert.match(h.text(),/合計1〜5000枚/);
+    await set('通常分の枚数','4');await set('予備分の枚数','1');
+    await h.click('QR・チケットを発行');assert.equal(calls,1);assert.equal(issued.length,5);
+    assert.ok(issued.slice(0,4).every(ticket=>ticket.basicInfo.reserve!==true));assert.equal(issued[4].basicInfo.reserve,true);
+  }finally{await h.close();}
+});
+
 test('new issuance appends reserve tickets after regular tickets and opens reserve preparation',async()=>{
   let issued;const h=await harness({loadNextTicketNumber:async()=>101,appendTickets:async(_id,items)=>{issued=items;}});
   try{
