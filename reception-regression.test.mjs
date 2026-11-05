@@ -368,9 +368,11 @@ test("reception service worker does not intercept management navigation",()=>{
     location:{href:"https://example.test/QR-Ticket-System/sw.js",origin:"https://example.test"},
     addEventListener:(name,handler)=>{listeners[name]=handler;},
   },URL);
-  let intercepted=false;
-  listeners.fetch({request:{method:"GET",mode:"navigate",url:"https://example.test/QR-Ticket-System/management-app/"},respondWith:()=>{intercepted=true;}});
-  assert.equal(intercepted,false);
+  for(const path of ["management-app/","control/","control/assets/app.js"]){
+    let intercepted=false;
+    listeners.fetch({request:{method:"GET",mode:"navigate",url:"https://example.test/QR-Ticket-System/"+path},respondWith:()=>{intercepted=true;}});
+    assert.equal(intercepted,false,path);
+  }
 });
 
 test("camera restart waits for a pending start and old cleanup before starting the next reader",async()=>{
