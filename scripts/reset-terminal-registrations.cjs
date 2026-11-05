@@ -32,8 +32,9 @@ async function remove(db,records){
 }
 async function main(){
  const account=JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT||'null');if(!account?.private_key||!account.client_email)throw Error('Firebase admin credential missing');
- const {initializeApp,cert}=require('../functions/node_modules/firebase-admin/app');
- const {getFirestore}=require('../functions/node_modules/firebase-admin/firestore');
+ const adminRequire=require('node:module').createRequire(require('node:path').resolve(__dirname,'../functions/package.json'));
+ const {initializeApp,cert}=adminRequire('firebase-admin/app');
+ const {getFirestore}=adminRequire('firebase-admin/firestore');
  initializeApp({credential:cert(account),projectId:PROJECT});const db=getFirestore();
  const audit=db.doc('maintenanceOperations/'+OPERATION),backup=process.env.RESET_BACKUP_PATH;
  if(!backup)throw Error('Encrypted backup path required');

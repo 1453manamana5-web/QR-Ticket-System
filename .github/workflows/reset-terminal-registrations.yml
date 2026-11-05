@@ -14,7 +14,7 @@ jobs:
       name: firebase-production
     timeout-minutes: 15
     env:
-      RESET_BACKUP_PATH: ${{ runner.temp }}/terminal-reset-encrypted.json
+      RESET_BACKUP_PATH: terminal-reset-encrypted.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
