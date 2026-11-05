@@ -24,7 +24,7 @@ self.addEventListener('fetch',event=>{
   if(req.method!=='GET'||url.origin!==self.location.origin||!url.pathname.startsWith(BASE))return;
   if(req.mode==='navigate'){
     if(url.pathname!==BASE&&url.pathname!==BASE+'index.html')return;
-    event.respondWith((async()=>{const cache=await caches.open(CACHE);try{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),3000);let response;try{response=await fetch(req,{signal:controller.signal});}finally{clearTimeout(timer);}event.waitUntil(saveShell(cache,response.clone()).catch(()=>{}));return response;}catch{return await cache.match(INDEX)||new Response('オンラインで一度、管理アプリを開いて準備してください。',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8'}});}})());return;
+    event.respondWith((async()=>{const cache=await caches.open(CACHE);try{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),3000);let response;try{response=await fetch(req,{signal:controller.signal});}finally{clearTimeout(timer);}if(!response.ok)throw Error('管理画面を取得できませんでした');event.waitUntil(saveShell(cache,response.clone()).catch(()=>{}));return response;}catch{return await cache.match(INDEX)||new Response('オンラインで一度、管理アプリを開いて準備してください。',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8'}});}})());return;
   }
   event.respondWith((async()=>{const cache=await caches.open(CACHE),saved=await cache.match(req);if(saved)return saved;try{const response=await fetch(req);if(response.ok)await cache.put(req,response.clone());return response;}catch{return new Response('',{status:503});}})());
 });

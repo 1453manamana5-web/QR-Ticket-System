@@ -50,9 +50,14 @@ self.addEventListener("fetch", event => {
     if (url.pathname !== BASE_PATH && url.pathname !== BASE_PATH + "index.html") return;
     event.respondWith((async () => {
       try {
-        const response = await fetch(request);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        let response;
+        try { response = await fetch(request, {signal: controller.signal}); }
+        finally { clearTimeout(timer); }
+        if (!response.ok) throw new Error("受付画面を取得できませんでした");
         const cache = await caches.open(SHELL_CACHE);
-        await cacheShell(cache, response);
+        event.waitUntil(cacheShell(cache, response.clone()).catch(() => {}));
         return response;
       } catch {
         const cache = await caches.open(SHELL_CACHE);
