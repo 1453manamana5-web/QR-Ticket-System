@@ -1861,7 +1861,7 @@ export default function App({practice=false}:AppProps={}) {
         <div className="event-primary-actions">
           <button
             className="primary-action"
-            disabled={publishing || event.eventStatus === "finished"}
+            aria-busy={publishing} disabled={publishing || event.eventStatus === "finished"}
             onClick={() => void saveEvent()}
             title={event.eventStatus === "finished" ? "過去のイベントは履歴として保存され、再公開できません。" : undefined}
           >
@@ -1950,7 +1950,7 @@ export default function App({practice=false}:AppProps={}) {
             <label>イベントID<input value={event.eventId} readOnly /></label>
             <label>データバージョン<input value={event.dataVersion} disabled /></label>
           </div>
-          <button className="primary-action event-save-button" disabled={publishing} onClick={() => void saveEvent()}>
+          <button className="primary-action event-save-button" aria-busy={publishing} disabled={publishing} onClick={() => void saveEvent()}>
             {publishing ? "保存・公開中…" : "保存してFirebaseへ公開"}
           </button>
         </section>}
@@ -2077,12 +2077,12 @@ export default function App({practice=false}:AppProps={}) {
           <p role="status">集計対象 {ticketCount}枚 ／ 未印刷予備 {reserveTicketCount}枚（準備するQRは計 {ticketCount+reserveTicketCount}枚）</p><p>予備分は通常分に続く番号で発行し、通常印刷から除外します。発行後にデザインとQRを端末へ保存してください。</p>
           <div className="ticket-modal-actions">
             <button className="secondary" onClick={() => setTicketCreateModalOpen(false)}>キャンセル</button>
-            <button className="ticket-modal-primary" disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
+            <button className="ticket-modal-primary" aria-busy={ticketGenerating} disabled={ticketGenerating} onClick={() => { void generateTickets(); }}>{ticketGenerating ? "保存中…" : "QR・チケットを発行"}</button>
           </div>
         </div>
       </div>}</SurfacePresence>
 
-      {ticketDesignModalOpen && <TicketDesigner
+      <SurfacePresence>{ticketDesignModalOpen && <TicketDesigner
         key={event.eventId}
         eventId={event.eventId}
         initialReserveOpen={ticketDesignReserveOpen}
@@ -2101,7 +2101,7 @@ export default function App({practice=false}:AppProps={}) {
         }}
 
         onClose={() => {setTicketDesignModalOpen(false);setTicketDesignReserveOpen(false);}}
-      />}
+      />}</SurfacePresence>
 
       <SurfacePresence>{ticketQrModalTicket && <div className="ticket-modal-backdrop" onMouseDown={() => setTicketQrModalTicket(null)}>
         <TicketZoomSurface origin={ticketZoomOrigin}>
@@ -2222,7 +2222,7 @@ export default function App({practice=false}:AppProps={}) {
           {receptionEventApprovals.length ? receptionEventApprovals.map(item => (
             <article className="managed-terminal-card pending-card" key={item.eventId + item.terminalId}>
               <div><strong>{item.name}</strong><p>{item.eventName} ／ {item.terminalId}</p></div>
-              <button className="primary-action" disabled={!canManageTerminals || approvingEventTerminal !== null}
+              <button className="primary-action" aria-busy={approvingEventTerminal===item.terminalId} disabled={!canManageTerminals || approvingEventTerminal !== null}
                 onClick={() => void approveEventReception(item)}>{approvingEventTerminal === item.terminalId ? "承認中…" : "このイベントの受付を承認"}</button>
             </article>
           )) : <p>イベントの受付承認待ちはありません。受付アプリを開くと申請が表示されます。</p>}
@@ -2442,7 +2442,7 @@ export default function App({practice=false}:AppProps={}) {
         )}
       </section>
 
-      {memberBulkModalOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberBulkModalOpen(false)}>
+      <SurfacePresence>{memberBulkModalOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberBulkModalOpen(false)}>
         <section className="member-registration-modal member-bulk-modal" onMouseDown={e => e.stopPropagation()}>
           <button className="member-registration-close" onClick={() => setMemberBulkModalOpen(false)} aria-label="閉じる">×</button>
           <div className="member-registration-heading"><small>BULK MEMBER EDIT</small><h2>部員名をまとめて変更</h2><p>選択した部員の順番に合わせて、1行に1人ずつ入力してください。</p></div>
@@ -2451,9 +2451,9 @@ export default function App({practice=false}:AppProps={}) {
           <div className="member-bulk-order">{filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => <span key={member.memberId}>#{member.memberNumber}</span>)}</div>
           <div className="member-registration-actions"><button className="secondary" onClick={() => setMemberBulkModalOpen(false)}>キャンセル</button><button className="primary-action" disabled={memberBulkText.split(/\r?\n/).filter(name => name.trim()).length !== selectedMemberIds.length} onClick={applyBulkMemberNames}>変更を適用</button></div>
         </section>
-      </div>}
+      </div>}</SurfacePresence>
 
-      {memberRegistrationOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberRegistrationOpen(false)}>
+      <SurfacePresence>{memberRegistrationOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberRegistrationOpen(false)}>
         <section className="member-registration-modal" onMouseDown={e => e.stopPropagation()}>
           <button className="member-registration-close" onClick={() => setMemberRegistrationOpen(false)} aria-label="閉じる">×</button>
           <div className="member-registration-heading">
@@ -2480,9 +2480,9 @@ export default function App({practice=false}:AppProps={}) {
             <button className="primary-action" disabled={!memberName.trim()} onClick={() => { addMember(); setMemberRegistrationOpen(false); }}>部員を登録</button>
           </div>
         </section>
-      </div>}
+      </div>}</SurfacePresence>
 
-      {memberQrModal && <div className="member-qr-backdrop" onMouseDown={() => setMemberQrModal(null)}>
+      <SurfacePresence>{memberQrModal && <div className="member-qr-backdrop" onMouseDown={() => setMemberQrModal(null)}>
         <section className="member-qr-modal" onMouseDown={e => e.stopPropagation()}>
           <button className="member-qr-close" onClick={() => setMemberQrModal(null)} aria-label="閉じる">×</button>
           <div className="member-qr-heading">
@@ -2510,7 +2510,7 @@ export default function App({practice=false}:AppProps={}) {
             <button className="secondary" onClick={() => setMemberQrModal(null)}>閉じる</button>
           </div>
         </section>
-      </div>}
+      </div>}</SurfacePresence>
     </>;
 
     if (page === "分析") {
@@ -3213,5 +3213,5 @@ function Terminal({ name, mode, onAction }: { name: string; mode: string; onActi
 }
 
 function Setting({ title, text, checked, onChange }: { title: string; text: string; checked: boolean; onChange: () => void }) {
-  return <div className="setting"><div><b>{title}</b><small>{text}</small></div><input type="checkbox" checked={checked} onChange={onChange} /></div>;
+  return <label className="setting"><span className="setting-copy"><b>{title}</b><small>{text}</small></span><input className="setting-switch" type="checkbox" role="switch" aria-label={title} checked={checked} onChange={onChange} /><span className="setting-switch-track" aria-hidden="true"><span /></span></label>;
 }

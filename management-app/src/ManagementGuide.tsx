@@ -24,18 +24,42 @@ export function useManagementGuide(terminalId:string,enabled:boolean,storage:Pic
   return {open,step,saveError,topic,start,startTopic,pause,next,restartChapter};
 }
 export type GuideController=ReturnType<typeof useManagementGuide>;
+function guideTargetVisible(node:HTMLElement):boolean {
+  const hidden=(element:HTMLElement)=>element.getAttribute('inert')!==null||element.getAttribute('hidden')!==null||element.getAttribute('aria-hidden')==='true';
+  if(hidden(node)||node.getClientRects().length===0)return false;
+  const ancestor=node.closest<HTMLElement>('[inert],[hidden],[aria-hidden="true"]');
+  return !ancestor||!hidden(ancestor);
+}
+function guideHighlightTarget(node:HTMLElement):HTMLElement|null {
+  const label=node.closest<HTMLElement>('label');
+  // Both native file overlays and the clipped switch input are accessible
+  // controls, but their own outline is invisible. Highlight their visible label.
+  const delegate=node.getAttribute('type')==='file'||node.getAttribute('class')?.split(/\s+/).includes('setting-switch');
+  if(delegate&&label&&guideTargetVisible(label))return label;
+  return guideTargetVisible(node)?node:null;
+}
 export function findGuideTarget(root:HTMLElement,target?:GuideTarget):HTMLElement|null{
   if(!target)return null;
-  const scope=target.scope?root.querySelector<HTMLElement>(target.scope):root;if(!scope)return null;
-  const visible=(node:HTMLElement)=>node.getClientRects().length>0;
-  if(target.selector)return [...scope.querySelectorAll<HTMLElement>(target.selector)].find(visible)??null;
-  if(target.label){
-    const exact=[...scope.querySelectorAll<HTMLElement>('[aria-label]')].find(n=>n.getAttribute('aria-label')===target.label);
-    if(exact)return visible(exact)?exact:exact.closest<HTMLElement>('label');
-    const label=[...scope.querySelectorAll<HTMLLabelElement>('label')].find(n=>n.textContent?.includes(target.label!));
-    if(label)return label.querySelector<HTMLElement>('input,select,textarea')??label;
+  // A closing surface may still be mounted beside the newly opened one.
+  // Search every live scope instead of letting its outgoing picture win.
+  const scopes=target.scope?[...root.querySelectorAll<HTMLElement>(target.scope)].filter(guideTargetVisible):[root];
+  for(const scope of scopes){
+    if(target.selector){const match=[...scope.querySelectorAll<HTMLElement>(target.selector)].map(guideHighlightTarget).find(Boolean);if(match)return match;continue;}
+    if(target.label){
+      for(const exact of [...scope.querySelectorAll<HTMLElement>('[aria-label]')].filter(n=>n.getAttribute('aria-label')===target.label)){
+        const highlight=guideHighlightTarget(exact);if(highlight)return highlight;
+        const label=exact.closest<HTMLElement>('label');
+        if(label&&guideTargetVisible(label))return label;
+      }
+      for(const label of [...scope.querySelectorAll<HTMLLabelElement>('label')].filter(n=>n.textContent?.includes(target.label!)&&guideTargetVisible(n))){
+        const input=label.querySelector<HTMLElement>('input,select,textarea');
+        return input?guideHighlightTarget(input)??label:label;
+      }
+    }
+    const match=[...scope.querySelectorAll<HTMLElement>('button,a,[role="menuitem"]')].find(n=>guideTargetVisible(n)&&n.textContent?.replace(/\s/g,'').includes(target.text?.replace(/\s/g,'')??'__missing__'));
+    if(match)return match;
   }
-  return [...scope.querySelectorAll<HTMLElement>('button,a,[role="menuitem"]')].find(n=>visible(n)&&n.textContent?.replace(/\s/g,'').includes(target.text?.replace(/\s/g,'')??'__missing__'))??null;
+  return null;
 }
 export default function ManagementGuide({controller:c,renderWorkspace}:{controller:GuideController;renderWorkspace:()=>ReactNode}){
   const step=steps[c.step],root=useRef<HTMLDivElement>(null),dialog=useRef<HTMLElement>(null),heading=useRef<HTMLHeadingElement>(null);
@@ -50,9 +74,9 @@ export default function ManagementGuide({controller:c,renderWorkspace}:{controll
     const update=()=>{
       const target=findGuideTarget(host,step.target);setFound(Boolean(target));
       if(target!==highlighted){highlighted?.removeAttribute('data-guide-highlight');highlighted=target;if(target){target.setAttribute('data-guide-highlight','true');target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});}}
-      setReady(Boolean(step.note)||(acted&&(!step.after||Boolean(host.querySelector(step.after)))));
+      setReady(Boolean(step.note)||(acted&&(!step.after||Boolean(findGuideTarget(host,{selector:step.after})))));
     };
-    update();const observer=new MutationObserver(update);observer.observe(host,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','aria-expanded','value','class']});
+    update();const observer=new MutationObserver(update);observer.observe(host,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','aria-expanded','aria-hidden','inert','hidden','value','class','style']});
     const timer=window.setInterval(update,400);
     return()=>{observer.disconnect();window.clearInterval(timer);highlighted?.removeAttribute('data-guide-highlight');};
   },[c.step,acted,epoch]);
@@ -72,7 +96,7 @@ export default function ManagementGuide({controller:c,renderWorkspace}:{controll
   return <section className="management-guide" role="dialog" aria-modal="true" aria-labelledby="guide-heading" ref={dialog} onKeyDown={event=>{
     if(event.key==='Escape'){event.preventDefault();c.pause();}
     if(event.key==='Tab'){
-      const items=[...dialog.current!.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(n=>n.getClientRects().length>0);
+      const items=[...dialog.current!.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(guideTargetVisible);
       const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
     }
   }}>
