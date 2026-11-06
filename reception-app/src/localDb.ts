@@ -118,7 +118,42 @@ export async function loadLocalEvent(validateInventory=false): Promise<LocalEven
   }finally{database.close();}
 }
 
-export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[]): Promise<void> {
+export type LocalReceptionSnapshot = {
+  eventId: string;
+  recordIds: string[];
+  pendingRecordIds: string[];
+};
+
+/** Capture before reading remote inventory, so a completed upload cannot be lost
+ * when an older inventory response arrives later. This marker is never persisted.
+ */
+export async function captureLocalReceptionSnapshot(eventId: string): Promise<LocalReceptionSnapshot> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<LocalReceptionSnapshot>((resolve, reject) => {
+      const tx = database.transaction([STORES.receptionRecords, STORES.syncQueue], "readonly");
+      const records = tx.objectStore(STORES.receptionRecords).getAll();
+      const queue = tx.objectStore(STORES.syncQueue).getAll();
+      tx.oncomplete = () => {
+        const recordIds = (records.result as ReceptionRecord[])
+          .filter(record => record.eventId === eventId).map(record => record.recordId);
+        const ownIds = new Set(recordIds);
+        resolve({eventId, recordIds, pendingRecordIds: (queue.result as SyncQueueItem[])
+          .filter(item => ownIds.has(item.recordId) && item.status !== "synced").map(item => item.recordId)});
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("同期状態を確認できませんでした"));
+      tx.onabort = () => reject(tx.error ?? new Error("同期状態の確認が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function prepareLocalEventData(
+  event: LocalEventData & {receptionSnapshot?: LocalReceptionSnapshot},
+  tickets: Ticket[],
+  options: {offlineTransfer?: boolean} = {},
+): Promise<void> {
   const eventId = event.event.eventId;
   const ticketIds = new Set<string>();
 
@@ -144,8 +179,9 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
   // イベント本体と全チケットは同じIndexedDBトランザクションで保存する。
   // トランザクションが完了した時点で両方が保存済みになるため、
   // 保存対象のイベントには準備完了状態を記録してよい。
+  const {receptionSnapshot, ...eventData} = event;
   const readyEvent: LocalEventData = {
-    ...event,
+    ...eventData,
     dataReady: true,
     ticketCount: tickets.length,
   };
@@ -163,15 +199,36 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
 
       const abort=(message:string)=>{reject(new Error(message));transaction.abort();};
 
+      // Offline exports do not identify the latest reception state. Once this
+      // terminal has accepted a scan, only a fresh server read may replace its
+      // inventory. Keep this check in the write transaction to include scans
+      // committed by another tab immediately before this preparation.
+      if (options.offlineTransfer) {
+        const history = transaction.objectStore(STORES.receptionRecords).getAll();
+        history.onsuccess = () => {
+          if ((history.result as ReceptionRecord[]).some(record => record.eventId === eventId)) {
+            abort("このイベントには端末内の受付記録があるため、オフラインQRでは再読み込みできません。通信で最新データを受信してください。");
+          }
+        };
+      }
+
       // Refresh inventory without rolling back locally accepted, unsent scans.
       const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
       queueRequest.onsuccess = () => {
-        const pendingQueue = (queueRequest.result as SyncQueueItem[]).filter(item => item.status !== "synced");
+        const queue = queueRequest.result as SyncQueueItem[];
+        const capturedIds = new Set(receptionSnapshot?.recordIds);
+        const capturedPendingIds = new Set(receptionSnapshot?.pendingRecordIds);
+        const newlySyncedIds = receptionSnapshot?.eventId === eventId
+          ? new Set(queue.filter(item => item.status === "synced" &&
+              (capturedPendingIds.has(item.recordId) || !capturedIds.has(item.recordId))).map(item => item.recordId))
+          : new Set<string>();
+        const pendingQueue = queue.filter(item => item.status !== "synced");
         const pendingIds = new Set(pendingQueue.map(item => item.recordId));
         const sequences = new Map(pendingQueue.map(item => [item.recordId, item.sequence]));
         // Queue entries point to records; read them in this same transaction.
         const pendingRecords = new Map<string, {record: ReceptionRecord; sequence?: number}>();
-        let remaining = pendingIds.size;
+        const recordIds = new Set([...pendingIds, ...newlySyncedIds]);
+        let remaining = recordIds.size;
         const storeInventory = () => {
           const current=(currentEventRequest.result as LocalEventData[])[0];
           if(current?.event.eventId===eventId && current.event.dataVersion>readyEvent.event.dataVersion){
@@ -202,11 +259,15 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           };
         };
         if (!remaining) { storeInventory(); return; }
-        for (const recordId of pendingIds) {
+        for (const recordId of recordIds) {
           const request = transaction.objectStore(STORES.receptionRecords).get(recordId);
           request.onsuccess = () => {
             const record = request.result as ReceptionRecord | undefined;
             if (record?.eventId === eventId) {
+              // This download may predate the just-completed upload. Preserve the
+              // current inventory and retry the remote read on the next poll;
+              // overlaying it could also hide a newer exit on another terminal.
+              if (newlySyncedIds.has(recordId)) { abort("LOCAL_RECEPTION_SYNC_CHANGED"); return; }
               const previous = pendingRecords.get(record.ticketId);
               const sequence = sequences.get(recordId);
               const newer = !previous || (sequence !== undefined

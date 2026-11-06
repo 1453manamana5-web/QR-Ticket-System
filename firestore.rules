@@ -187,7 +187,9 @@ service cloud.firestore {
     function validManagedModeUpdate(terminalId) {
       let current = resource.data;
       let next = request.resource.data;
-      return terminalId != managementTerminalId()
+      let manager = get(terminalPath(managementTerminalId())).data;
+      return (manager.admin == true || manager.subAdmin == true)
+        && terminalId != managementTerminalId()
         && current.approved == true
         && next.diff(current).affectedKeys().hasOnly(["desiredMode", "desiredModeUpdatedAt"])
         && next.desiredMode in ["入口受付", "出口受付", "停止"]
@@ -450,6 +452,7 @@ service cloud.firestore {
       let target = resource.data;
       let ownerAfter = getAfter(ownerPath(terminalId)).data;
       return terminalId != managementTerminalId()
+        && (manager.admin == true || manager.subAdmin == true)
         && target.admin != true && target.subAdmin != true
         && (manager.admin == true || !(target.role in ["management", "both"]))
         && ownerAfter.terminalId == terminalId
@@ -465,6 +468,7 @@ service cloud.firestore {
       let manager = get(terminalPath(managementTerminalId())).data;
       return exists(targetPath)
         && terminalId != managementTerminalId()
+        && (manager.admin == true || manager.subAdmin == true)
         && target.admin != true && target.subAdmin != true
         && (manager.admin == true || !(target.role in ["management", "both"]))
         && !existsAfter(targetPath)

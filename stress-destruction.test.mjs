@@ -67,7 +67,7 @@ function clients() {
     managerDb, receptionDb, local,
     management: loadClientModule("./management-app/src/firebaseData.ts", managerDb, "flow-manager", "T-FLOW-MANAGER"),
     publisher: loadClientModule("./management-app/src/eventPublisher.ts", managerDb, "flow-manager", "T-FLOW-MANAGER"),
-    downloader: loadClientModule("./reception-app/src/eventDownloader.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION"),
+    downloader: loadClientModule("./reception-app/src/eventDownloader.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION", local),
     reception: loadClientModule("./reception-app/src/receptionSync.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION", local),
   };
 }

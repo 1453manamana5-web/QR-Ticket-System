@@ -611,7 +611,7 @@ export default function App(){
       }else if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
       if(!registrationIsCurrent(registrationVersion))return;
       const event:LocalEventData={...downloaded.localEvent,dataReady:false};
-      await prepareLocalEventData(event,downloaded.tickets);
+      await prepareLocalEventData(event,downloaded.tickets,{offlineTransfer:Boolean(offlineData)});
       if(!registrationIsCurrent(registrationVersion))return;
       event.dataReady=true;
       eventAuthenticationRequiredRef.current=false;
@@ -1056,7 +1056,8 @@ export default function App(){
                 <p className="entry-result-primary">受付用QRデータ {localEvent.ticketCount}件を端末に保存しました（未印刷の予備を含む）</p>
                 <p className="entry-result-secondary">受付を開始すると、ここにQRコードカメラが表示されます</p>
                 <button type="button" className="secondary" onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p className="entry-result-secondary" role="status">{audioNotice}</p>}
-                <button type="button" className="primary" onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button><button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setError("");setScreen("authScan");}}>イベントQRを読み直す</button>
+                {remoteStopped&&<p className="entry-result-secondary" role="status">管理画面から受付停止の指示を受けています。管理画面から入口・出口受付へ戻すと開始できます。</p>}
+                <button type="button" className="primary" disabled={remoteStopped} onClick={()=>{setResult(null);setCameraFailed(false);setScreen("reception");setScannerKey(value=>value+1);}}>受付を開始する</button><button type="button" className="secondary" onClick={()=>{++offlineScanVersion.current;offlineCollector.current.reset();setOfflineProgress({received:0,total:0});setOfflineData(null);setError("");setScreen("authScan");}}>イベントQRを読み直す</button>
                 <button type="button" className="secondary" onClick={()=>{setTestResultKind(mode==="entry"?"entry":"exit");announceReception(mode==="entry"?"entry":"exit");setScreen("test");}}>受付結果を試験表示</button>
               </div>
             </div>

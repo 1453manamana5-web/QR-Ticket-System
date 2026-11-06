@@ -1,6 +1,7 @@
 import { collection, doc, getDocFromServer, getDocsFromServer, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
 import { getFirebaseDb } from "./firebaseClient";
+import { captureLocalReceptionSnapshot, type LocalReceptionSnapshot } from "./localDb";
 
 type EventBundle = {
   event: Event;
@@ -93,7 +94,8 @@ export async function getEventAuthPayloadByToken(token: string): Promise<EventAu
 export async function downloadEventData(
   payload: EventAuthPayload,
   terminalId: string,
-): Promise<{ localEvent: LocalEventData; tickets: Ticket[] }> {
+): Promise<{ localEvent: LocalEventData & {receptionSnapshot?: LocalReceptionSnapshot}; tickets: Ticket[] }> {
+  const receptionSnapshot = await captureLocalReceptionSnapshot(payload.eventId);
   const db = getFirebaseDb();
   const snapshot = await getDocFromServer(doc(db, "eventBundles", payload.authToken));
 
@@ -133,13 +135,14 @@ export async function downloadEventData(
     reentryEnabled: true,
   };
 
-  const localEvent: LocalEventData = {
+  const localEvent: LocalEventData & {receptionSnapshot?: LocalReceptionSnapshot} = {
     event,
     settings,
     terminalId,
     authenticatedAt: new Date().toISOString(),
     dataReady: false,
     ticketCount: tickets.length,
+    receptionSnapshot,
   };
 
   return { localEvent, tickets };

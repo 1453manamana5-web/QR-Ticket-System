@@ -695,13 +695,18 @@ export default function App({practice=false}:AppProps={}) {
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let active = true;
+    let subscriptionUpdated = false;
     setTerminalDataHydrated(false);
 
     void loadTerminals().then(remote => {
+      // A slow startup request must not undo a later approval or revocation.
+      if (!active || subscriptionUpdated) return;
       setFirebaseDeviceId(appStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
       setTerminals(remote);
       setTerminalDataHydrated(true);
     }).catch(reason => {
+      if (!active || subscriptionUpdated) return;
       console.error("Firebase terminal load failed", reason);
       setTerminals([]);
       setTerminalNotice("端末の登録状態を確認できません。ネット接続を確認して再読み込みしてください。");
@@ -710,10 +715,14 @@ export default function App({practice=false}:AppProps={}) {
 
     try {
       unsubscribe = subscribeTerminals(remote => {
+        if (!active) return;
+        subscriptionUpdated = true;
         setFirebaseDeviceId(appStorage.getItem("qr-ticket-terminal-id") || firebaseDeviceId);
-      setTerminals(remote);
+        setTerminals(remote);
         setTerminalDataHydrated(true);
       }, reason => {
+        if (!active) return;
+        subscriptionUpdated = true;
         console.error("Firebase terminal subscription failed", reason);
         setTerminals([]);
         setTerminalNotice("端末の登録状態を確認できません。ネット接続を確認して再読み込みしてください。");
@@ -726,7 +735,7 @@ export default function App({practice=false}:AppProps={}) {
       setTerminalDataHydrated(true);
     }
 
-    return () => unsubscribe?.();
+    return () => { active = false; unsubscribe?.(); };
   }, []);
 
 
