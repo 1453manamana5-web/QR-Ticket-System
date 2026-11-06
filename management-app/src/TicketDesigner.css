@@ -173,6 +173,14 @@
   transform: translate(-50%, -50%);
 }
 
+/* Keep fixed ticket artwork out of mobile text auto-enlargement. */
+.ticket-design-card,
+.ticket-print-card,
+.ticket-actual-size-preview {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 .ticket-print-range {
   margin-top: 24px;
   padding: 20px;

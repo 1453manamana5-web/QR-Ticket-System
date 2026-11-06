@@ -97,7 +97,7 @@ type PrintSheetStyle = CSSProperties & {
 const TICKET_PRINT_CSS = `
   @page { size: auto; margin: 8mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
   .ticket-print-sheet {
     display: block;
@@ -213,8 +213,11 @@ function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesig
  return <>{(settings.images??[]).map(image=><div key={image.id} className={`studio-image ${onSelect?"ticket-draggable-part":""} ${selected===image.id?"is-selected":""}`} style={{position:"absolute",left:`${image.x}%`,top:`${image.y}%`,width:`${image.width}%`,transform:"translate(-50%,-50%)",...layerStyle(settings,image.id)}} onPointerDown={onSelect?e=>onSelect(image.id,e):undefined}><img src={image.src} alt={image.name} draggable={false} style={{display:"block",width:"100%",height:"auto"}}/>{onResize&&selected===image.id&&!settings.locked?.[image.id]&&<button type="button" className="studio-resize" aria-label="画像をリサイズ" onPointerDown={e=>onResize(image.id,e)}/>}</div>)}</>;
 }
 
-function PrintableTicket({ticket,settings,value,immediate=false}:{ticket:TicketDesignerTicket;settings:TicketDesignSettings;value:string;immediate?:boolean}){
+function PrintableTicket({ticket,settings,value,canvasWidth,immediate=false}:{ticket:TicketDesignerTicket;settings:TicketDesignSettings;value:string;canvasWidth:number;immediate?:boolean}){
   const Qr=immediate?QRCodeSVG:LazyQrCode;
+  // Text is edited in screen pixels; print it in the same proportion to the
+  // ticket as the QR and image layers, independently of editor width or zoom.
+  const textMmPerPixel=Math.max(30,settings.printWidthMm)/canvasWidth;
   return (
                   <div
                     key={ticket.id}
@@ -226,7 +229,7 @@ function PrintableTicket({ticket,settings,value,immediate=false}:{ticket:TicketD
                           : `url("${settings.backgroundImage}")`,
                     }}
                   >
-                    <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+                    <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${(settings.titleSize??28)*textMmPerPixel}mm`}}>{settings.title}</div>}
                     <div
                       className="ticket-design-qr"
                       style={{
@@ -248,7 +251,7 @@ function PrintableTicket({ticket,settings,value,immediate=false}:{ticket:TicketD
                       style={{
                         ...layerStyle(settings,"number"), left: `${settings.numberX}%`,
                         top: `${settings.numberY}%`,
-                        fontSize: `${settings.numberSize}px`,
+                        fontSize: `${settings.numberSize*textMmPerPixel}mm`,
                       }}
                     >
                       {ticket.qrNumber}
@@ -429,6 +432,21 @@ function TicketDesigner({
   const pinchStartZoom = useRef(1);
   const liveZoom = useRef(1);
   const ticketCardRef = useRef<HTMLDivElement | null>(null);
+  const [canvasWidth,setCanvasWidth]=useState(760);
+  useEffect(()=>{
+    const card=ticketCardRef.current;
+    if(!card)return;
+    const measure=()=>{
+      // clientWidth excludes the workspace's transform/zoom.
+      const width=card.clientWidth;
+      if(Number.isFinite(width)&&width>0)setCanvasWidth(width);
+    };
+    measure();
+    if(typeof ResizeObserver==='undefined')return;
+    const observer=new ResizeObserver(measure);
+    observer.observe(card);
+    return()=>observer.disconnect();
+  },[showEditor]);
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
@@ -808,7 +826,7 @@ function TicketDesigner({
     if(selected.some(t=>!t||!t.valid||t.status!=="unused"))throw Error("予備に指定できないチケットがあります。");
     const first=selected[0]!;
     const host=document.createElement('div');
-    host.innerHTML=renderToStaticMarkup(<PrintableTicket ticket={first} settings={settings} value={qrValue(first)} immediate/>);
+    host.innerHTML=renderToStaticMarkup(<PrintableTicket ticket={first} settings={settings} canvasWidth={canvasWidth} value={qrValue(first)} immediate/>);
     const card=host.querySelector<HTMLElement>('.ticket-print-card');
     if(!card)throw Error("印刷デザインを保存できませんでした。");
     card.querySelector('.ticket-design-qr')!.innerHTML='';card.querySelector('.ticket-design-number')!.textContent='';
@@ -1600,11 +1618,11 @@ function TicketDesigner({
             </div>
             <div className="ticket-actual-size-preview-wrap">
               <div className="ticket-actual-size-preview" style={({ "--ticket-actual-size-width": `${safePrintWidth * (96 / 25.4) * screenScale}px`, aspectRatio: `${ratio.width} / ${ratio.height}`, backgroundImage: settings.backgroundImage ? `url("${settings.backgroundImage}")` : "none" } as CSSProperties & { "--ticket-actual-size-width": string })}>
-                <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${settings.titleSize??28}px`}}>{settings.title}</div>}
+                <AddedImages settings={settings}/>{settings.title&&<div className="ticket-design-title" style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${(settings.titleSize??28)/canvasWidth*safePrintWidth*(96/25.4)*screenScale}px`}}>{settings.title}</div>}
       <div className="ticket-design-qr" style={{ ...layerStyle(settings,"qr"), left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
-                <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize * screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
+                <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize/canvasWidth*safePrintWidth*(96/25.4)*screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
               </div>
             </div>
             <div className="ticket-screen-calibration">
@@ -1649,7 +1667,7 @@ function TicketDesigner({
                   (rowIndex + 1) * Math.max(1, Math.min(4, settings.cardsPerRow))
                 )
                 .map((ticket) => (
-                  <PrintableTicket key={ticket.id} ticket={ticket} settings={settings} value={qrValue(ticket)}/>
+                  <PrintableTicket key={ticket.id} ticket={ticket} settings={settings} canvasWidth={canvasWidth} value={qrValue(ticket)}/>
                 ))}
             </div>
           )

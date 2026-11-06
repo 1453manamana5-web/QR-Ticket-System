@@ -115,6 +115,37 @@ function designerModule(storage,{globals={},detection={},reserve=null}={}){
 const designTickets=Array.from({length:6},(_,i)=>({id:String(i),qrNumber:String(i+1),valid:true,status:'unused'}));
 const designLabel=node=>node.children.map(child=>typeof child==='string'?child:designLabel(child)).join('');
 
+for(const [editorWidth,printWidthMm,numberSize] of [[320,90,12],[500,60,36],[760,90,60]]){
+  test(`printed number matches editor proportions at ${editorWidth}px / ${printWidthMm}mm / size ${numberSize}`,async()=>{
+    const storage=new Map([['qr-management-ticket-design-id-font-scale',JSON.stringify({title:'Test',titleSize:24,numberSize,printWidthMm,rotations:{number:30}})]]);
+    let resize,disconnected=false;
+    const card={clientWidth:editorWidth,getBoundingClientRect:()=>({width:editorWidth*2,height:300,left:0,top:0})};
+    const module=designerModule(storage,{globals:{ResizeObserver:class{constructor(callback){resize=callback;}observe(){}disconnect(){disconnected=true;}}}});
+    let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'font-scale',eventName:'Test',tickets:designTickets,qrValue:t=>t.id,onClose(){}}),{createNodeMock:node=>node.props.className==='ticket-design-card'?card:null});});
+    const printed=()=>renderer.root.findAll(node=>node.props.className==='ticket-print-card')[0];
+    const number=()=>printed().findByProps({className:'ticket-design-number'});
+    const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-10,`${actual} != ${expected}`);
+    try{
+      assert.match(number().props.style.fontSize,/mm$/);
+      close(parseFloat(number().props.style.fontSize)/printWidthMm,numberSize/editorWidth);
+      close(parseFloat(printed().findByProps({className:'ticket-design-title'}).props.style.fontSize)/printWidthMm,24/editorWidth);
+      assert.match(number().props.style.transform,/rotate\(30deg\)/);
+      const before=number().props.style.fontSize;
+      await act(async()=>renderer.root.findByProps({'aria-label':'拡大'}).props.onClick());
+      assert.equal(number().props.style.fontSize,before,'workspace zoom must not change printed font size');
+      await act(async()=>renderer.root.findAllByType('button').find(node=>designLabel(node)==='実寸確認').props.onClick());
+      const actual=renderer.root.findByProps({className:'ticket-actual-size-preview'}).findByProps({className:'ticket-design-number'});
+      close(parseFloat(actual.props.style.fontSize),parseFloat(before)*96/25.4);
+      card.clientWidth=640;await act(async()=>resize());
+      close(parseFloat(number().props.style.fontSize)/printWidthMm,numberSize/640);
+      const measured=number().props.style.fontSize;
+      card.clientWidth=0;await act(async()=>resize());
+      assert.equal(number().props.style.fontSize,measured,'print styles hiding the editor must keep its last usable width');
+    }finally{await act(async()=>renderer.unmount());}
+    assert.equal(disconnected,true);
+  });
+}
+
 test('designs are isolated by event ID, survive renaming, and migrate named designs without changing another event',async()=>{
   const storage=new Map([['qr-management-ticket-design-id-event-a',JSON.stringify({title:'Design A'})]]),module=designerModule(storage);
   let renderer;
