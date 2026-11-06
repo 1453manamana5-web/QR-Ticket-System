@@ -20,6 +20,7 @@ function load(file, dependencies={}, globals={}) {
   const exports={};
   new Function("exports","require",...Object.keys(globals),compiled)(exports,name=>{
     if(name in dependencies)return dependencies[name];
+    if(name==='../../shared/src/receptionTiming')return load('./shared/src/receptionTiming.ts');
     if(name==="./receptionState")return load("./reception-app/src/receptionState.ts");
     if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
     if(name==="react"||name==="react/jsx-runtime")return require(name);
@@ -33,10 +34,72 @@ const makeEvent=(eventId="event-one",dataVersion=1)=>({
   terminalId:"T-REGRESSION-01",authenticatedAt:"2026-10-27T00:00:00.000Z",dataReady:false,ticketCount:1,
 });
 const makeTicket=(eventId="event-one")=>({ticketId:"ticket-one",eventId,basicInfo:{},valid:true,currentStatus:"unused",updatedAt:"2026-10-27T00:00:00.000Z"});
-const localDb=()=>load("./reception-app/src/localDb.ts",{},{indexedDB:new IDBFactory()});
+const localDb=(indexedDB=new IDBFactory())=>load("./reception-app/src/localDb.ts",{},{indexedDB});
 const record=(recordId,type="entry",timestamp="2026-10-27T01:00:00.000Z")=>({recordId,type,timestamp,eventId:"event-one",ticketId:"ticket-one",terminalId:"T-REGRESSION-01"});
 
+test('trial scans never consume tickets or create records or a sync queue; exact opening time is production',async()=>{
+  const local=localDb(),event=makeEvent();
+  event.event.eventStatus='ready';
+  await local.prepareLocalEventData(event,[makeTicket()]);
+  const before='2026-10-26T23:59:59.999Z',opening='2026-10-27T00:00:00.000Z';
+  for(const type of ['entry','exit','reentry']){
+    assert.equal(await local.saveReceptionTransaction({...makeTicket(),currentStatus:'inside'},record('trial-'+type,type,before),makeTicket()),'trial');
+    assert.equal(await local.getReceptionRecord('trial-'+type),null);
+  }
+  assert.equal((await local.getTicket('ticket-one')).currentStatus,'unused');
+  assert.equal((await local.getPendingSyncItems()).length,0);
+  assert.equal(await local.saveReceptionTransaction({...makeTicket(),currentStatus:'inside'},record('official','entry',opening),makeTicket()),'saved');
+  assert.equal((await local.getPendingSyncItems()).length,1);
+});
+
+test('pre-opening scans display a test ticket and allow repeated testing without changing inventory',async()=>{
+  const data=()=>({localEvent:{...makeEvent(),event:{...makeEvent().event,eventDate:'2099-10-27',eventStatus:'ready'}},tickets:[makeTicket()],authPayload:{authToken:'test-token'}});
+  const h=await harness({saved:false,automatic:async()=>data(),download:async()=>data()});
+  try{
+    await h.click('受付を開始する');
+    await h.scan('ticket-one');await h.scan('ticket-one');
+    assert.match(h.text(),/試験チケット/);
+    assert.equal((await h.local.getTicket('ticket-one')).currentStatus,'unused');
+    assert.equal((await h.local.getPendingSyncItems()).length,0);
+    h.navigator.onLine=false;
+    await h.control('出口受付','2099-10-27T01:00:00.000Z');
+    await h.scan('ticket-one');
+    assert.match(h.text(),/試験チケット/);
+    assert.equal((await h.local.getPendingSyncItems()).length,0);
+  }finally{await h.close();}
+});
+
+test('legacy pre-opening queue items never upload after opening',async()=>{
+  const indexedDB=new IDBFactory(),local=localDb(indexedDB);
+  await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+  const oldTrial=record('old-trial','entry','2026-10-26T23:59:59.000Z');
+  await new Promise((resolve,reject)=>{
+    const open=indexedDB.open('qr-ticket-reception');
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction(['receptionRecords','syncQueue'],'readwrite');
+      tx.objectStore('receptionRecords').put(oldTrial);
+      tx.objectStore('syncQueue').put({recordId:oldTrial.recordId,status:'pending',retryCount:0,sequence:1});
+      tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);
+    };
+    open.onerror=()=>reject(open.error);
+  });
+  const uploaded=[];
+  const worker=load('./reception-app/src/syncQueue.ts',{'./localDb':local,'./receptionSync':{syncReceptionRecord:async item=>uploaded.push(item)}},{navigator:{onLine:true}});
+  await worker.syncPendingReceptionRecords();
+  assert.equal(uploaded.length,0);
+  assert.equal((await local.getPendingSyncItems()).length,0);
+  assert.equal((await local.getReceptionRecord('old-trial')).timestamp,oldTrial.timestamp);
+});
+
 const offlineProtocol=()=>load('./shared/src/offlineTransfer.ts',{}, {crypto:webcrypto});
+test('offline event validation rejects calendar rollover before creating trial schedules',()=>{
+  const {validateOfflineEvent}=offlineProtocol();
+  const data={event:makeEvent().event,settings:makeEvent().settings,tickets:[]};
+  for(const eventDate of ['2026-02-29','2026-11-31','2026-13-01','2026-1-01']){
+    assert.throws(()=>validateOfflineEvent({...data,event:{...data.event,eventDate}}),/形式/,eventDate);
+  }
+  assert.equal(validateOfflineEvent({...data,event:{...data.event,eventDate:'2028-02-29'}}).event.eventDate,'2028-02-29');
+});
 test('offline QR transfers 500 tickets out of order, ignores repeats and rejects mixed or damaged chunks',async()=>{
   const {encodeOfflineEvent,OfflineEventCollector}=offlineProtocol();
   const data={event:makeEvent().event,settings:makeEvent().settings,tickets:Array.from({length:500},(_,i)=>({...makeTicket(),ticketId:'ticket-'+i,basicInfo:{ticketNumber:i+1}}))};
@@ -308,9 +371,9 @@ test("publication switch stops reception without overwriting registration or era
     assert.match(h.text(),/受付.*承認/);
     await h.approve();
     await h.click("通信でイベントデータを受信");
-    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-two");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
     assert.equal((await h.local.getPendingSyncItems()).length,1);
-    assert.match(h.text(),/受付準備完了/);
+    assert.match(h.text(),/未送信|未同期/);
   }finally{await h.close();}
 });
 

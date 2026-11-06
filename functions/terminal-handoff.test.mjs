@@ -7,6 +7,10 @@ const db = getFirestore();
 const collections = ["terminals", "terminalOwners", "terminalInstallations", "terminalHandoffRequests", "terminalHandoffRateLimits", "events", "eventBundles"];
 async function clearCollections() {
   for (const name of collections) {
+    if (name === "events") {
+      await db.recursiveDelete(db.collection(name));
+      continue;
+    }
     const snapshot = await db.collection(name).get();
     for (let i = 0; i < snapshot.docs.length; i += 400) {
       const batch = db.batch();
@@ -24,6 +28,85 @@ async function seedReceptionTerminal() {
   await db.doc("terminals/T-RECEPTION-0001").set({ terminalId: "T-RECEPTION-0001", approved: true, receptionApproved: true, managementApproved: false, role: "reception", receptionApprovalVersion: 0 });
   await db.doc("terminalOwners/T-RECEPTION-0001").set({ terminalId: "T-RECEPTION-0001", ownerUid: "trusted-owner-uid", enabled: true });
   await db.doc("terminalInstallations/trusted-owner-uid").set({ terminalId: "T-RECEPTION-0001", authUid: "trusted-owner-uid", approved: true });
+}
+
+async function seedCallableReception() {
+  await seedReceptionTerminal();
+  await db.doc("events/callable-event").set({
+    eventId: "callable-event", eventName: "Callable event", eventDate: "2026-10-25",
+    startTime: "09:00", receptionTarget: true, eventStatus: "ready", dataVersion: 1, authToken: "callable-token",
+  });
+  await db.doc("events/callable-event/tickets/callable-ticket").set({
+    eventId: "callable-event", ticketId: "callable-ticket", valid: true, currentStatus: "unused",
+  });
+  return {
+    recordId: "callable-record", eventId: "callable-event", ticketId: "callable-ticket",
+    terminalId: "T-RECEPTION-0001", type: "entry", timestamp: "2026-10-25T00:00:00.000Z",
+  };
+}
+
+test("callable reception cannot bypass event approval or its approving identity", async () => {
+  const record = await seedCallableReception();
+  const approval = db.doc("events/callable-event/receptionApprovals/T-RECEPTION-0001");
+  for (const data of [null, { status: "pending", requestedByUid: "trusted-owner-uid" },
+    { status: "approved", requestedByUid: "another-installation" }]) {
+    if (data) await approval.set(data);
+    await assert.rejects(call("recordReception", "trusted-owner-uid", { record }),
+      error => error.code === "permission-denied");
+  }
+  assert.equal((await db.doc("events/callable-event/tickets/callable-ticket").get()).get("currentStatus"), "unused");
+  assert.equal((await db.doc("events/callable-event/receptionRecords/callable-record").get()).exists, false);
+});
+
+test("callable reception rejects preopening trials and records an idempotent real entry at opening", async () => {
+  const record = await seedCallableReception();
+  await db.doc("events/callable-event/receptionApprovals/T-RECEPTION-0001").set({
+    status: "approved", requestedByUid: "trusted-owner-uid",
+  });
+  await assert.rejects(call("recordReception", "trusted-owner-uid", {
+    record: { ...record, timestamp: "2026-10-24T23:59:59.999Z" },
+  }), error => error.code === "failed-precondition");
+  assert.equal((await db.doc("events/callable-event/tickets/callable-ticket").get()).get("currentStatus"), "unused");
+  assert.equal((await db.doc("events/callable-event/receptionRecords/callable-record").get()).exists, false);
+  await call("recordReception", "trusted-owner-uid", { record });
+  await call("recordReception", "trusted-owner-uid", { record });
+  const ticket = await db.doc("events/callable-event/tickets/callable-ticket").get();
+  assert.equal(ticket.get("currentStatus"), "inside");
+  assert.equal(ticket.get("lastReceptionRecordId"), "callable-record");
+  assert.equal((await db.collection("events/callable-event/receptionRecords").get()).size, 1);
+});
+
+const managementCalls = {
+  revokeTerminalReception: { targetTerminalId: "T-RECEPTION-0001" },
+  deleteManagedTerminal: { targetTerminalId: "T-RECEPTION-0001" },
+  setTerminalSubAdmin: { targetTerminalId: "T-TARGET-MANAGER", enabled: true },
+  updateManagedTerminalName: { terminalId: "T-MANAGEMENT-0001", name: "Updated manager" },
+  setManagedTerminalMode: { targetTerminalId: "T-RECEPTION-0001", mode: "入口受付" },
+};
+for (const [name, input] of Object.entries(managementCalls)) {
+  test(`${name} requires the caller's current installation grant`, async () => {
+    const installation = db.doc("terminalInstallations/manager-owner-uid");
+    for (const grant of [null,
+      { authUid: "manager-owner-uid", terminalId: "T-MANAGEMENT-0001", approved: false },
+      { authUid: "manager-owner-uid", terminalId: "T-OTHER-MANAGER", approved: true },
+      { authUid: "another-uid", terminalId: "T-MANAGEMENT-0001", approved: true }]) {
+      await seedManager();
+      await seedReceptionTerminal();
+      await db.doc("terminals/T-TARGET-MANAGER").set({
+        terminalId: "T-TARGET-MANAGER", approved: true, managementApproved: true,
+        role: "management", admin: false, subAdmin: false,
+      });
+      await db.doc("terminalOwners/T-TARGET-MANAGER").set({ ownerUid: "target-owner", enabled: true });
+      await db.doc("terminalInstallations/target-owner").set({
+        terminalId: "T-TARGET-MANAGER", authUid: "target-owner", approved: true,
+      });
+      if (grant) await installation.set(grant); else await installation.delete();
+      await assert.rejects(call(name, "manager-owner-uid", { managerTerminalId: "T-MANAGEMENT-0001", ...input }),
+        error => error.code === "permission-denied");
+    }
+    await seedManager();
+    await call(name, "manager-owner-uid", { managerTerminalId: "T-MANAGEMENT-0001", ...input });
+  });
 }
 async function call(name, uid, data) {
   const callable = functions[name];
@@ -73,6 +156,48 @@ test("expired approvals cannot create installation grants", async () => {
   await assert.rejects(call("completeTerminalHandoff", "new-installation-uid", { requestId: "manual-expired-request" }));
   assert.equal((await db.doc("terminalInstallations/new-installation-uid").get()).exists, false);
 });
+
+for (const format of ["ISO", "Timestamp", "invalid", "missing"]) {
+  test(`a ${format} release marker prevents replaying an older handoff approval`, async () => {
+    await seedReceptionTerminal();
+    const requestId = "pre-release-approved-request";
+    const now = Date.now();
+    await db.doc("terminalHandoffRequests/" + requestId).set({
+      terminalId: "T-RECEPTION-0001", requesterUid: "released-installation", status: "approved",
+      receptionApprovalVersion: 0, createdAt: Timestamp.fromMillis(now - 2000),
+      expiresAt: Timestamp.fromMillis(now + 60000), decidedByUid: "trusted-owner-uid",
+    });
+    const installation = {
+      terminalId: "T-RECEPTION-0001", authUid: "released-installation", approved: false,
+    };
+    if (format !== "missing") installation.releasedAt = format === "Timestamp"
+      ? Timestamp.fromMillis(now - 1000) : format === "ISO" ? new Date(now - 1000).toISOString() : "invalid";
+    await db.doc("terminalInstallations/released-installation").set(installation);
+    await assert.rejects(call("completeTerminalHandoff", "released-installation", { requestId }),
+      error => error.code === "failed-precondition");
+    assert.equal((await db.doc("terminalInstallations/released-installation").get()).get("approved"), false);
+    assert.equal((await db.doc("terminalHandoffRequests/" + requestId).get()).get("status"), "approved");
+  });
+}
+
+for (const format of ["ISO", "Timestamp"]) {
+  test(`a new handoff approved after a ${format} release remains usable`, async () => {
+    await seedReceptionTerminal();
+    const requestId = "post-release-approved-request";
+    const now = Date.now();
+    await db.doc("terminalHandoffRequests/" + requestId).set({
+      terminalId: "T-RECEPTION-0001", requesterUid: "released-installation", status: "approved",
+      receptionApprovalVersion: 0, createdAt: Timestamp.fromMillis(now - 1000),
+      expiresAt: Timestamp.fromMillis(now + 60000), decidedByUid: "trusted-owner-uid",
+    });
+    await db.doc("terminalInstallations/released-installation").set({
+      terminalId: "T-RECEPTION-0001", authUid: "released-installation", approved: false,
+      releasedAt: format === "Timestamp" ? Timestamp.fromMillis(now - 2000) : new Date(now - 2000).toISOString(),
+    });
+    await call("completeTerminalHandoff", "released-installation", { requestId });
+    assert.equal((await db.doc("terminalInstallations/released-installation").get()).get("approved"), true);
+  });
+}
 
 test("reception revocation invalidates an already approved handoff", async () => {
   await seedManager();

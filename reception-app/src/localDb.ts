@@ -4,6 +4,7 @@ import type {
   SyncQueueItem,
   Ticket,
 } from "@qr-ticket-system/shared";
+import {isBeforeEventStart} from '../../shared/src/receptionTiming';
 
 const DB_NAME = "qr-ticket-reception";
 const DB_VERSION = 8;
@@ -86,7 +87,28 @@ export async function saveLocalEvent(data: LocalEventData): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(STORES.event, "readwrite");
-      transaction.objectStore(STORES.event).put(data);
+      const store = transaction.objectStore(STORES.event);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const events = request.result as LocalEventData[];
+        const current = events[0];
+        // Metadata is an update to the active inventory, never a way to restore
+        // an event removed or replaced while a network read was outstanding.
+        if (events.length !== 1 || current.event.eventId !== data.event.eventId ||
+            current.terminalId !== data.terminalId || current.authenticatedAt !== data.authenticatedAt) {
+          reject(new Error("LOCAL_EVENT_CHANGED"));
+          transaction.abort();
+          return;
+        }
+        if (current.event.dataVersion > data.event.dataVersion) {
+          reject(new Error("LOCAL_EVENT_VERSION_CHANGED"));
+          transaction.abort();
+          return;
+        }
+        // A metadata poll may have started before a scan added a newly issued
+        // ticket. Keep the inventory counters committed by that scan.
+        store.put({...data, ticketCount: current.ticketCount, dataReady: current.dataReady});
+      };
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("イベントデータを保存できませんでした"));
@@ -171,8 +193,12 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
         const sequences = new Map(pendingQueue.map(item => [item.recordId, item.sequence]));
         // Queue entries point to records; read them in this same transaction.
         const pendingRecords = new Map<string, {record: ReceptionRecord; sequence?: number}>();
+        let hasOtherEventRecords = false;
         let remaining = pendingIds.size;
         const storeInventory = () => {
+          if (hasOtherEventRecords) {
+            abort("LOCAL_EVENT_PENDING_SYNC");return;
+          }
           const current=(currentEventRequest.result as LocalEventData[])[0];
           if(current?.event.eventId===eventId && current.event.dataVersion>readyEvent.event.dataVersion){
             abort("LOCAL_EVENT_VERSION_CHANGED");return;
@@ -182,10 +208,11 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           eventStore.put(readyEvent);
           for (const ticket of tickets) {
             const pending = pendingRecords.get(ticket.ticketId)?.record;
+            const normalized = normalizePreopeningTicket(ticket, readyEvent);
             ticketStore.put(pending
-              ? {...ticket, currentStatus: pending.type === "exit" ? "exited" : "inside",
+              ? {...normalized, currentStatus: pending.type === "exit" ? "exited" : "inside",
                 updatedAt: pending.timestamp}
-              : ticket);
+              : normalized);
           }
           // Verify within the same transaction. A later refresh in another tab
           // must never make this refresh delete that tab's committed inventory.
@@ -206,7 +233,9 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           const request = transaction.objectStore(STORES.receptionRecords).get(recordId);
           request.onsuccess = () => {
             const record = request.result as ReceptionRecord | undefined;
-            if (record?.eventId === eventId) {
+            if (!record || record.eventId !== eventId) {
+              hasOtherEventRecords = true;
+            } else if (!isBeforeEventStart(readyEvent.event, record.timestamp)) {
               const previous = pendingRecords.get(record.ticketId);
               const sequence = sequences.get(recordId);
               const newer = !previous || (sequence !== undefined
@@ -276,31 +305,55 @@ export async function replaceTickets(tickets: Ticket[]): Promise<void> {
 
 export async function getTicket(ticketId: string): Promise<Ticket | null> {
   const database = await openDatabase();
+  try {
+    return await new Promise<Ticket | null>((resolve, reject) => {
+      const transaction = database.transaction([STORES.tickets, STORES.event], "readwrite");
+      const store = transaction.objectStore(STORES.tickets);
+      const request = store.get(ticketId);
+      let ticket: Ticket | null = null;
+      request.onsuccess = () => {
+        const saved = request.result as Ticket | undefined;
+        if (!saved) return;
+        ticket = saved;
+        const eventRequest = transaction.objectStore(STORES.event).get(saved.eventId);
+        eventRequest.onsuccess = () => {
+          const event = eventRequest.result as LocalEventData | undefined;
+          if (!event) return;
+          ticket = normalizePreopeningTicket(saved, event);
+          if (ticket !== saved) store.put(ticket);
+        };
+      };
+      transaction.oncomplete = () => resolve(ticket);
+      transaction.onerror = () => reject(transaction.error ?? new Error("チケットデータを読み込めませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("チケットデータの読み込みが中断されました"));
+    });
+  } finally {
+    database.close();
+  }
+}
 
-  const ticket = await new Promise<Ticket | undefined>((resolve, reject) => {
-    const request = database
-      .transaction(STORES.tickets, "readonly")
-      .objectStore(STORES.tickets)
-      .get(ticketId);
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("チケットデータを読み込めませんでした"));
-  });
-
-  database.close();
-  return ticket ?? null;
+function normalizePreopeningTicket(ticket: Ticket, event: LocalEventData): Ticket {
+  return ticket.eventId === event.event.eventId && ticket.currentStatus !== "unused" &&
+    isBeforeEventStart(event.event, ticket.updatedAt)
+    ? {...ticket, currentStatus: "unused"}
+    : ticket;
 }
 
 export async function saveReceptionTransaction(
   ticket: Ticket,
   record: ReceptionRecord,
   expectedLocalTicket?: Ticket | null
-): Promise<void> {
+): Promise<'saved'|'trial'> {
+  if (!record.recordId || !record.eventId || !record.ticketId || !record.terminalId ||
+      record.eventId !== ticket.eventId || record.ticketId !== ticket.ticketId ||
+      !["entry", "exit", "reentry"].includes(record.type) || !Number.isFinite(Date.parse(record.timestamp))) {
+    throw new Error("INVALID_RECEPTION_RECORD");
+  }
   const database = await openDatabase();
 
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<'saved'|'trial'>((resolve, reject) => {
+      let trial=false;
       const transaction = database.transaction(
         [STORES.event, STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
         "readwrite"
@@ -321,11 +374,16 @@ export async function saveReceptionTransaction(
         if(expectedLocalTicket!==undefined && (!saved?.dataReady || saved.event.eventId!==record.eventId)){
           reject(new Error("LOCAL_EVENT_CHANGED"));transaction.abort();return;
         }
+        if(saved&&isBeforeEventStart(saved.event,record.timestamp)){
+          trial=true;
+          return;
+        }
         if(!currentTicket.result && saved){
           transaction.objectStore(STORES.event).put({...saved,ticketCount:saved.ticketCount+1});
         }
-        ticketStore.put(ticket);
-        transaction.objectStore(STORES.receptionRecords).put(record);
+        ticketStore.put({...ticket, currentStatus: record.type === "exit" ? "exited" : "inside", updatedAt: record.timestamp});
+        // Never replace an existing scan if a caller accidentally reuses its ID.
+        transaction.objectStore(STORES.receptionRecords).add(record);
         const queueStore=transaction.objectStore(STORES.syncQueue);
         const existing=queueStore.index("sequence").openCursor(null,"prev");
         existing.onsuccess=()=>{
@@ -334,7 +392,7 @@ export async function saveReceptionTransaction(
         };
       };
 
-      transaction.oncomplete = () => resolve();
+      transaction.oncomplete = () => resolve(trial?'trial':'saved');
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("受付データを保存できませんでした"));
       transaction.onabort = () =>

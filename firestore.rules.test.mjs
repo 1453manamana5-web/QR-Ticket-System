@@ -17,6 +17,45 @@ before(async () => {
 beforeEach(async () => env.clearFirestore());
 after(async () => env.cleanup());
 
+for (const [authority, targetRole, allowed] of [
+  ["ordinary", "reception", false], ["ordinary", "management", false],
+  ["subAdmin", "reception", true], ["subAdmin", "management", false],
+  ["admin", "reception", true], ["admin", "management", true],
+]) {
+  test(`terminal deletion requires administrator authority: ${authority} deleting ${targetRole}`, async () => {
+    await env.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      await setDoc(doc(db, "terminals", "T-DELETE-MANAGER"), {
+        terminalId: "T-DELETE-MANAGER", requestedByUid: "delete-manager", approved: true,
+        role: "management", managementApproved: true, receptionApproved: false,
+        admin: authority === "admin", subAdmin: authority === "subAdmin",
+      });
+      await setDoc(doc(db, "terminalOwners", "T-DELETE-MANAGER"), {
+        terminalId: "T-DELETE-MANAGER", ownerUid: "delete-manager", enabled: true,
+      });
+      await setDoc(doc(db, "terminalInstallations", "delete-manager"), {
+        terminalId: "T-DELETE-MANAGER", authUid: "delete-manager", approved: true,
+      });
+      await setDoc(doc(db, "terminals", "T-DELETE-TARGET"), {
+        terminalId: "T-DELETE-TARGET", requestedByUid: "delete-target", approved: true,
+        role: targetRole, managementApproved: targetRole === "management",
+        receptionApproved: targetRole === "reception", admin: false, subAdmin: false,
+      });
+      await setDoc(doc(db, "terminalOwners", "T-DELETE-TARGET"), {
+        terminalId: "T-DELETE-TARGET", ownerUid: "delete-target", enabled: true,
+      });
+    });
+    const db = env.authenticatedContext("delete-manager").firestore();
+    const batch = writeBatch(db);
+    batch.delete(doc(db, "terminals", "T-DELETE-TARGET"));
+    batch.set(doc(db, "terminalOwners", "T-DELETE-TARGET"), {
+      terminalId: "T-DELETE-TARGET", ownerUid: "delete-target", enabled: false,
+      deletedByUid: "delete-manager", updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    await (allowed ? assertSucceeds(batch.commit()) : assertFails(batch.commit()));
+  });
+}
+
 test("rejects access when unauthenticated", async () => {
   const db = env.unauthenticatedContext().firestore();
   await assertFails(getDoc(doc(db, "events", "event-1")));

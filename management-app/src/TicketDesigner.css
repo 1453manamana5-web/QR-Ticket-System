@@ -173,6 +173,15 @@
   transform: translate(-50%, -50%);
 }
 
+/* Keep fixed ticket artwork out of mobile text auto-enlargement. */
+.ticket-design-card,
+.ticket-qr-design-preview,
+.ticket-print-card,
+.ticket-actual-size-preview {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 .ticket-print-range {
   margin-top: 24px;
   padding: 20px;
@@ -2779,3 +2788,25 @@
 .studio-part-controls input{min-width:0;width:100px;min-height:38px;padding:6px;border:1px solid #dae2ee;border-radius:8px;}
 .studio-part-controls p{font-size:11px;color:#64748b;line-height:1.6;}
 @media screen{.ticket-studio .ticket-design-card{overflow:visible!important;}.studio-panel>header strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.studio-panel>header button{flex-shrink:0;}}
+
+/* Match the dedicated print window when a blocked popup uses window.print(). */
+@media print {
+  .ticket-print-row {
+    display: flex !important;
+    flex-flow: row nowrap !important;
+    align-items: flex-start !important;
+    gap: var(--ticket-print-gap, 4mm) !important;
+    width: max-content !important;
+    max-width: 100% !important;
+    margin: 0 0 var(--ticket-print-gap, 4mm) !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    -webkit-column-break-inside: avoid !important;
+  }
+  .ticket-print-row > .ticket-print-card {
+    display: block !important;
+    flex: 0 0 var(--ticket-print-width, 90mm) !important;
+    margin: 0 !important;
+  }
+  .ticket-actual-size-overlay { display: none !important; }
+}

@@ -4,10 +4,15 @@ export type OfflineEventData={event:Event;settings:ReceptionSettings;tickets:Tic
 type Part={type:'qr-ticket-offline-v1';id:string;index:number;total:number;data:string};
 const maxBytes=2_000_000,maxParts=200;
 const validId=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=160&&!v.includes('/');
+const validDate=(v:unknown):v is string=>{
+  if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;
+  const time=Date.parse(`${v}T00:00:00.000Z`);
+  return Number.isFinite(time)&&new Date(time).toISOString().slice(0,10)===v;
+};
 export function validateOfflineEvent(value:unknown):OfflineEventData{
   const v=value as OfflineEventData;
   if(!v||!v.event||!validId(v.event.eventId)||typeof v.event.eventName!=='string'||v.event.eventName.length>300||
-    typeof v.event.eventDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v.event.eventDate)||!Number.isFinite(Date.parse(v.event.eventDate))||
+    !validDate(v.event.eventDate)||
     !/^([01]\d|2[0-3]):[0-5]\d$/.test(v.event.startTime)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(v.event.endTime)||v.event.startTime>=v.event.endTime||
     !Number.isSafeInteger(v.event.dataVersion)||v.event.dataVersion<1||!['ready','active'].includes(v.event.eventStatus)||
     !v.settings||![v.settings.entryEnabled,v.settings.exitEnabled,v.settings.reentryEnabled].every(x=>typeof x==='boolean')||

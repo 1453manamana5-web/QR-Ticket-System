@@ -220,7 +220,9 @@ export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array
     if(expectedRevision !== undefined && expectedRevision !== (Number(metadata.data.inventoryRevision)||0))throw new Error("TICKET_CHANGED_RETRY");
     if(fields){
       if(!existing.exists())throw new Error("TICKET_NOT_FOUND");
-      const changes:Record<string,unknown> = {updatedAt:ticket.updatedAt};
+      // Reception timing belongs to the status transition. Metadata edits must
+      // not disguise an older trial scan or rewind a newer reception timestamp.
+      const changes:Record<string,unknown> = fields.includes("currentStatus") ? {updatedAt:ticket.updatedAt} : {};
       for(const field of fields)changes[field]=ticket[field];
       tx.update(ref,changes);
     }else tx.set(ref,ticket,{merge:true});
@@ -824,7 +826,7 @@ export async function markReserveTicketsPrinted(eventId:string,ids:string[]):Pro
         if(!snapshot.exists())return;
         const ticket=snapshot.data();
         if(ticket.basicInfo?.reserve===true&&ticket.basicInfo?.reservePrinted!==true){
-          tx.update(refs[index],{'basicInfo.reservePrinted':true,updatedAt:new Date().toISOString()});changed=true;
+          tx.update(refs[index],{'basicInfo.reservePrinted':true});changed=true;
         }
       });
       // ticketCount is the transfer inventory size, including reserve QR data.

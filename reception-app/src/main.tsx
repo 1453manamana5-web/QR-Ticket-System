@@ -21,7 +21,7 @@ async function startApp() {
     await ensureFirebaseAuth();
     if ("serviceWorker" in navigator) {
       const registerOfflineShell = () => {
-        void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+        void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL,updateViaCache:'none' })
           .catch(error => console.warn("受付アプリのオフライン起動を準備できませんでした", error));
       };
       if(document.readyState === "complete") registerOfflineShell();

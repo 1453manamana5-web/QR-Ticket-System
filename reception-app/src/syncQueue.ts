@@ -1,4 +1,5 @@
-import {getPendingSyncItems, getReceptionRecord, markSyncStatus} from "./localDb";
+import {getPendingSyncItems, getReceptionRecord, markSyncStatus,loadLocalEvent} from "./localDb";
+import {isBeforeEventStart} from '../../shared/src/receptionTiming';
 import {syncReceptionRecord} from "./receptionSync";
 
 let running: Promise<void> | null = null;
@@ -13,8 +14,20 @@ export function syncPendingReceptionRecords(): Promise<void> {
       requested = false;
       const blockedTickets = new Set<string>();
       for (const item of await getPendingSyncItems()) {
+        if (!navigator.onLine) break;
         const record = await getReceptionRecord(item.recordId);
-        if (!record) continue;
+        if (!record) {
+          // Keep the queue entry for recovery, but make missing local history
+          // visible instead of silently reporting a permanently pending upload.
+          await markSyncStatus(item.recordId, "failed", item.retryCount + 1);
+          console.error("受付記録が見つからないため同期できませんでした", item.recordId);
+          continue;
+        }
+        const localEvent=await loadLocalEvent();
+        if(localEvent?.event.eventId===record.eventId&&isBeforeEventStart(localEvent.event,record.timestamp)){
+          await markSyncStatus(item.recordId,'synced',item.retryCount);
+          continue;
+        }
         const key = JSON.stringify([record.eventId, record.ticketId]);
         // An exit must never overtake a failed entry for the same ticket.
         if (blockedTickets.has(key)) continue;
@@ -28,6 +41,11 @@ export function syncPendingReceptionRecords(): Promise<void> {
         }
       }
     }
-  })().finally(() => { running = null; });
+  })().finally(() => {
+    running = null;
+    // A new scan can request work after the loop's final condition, before
+    // this completion callback runs. Do not lose that last upload request.
+    if (requested && navigator.onLine) return syncPendingReceptionRecords();
+  });
   return running;
 }

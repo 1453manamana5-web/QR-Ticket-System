@@ -97,7 +97,7 @@ test('print title treats event names as text and prints only once',async()=>{
   const window={open:()=>popup,setTimeout:fn=>fn()};
   const document={querySelector:()=>({cloneNode:()=>({style:{}})})};
   const exports={};
-  new Function('exports','require','localStorage','window','document','alert',ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(exports,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>null}:n==='./LazyQrCode'?{default:()=>null}:{},{getItem:()=>null},window,document,()=>assert.fail('printing failed'));
+  new Function('exports','require','localStorage','window','document','alert',ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(exports,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>null}:n==='qrcode.react'?{QRCodeSVG:props=>React.createElement('svg',props)}:n==='./LazyQrCode'?{default:()=>null}:{},{getItem:()=>null},window,document,()=>assert.fail('printing failed'));
   let renderer;await act(async()=>{renderer=create(React.createElement(exports.default,{eventName:name,tickets:[{id:'1',qrNumber:'1',valid:true,status:'unused'}],qrValue:()=>'',onClose(){}}));});
   const click=async text=>{const button=renderer.root.findAllByType('button').find(n=>n.children.join('')===text);assert.ok(button,text);await act(async()=>button.props.onClick());};
   try{
@@ -109,11 +109,42 @@ test('print title treats event names as text and prints only once',async()=>{
 
 function designerModule(storage,{globals={},detection={},reserve=null}={}){
   const out={};
-  new Function('exports','require','localStorage','window','alert',...Object.keys(globals),ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>reserve}:n==='./LazyQrCode'?{default:()=>null}:n==='./pinkQrMarkerDetection'?detection:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{},...Object.values(globals));
+  new Function('exports','require','localStorage','window','alert',...Object.keys(globals),ts.transpileModule(readFileSync('management-app/src/TicketDesigner.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):n==='./reservePrintStore'?{loadReservePackage:async()=>reserve}:n==='qrcode.react'?{QRCodeSVG:props=>React.createElement('svg',props)}:n==='./LazyQrCode'?{default:()=>null}:n==='./pinkQrMarkerDetection'?detection:{},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{confirm:()=>true},()=>{},...Object.values(globals));
   return out;
 }
 const designTickets=Array.from({length:6},(_,i)=>({id:String(i),qrNumber:String(i+1),valid:true,status:'unused'}));
 const designLabel=node=>node.children.map(child=>typeof child==='string'?child:designLabel(child)).join('');
+
+for(const [editorWidth,printWidthMm,numberSize] of [[320,90,12],[500,60,36],[760,90,60]]){
+  test(`printed number matches editor proportions at ${editorWidth}px / ${printWidthMm}mm / size ${numberSize}`,async()=>{
+    const storage=new Map([['qr-management-ticket-design-id-font-scale',JSON.stringify({title:'Test',titleSize:24,numberSize,printWidthMm,rotations:{number:30}})]]);
+    let resize,disconnected=false;
+    const card={clientWidth:editorWidth,getBoundingClientRect:()=>({width:editorWidth*2,height:300,left:0,top:0})};
+    const module=designerModule(storage,{globals:{ResizeObserver:class{constructor(callback){resize=callback;}observe(){}disconnect(){disconnected=true;}}}});
+    let renderer;await act(async()=>{renderer=create(React.createElement(module.default,{eventId:'font-scale',eventName:'Test',tickets:designTickets,qrValue:t=>t.id,onClose(){}}),{createNodeMock:node=>node.props.className==='ticket-design-card'?card:null});});
+    const printed=()=>renderer.root.findAll(node=>node.props.className==='ticket-print-card')[0];
+    const number=()=>printed().findByProps({className:'ticket-design-number'});
+    const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-10,`${actual} != ${expected}`);
+    try{
+      assert.match(number().props.style.fontSize,/mm$/);
+      close(parseFloat(number().props.style.fontSize)/printWidthMm,numberSize/editorWidth);
+      close(parseFloat(printed().findByProps({className:'ticket-design-title'}).props.style.fontSize)/printWidthMm,24/editorWidth);
+      assert.match(number().props.style.transform,/rotate\(30deg\)/);
+      const before=number().props.style.fontSize;
+      await act(async()=>renderer.root.findByProps({'aria-label':'拡大'}).props.onClick());
+      assert.equal(number().props.style.fontSize,before,'workspace zoom must not change printed font size');
+      await act(async()=>renderer.root.findAllByType('button').find(node=>designLabel(node)==='実寸確認').props.onClick());
+      const actual=renderer.root.findByProps({className:'ticket-actual-size-preview'}).findByProps({className:'ticket-design-number'});
+      close(parseFloat(actual.props.style.fontSize),parseFloat(before)*96/25.4);
+      card.clientWidth=640;await act(async()=>resize());
+      assert.equal(number().props.style.fontSize,before,'resizing the editor must preserve the saved print proportions');
+      const measured=number().props.style.fontSize;
+      card.clientWidth=0;await act(async()=>resize());
+      assert.equal(number().props.style.fontSize,measured,'print styles hiding the editor must keep its last usable width');
+    }finally{await act(async()=>renderer.unmount());}
+    assert.equal(disconnected,true);
+  });
+}
 
 test('designs are isolated by event ID, survive renaming, and migrate named designs without changing another event',async()=>{
   const storage=new Map([['qr-management-ticket-design-id-event-a',JSON.stringify({title:'Design A'})]]),module=designerModule(storage);
@@ -230,7 +261,7 @@ test('reserve preparation selects issuance flags across nonconsecutive batches w
   const module={};const source=readFileSync('management-app/src/ReservePrinting.tsx','utf8').replaceAll('import.meta.env.BASE_URL',JSON.stringify('/management-app/'));
   new Function('exports','require',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(module,n=>n==='react'?React:n==='react/jsx-runtime'?require(n):store);
   const tickets=[{id:'a',qrNumber:'501',valid:true,status:'unused',reserve:true},{id:'b',qrNumber:'502',valid:true,status:'unused'},{id:'c',qrNumber:'701',valid:true,status:'unused',reserve:true}];
-  let renderer;await act(async()=>{renderer=create(React.createElement(module.ReserveConfiguration,{eventId:'test',tickets,build:async ids=>{built=ids;return reservePacket();},onSaved(){}}));});
+  let renderer;await act(async()=>{renderer=create(React.createElement(module.ReserveConfiguration,{eventId:'test',tickets,build:async ids=>{built=ids;return {...reservePacket(),eventId:'test'};},onSaved(){}}));});
   try{
     assert.equal(renderer.root.findAllByProps({'aria-label':'予備の開始番号'}).length,0);
     await act(async()=>renderer.root.findAllByType('button').find(n=>designLabel(n)==='予備のデザインとQRを端末に保存').props.onClick());

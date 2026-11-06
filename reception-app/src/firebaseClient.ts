@@ -35,9 +35,10 @@ export function ensureFirebaseAuth(): Promise<Auth> {
       await auth.authStateReady();
       if (!auth.currentUser) await signInAnonymously(auth);
       return auth;
-    })().catch((error) => {
+    })().finally(() => {
+      // Share only the in-flight restoration/sign-in. A later sign-out or
+      // cross-tab identity change must be checked again on the next operation.
       authReady = undefined;
-      throw error;
     });
   }
   return authReady;

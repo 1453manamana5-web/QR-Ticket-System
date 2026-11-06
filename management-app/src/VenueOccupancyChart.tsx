@@ -14,7 +14,7 @@ export function buildOccupancyPoints(records:readonly ReceptionRecord[]){
   });
 }
 const width=680,height=270,left=52,right=18,top=24,bottom=44;
-const timeLabel=(value:number,seconds=false)=>new Date(value).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",...(seconds?{second:"2-digit"}: {})});
+const timeLabel=(value:number,seconds=false)=>new Date(value).toLocaleTimeString("ja-JP",{timeZone:"Asia/Tokyo",hour:"2-digit",minute:"2-digit",...(seconds?{second:"2-digit"}: {})});
 export default function VenueOccupancyChart({records}:{records:readonly ReceptionRecord[]}){
   const points=useMemo(()=>buildOccupancyPoints(records),[records]);
   const [selected,setSelected]=useState<string|null>(null);

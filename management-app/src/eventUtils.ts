@@ -57,12 +57,12 @@ export function nextStatus(status: Event["eventStatus"]): Event["eventStatus"] {
   return "finished";
 }
 
-export function getAutomaticEventStatus(target: Event): Event["eventStatus"] | null {
-  const startAt = new Date(target.eventDate + "T" + target.startTime + ":00");
-  const endAt = new Date(target.eventDate + "T" + target.endTime + ":00");
-  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
+export function getAutomaticEventStatus(target: Event, now = Date.now()): Event["eventStatus"] | null {
+  // The event timetable is Japan time, just like the reception trial boundary.
+  const startAt = Date.parse(`${target.eventDate}T${target.startTime}:00+09:00`);
+  const endAt = Date.parse(`${target.eventDate}T${target.endTime}:00+09:00`);
+  if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || !Number.isFinite(now) || endAt <= startAt) return null;
 
-  const now = new Date();
   if (now >= endAt && target.eventStatus !== "finalizing" && target.eventStatus !== "finished") return "finalizing";
   if (now >= startAt && (target.eventStatus === "preparing" || target.eventStatus === "ready")) return "active";
   return null;

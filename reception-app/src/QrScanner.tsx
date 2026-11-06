@@ -149,7 +149,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
             scanLocked=true;
             // Serialize acceptance, without waiting for the result animation.
             void Promise.resolve()
-              .then(()=>onResultRef.current(normalizedValue))
+              .then(()=>{if(active)return onResultRef.current(normalizedValue);})
               .catch(error=>console.error("QRコードの受付処理に失敗しました",error))
               .finally(()=>{
                 window.setTimeout(()=>{

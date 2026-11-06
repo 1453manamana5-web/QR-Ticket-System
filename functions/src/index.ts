@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase-admin/app";
-import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, getFirestore, type DocumentSnapshot } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 initializeApp();
@@ -14,6 +14,11 @@ function requireUid(request: { auth?: { uid: string } | null }): string {
     throw new HttpsError("unauthenticated", "ログイン状態を確認してください。");
   }
   return uid;
+}
+
+function approvedInstallation(installation: DocumentSnapshot, uid: string, terminalId: string): boolean {
+  return installation.exists && installation.get("authUid") === uid &&
+    installation.get("terminalId") === terminalId && installation.get("approved") === true;
 }
 
 function readId(value: unknown, field: string): string {
@@ -308,13 +313,15 @@ export const completeTerminalHandoff = onCall(async (call) => {
     }
     // A release invalidates handoff approvals created before the release time.
     // A new owner-approved request created after release remains valid.
-    const releasedAt = installationSnap.get("releasedAt");
-    const requestCreatedAt = requestSnap.get("createdAt");
-    if (installationSnap.exists && installationSnap.get("approved") === false &&
-        releasedAt instanceof Timestamp &&
-        (!(requestCreatedAt instanceof Timestamp) ||
-         releasedAt.toMillis() >= requestCreatedAt.toMillis())) {
-      throw new HttpsError("failed-precondition", "受付登録の解除後に新しく申請してください。");
+    if (installationSnap.exists && installationSnap.get("approved") === false) {
+      const releasedAt = installationSnap.get("releasedAt");
+      // Direct Firestore releases use ISO strings; callable releases use
+      // Timestamps. Both must invalidate requests created before the release.
+      const releasedMillis = releasedAt instanceof Timestamp ? releasedAt.toMillis()
+        : typeof releasedAt === "string" ? Date.parse(releasedAt) : NaN;
+      if (!Number.isFinite(releasedMillis) || releasedMillis >= createdAt.toMillis()) {
+        throw new HttpsError("failed-precondition", "受付登録の解除後に新しく申請してください。");
+      }
     }
 
     tx.set(installationRef, {
@@ -626,17 +633,19 @@ export const revokeTerminalReception = onCall(async (call) => {
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const handoffRequestsQuery = db.collection("terminalHandoffRequests")
     .where("terminalId", "==", targetTerminalId);
   const nextReceptionApprovalVersion = await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap] = await Promise.all([
+    const [managerSnap, ownerSnap, installationSnap, targetSnap] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
+      tx.get(managerInstallationRef),
       tx.get(targetRef),
     ]);
     // Permission and ownership must still be valid at the exact time of revocation.
-    if (!managerSnap.exists || !ownerSnap.exists ||
+    if (!managerSnap.exists || !ownerSnap.exists || !approvedInstallation(installationSnap, uid, managerTerminalId) ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
         managerSnap.get("approved") !== true ||
         managerSnap.get("managementApproved") !== true ||
@@ -700,18 +709,20 @@ export const deleteManagedTerminal = onCall(async (call) => {
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   const deleted = await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+    const [managerSnap, ownerSnap, installationSnap, targetSnap, targetOwnerSnap] = await Promise.all([
       tx.get(managerRef),
       tx.get(managerOwnerRef),
+      tx.get(managerInstallationRef),
       tx.get(targetRef),
       tx.get(targetOwnerRef),
     ]);
     // Recheck the acting manager and target atomically to prevent stale
     // permissions from authorizing a delete after a concurrent revocation.
-    if (!managerSnap.exists || !ownerSnap.exists ||
+    if (!managerSnap.exists || !ownerSnap.exists || !approvedInstallation(installationSnap, uid, managerTerminalId) ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
         managerSnap.get("approved") !== true ||
         managerSnap.get("managementApproved") !== true ||
@@ -1003,13 +1014,14 @@ export const setTerminalSubAdmin = onCall(async (call) => {
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const ownerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const targetOwnerRef = db.doc("terminalOwners/" + targetTerminalId);
   await db.runTransaction(async (tx) => {
-    const [managerSnap, ownerSnap, targetSnap, targetOwnerSnap] = await Promise.all([
-      tx.get(managerRef), tx.get(ownerRef), tx.get(targetRef), tx.get(targetOwnerRef),
+    const [managerSnap, ownerSnap, managerInstallationSnap, targetSnap, targetOwnerSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(ownerRef), tx.get(managerInstallationRef), tx.get(targetRef), tx.get(targetOwnerRef),
     ]);
-    if (!managerSnap.exists || !ownerSnap.exists ||
+    if (!managerSnap.exists || !ownerSnap.exists || !approvedInstallation(managerInstallationSnap, uid, managerTerminalId) ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
         managerSnap.get("admin") !== true || managerSnap.get("approved") !== true ||
         managerSnap.get("managementApproved") !== true ||
@@ -1125,11 +1137,12 @@ export const recordReception = onCall(async (call) => {
   const eventRef = db.doc("events/" + eventId);
   const ticketRef = db.doc("events/" + eventId + "/tickets/" + ticketId);
   const recordRef = db.doc("events/" + eventId + "/receptionRecords/" + recordId);
+  const approvalRef = db.doc("events/" + eventId + "/receptionApprovals/" + terminalId);
 
   await db.runTransaction(async (tx) => {
-    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap, publishedEventsSnap] = await Promise.all([
+    const [installationSnap, terminalSnap, ownerSnap, eventSnap, ticketSnap, recordSnap, approvalSnap, publishedEventsSnap] = await Promise.all([
       tx.get(installationRef), tx.get(terminalRef), tx.get(ownerRef), tx.get(eventRef),
-      tx.get(ticketRef), tx.get(recordRef),
+      tx.get(ticketRef), tx.get(recordRef), tx.get(approvalRef),
       tx.get(db.collection("events").where("receptionTarget", "==", true)),
     ]);
 
@@ -1158,12 +1171,16 @@ export const recordReception = onCall(async (call) => {
     // original ownerUid. The server-issued installation must bind this UID to
     // this terminal, while the trusted owner mapping must remain enabled.
     const ownerEnabled = ownerSnap.exists && ownerSnap.get("enabled") === true;
-    const terminalAllowsReception = terminalSnap.exists &&
-      terminalSnap.get("approved") === true &&
-      (terminalSnap.get("receptionApproved") === true ||
-        (terminalSnap.get("receptionApproved") === undefined && terminalSnap.get("approved") === true)) &&
-      (terminalSnap.get("role") === "reception" || terminalSnap.get("role") === "both");
-    if (!installationMatches || !ownerEnabled || !terminalAllowsReception) {
+    const role = terminalSnap.get("role");
+    const managementOwner = terminalSnap.get("managementApproved") === true &&
+      (role === "management" || role === "both") && ownerSnap.get("ownerUid") === uid;
+    const receptionRole = (role === "reception" || role === "both") &&
+      (terminalSnap.get("receptionApproved") === true || terminalSnap.get("receptionApproved") === undefined);
+    const terminalAllowsReception = terminalSnap.exists && terminalSnap.get("approved") === true &&
+      (managementOwner || receptionRole);
+    const eventApproved = approvalSnap.exists && approvalSnap.get("status") === "approved" &&
+      approvalSnap.get("requestedByUid") === uid;
+    if (!installationMatches || !ownerEnabled || !terminalAllowsReception || !eventApproved) {
       throw new HttpsError("permission-denied", "この端末は受付記録を保存する権限がありません。");
     }
     if (!eventSnap.exists || !ticketSnap.exists ||
@@ -1182,6 +1199,13 @@ export const recordReception = onCall(async (call) => {
       return;
     }
 
+    const eventDate = eventSnap.get("eventDate"), startTime = eventSnap.get("startTime");
+    const start = typeof eventDate === "string" && typeof startTime === "string"
+      ? Date.parse(`${eventDate}T${startTime}:00+09:00`) : NaN;
+    if (Number.isFinite(start) && Date.parse(timestamp) < start) {
+      throw new HttpsError("failed-precondition", "イベント開始前の試験チケットは受付実績に保存できません。");
+    }
+
     const ticket = ticketSnap.data() ?? {};
     if (ticket.valid !== true) {
       throw new HttpsError("failed-precondition", "このチケットは無効です。");
@@ -1196,7 +1220,7 @@ export const recordReception = onCall(async (call) => {
     }
 
     const nextStatus = type === "exit" ? "exited" : "inside";
-    tx.update(ticketRef, { currentStatus: nextStatus, updatedAt: timestamp });
+    tx.update(ticketRef, { currentStatus: nextStatus, updatedAt: timestamp, lastReceptionRecordId: recordId });
     tx.create(recordRef, { recordId, eventId, ticketId, terminalId, type, timestamp });
   });
 
@@ -1335,9 +1359,10 @@ export const updateManagedTerminalName = onCall(async (call) => {
   }
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
   await db.runTransaction(async (tx) => {
-    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
-    if (!terminalSnap.exists || !ownerSnap.exists ||
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef)]);
+    if (!terminalSnap.exists || !ownerSnap.exists || !approvedInstallation(installationSnap, uid, terminalId) ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
         terminalSnap.get("approved") !== true ||
         terminalSnap.get("managementApproved") !== true ||
@@ -1365,13 +1390,14 @@ export const setManagedTerminalMode = onCall(async (call) => {
 
   const managerRef = db.doc("terminals/" + managerTerminalId);
   const managerOwnerRef = db.doc("terminalOwners/" + managerTerminalId);
+  const managerInstallationRef = db.doc("terminalInstallations/" + uid);
   const targetRef = db.doc("terminals/" + targetTerminalId);
   const updatedAt = new Date().toISOString();
   await db.runTransaction(async (tx) => {
-    const [managerSnap, managerOwnerSnap, targetSnap] = await Promise.all([
-      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(targetRef),
+    const [managerSnap, managerOwnerSnap, managerInstallationSnap, targetSnap] = await Promise.all([
+      tx.get(managerRef), tx.get(managerOwnerRef), tx.get(managerInstallationRef), tx.get(targetRef),
     ]);
-    if (!managerSnap.exists || !managerOwnerSnap.exists ||
+    if (!managerSnap.exists || !managerOwnerSnap.exists || !approvedInstallation(managerInstallationSnap, uid, managerTerminalId) ||
         managerOwnerSnap.get("enabled") !== true || managerOwnerSnap.get("ownerUid") !== uid ||
         managerSnap.get("approved") !== true ||
         managerSnap.get("managementApproved") !== true ||

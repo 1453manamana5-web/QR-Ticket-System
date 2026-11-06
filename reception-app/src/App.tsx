@@ -1,12 +1,13 @@
 import {receptionReducer,initialReceptionState,receptionPhase,canReceive,type ReceptionAction,type Registration,type Screen} from "./receptionState";
 import {useCallback, useEffect, useRef, useState, useReducer} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
+import {isBeforeEventStart,productionTicketStates} from '../../shared/src/receptionTiming';
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
 import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance,enableReceptionVoice} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
-import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
+import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,saveLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
 import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,getLatestReceptionTicket,syncReceptionErrorLog} from "./receptionSync";
 
@@ -84,9 +85,12 @@ export default function App(){
   useEffect(()=>prepareReceptionAudio(),[]);
   const [workflow,dispatchWorkflow]=useReducer(receptionReducer,initialReceptionState);
   const workflowRef=useRef(workflow);
+  const scanGenerationRef=useRef(0);
   workflowRef.current=workflow;
   const transition=useCallback((action:ReceptionAction)=>{
-    workflowRef.current=receptionReducer(workflowRef.current,action);
+    const next=receptionReducer(workflowRef.current,action);
+    if(canReceive(workflowRef.current)&&!canReceive(next))++scanGenerationRef.current;
+    workflowRef.current=next;
     dispatchWorkflow(action);
   },[]);
   const screen=workflow.screen;
@@ -169,17 +173,18 @@ export default function App(){
         };
       }catch{return null;}
     };
-    const applyRegistration=(incoming:{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null)=>{
-      // オフライン時にFirebaseのキャッシュが空でも、オンラインで承認済みだった端末は
-      // ローカルの承認記録を使う。オンラインで承認取消が確認できた場合は従来どおり停止する。
-      const value=(!navigator.onLine&&!incoming?.approved)?readCachedApproval():incoming;
+    const applyRegistration=(incoming:{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null,useCachedApproval=!navigator.onLine)=>{
+      // Wi-Fi接続中でもFirebaseに届かない場合は保存済みの承認を使う。
+      // 明示的な権限拒否・承認取消ではキャッシュに戻さず停止する。
+      const value=(useCachedApproval&&!incoming?.approved)?readCachedApproval():incoming;
       const approved=value?.approved===true;
       if(registrationActiveRef.current!==approved || workflowRef.current.registration?.eventId!==value?.eventId)++registrationVersionRef.current;
       registrationActiveRef.current=approved;
       setTerminalRegistration(value);
       if(value?.name)setTerminalRegistrationName(value.name);
       if(value?.approved){
-        if(navigator.onLine){
+        setOnline(value.status==="offline"?false:navigator.onLine);
+        if(navigator.onLine&&value.status!=="offline"){
           try{
             localStorage.setItem("qr-ticket-reception-approved",JSON.stringify({
               approved:true,
@@ -197,7 +202,7 @@ export default function App(){
       }else{
         pendingRemoteModeRef.current=null;
         receptionAllowedRef.current=false;
-        if(navigator.onLine){
+        if(navigator.onLine||!useCachedApproval){
           try{localStorage.removeItem("qr-ticket-reception-approved");}catch{}
         }
         // オフライン時は、未取得を「承認取消」と誤認して保存済みデータを消さない。
@@ -211,14 +216,19 @@ export default function App(){
         }
       }
     };
+    const handleRegistrationError=(reason:unknown)=>{
+      console.error("受付端末登録状態の購読に失敗しました",reason);
+      const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
+      if(code==="permission-denied")applyRegistration(null,false);
+      else if(!navigator.onLine||code==="unavailable"||code==="deadline-exceeded"||code==="auth/network-request-failed"){
+        setOnline(false);
+        applyRegistration(null,true);
+      }
+    };
     try{
-      unsubscribe=subscribeTerminalRegistration(applyRegistration,reason=>{
-        console.error("受付端末登録状態の購読に失敗しました",reason);
-        if(!navigator.onLine || (typeof reason==="object" && reason!==null && "code" in reason && reason.code==="permission-denied"))applyRegistration(null);
-      });
+      unsubscribe=subscribeTerminalRegistration(applyRegistration,handleRegistrationError);
     }catch(reason){
-      console.error("受付端末登録状態の購読開始に失敗しました",reason);
-      if(!navigator.onLine)applyRegistration(null);
+      handleRegistrationError(reason);
     }
     const handleOffline=()=>applyRegistration(null);
     window.addEventListener("offline",handleOffline);
@@ -289,6 +299,8 @@ export default function App(){
         setError("管理アプリで受付対象イベントを公開してください。");
       }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
         setError("受付対象の公開イベントが複数あります。管理アプリで1件にしてください。");
+      }else if(code==="LOCAL_EVENT_PENDING_SYNC"){
+        setError("未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。");
       }else{
         setError("通信でイベントデータを受信できませんでした。通信状態と管理アプリの公開設定を確認してください。");
       }
@@ -373,14 +385,21 @@ export default function App(){
           existing.event.eventId===payload.eventId &&
           existing.event.dataVersion===payload.dataVersion
         ){
-          cachedEvent=existing;
+          // The opening schedule can change without a new ticket inventory.
+          // Keep it current while preserving the local ticket states and queue.
+          const updated=payload.event?{...existing,event:payload.event}:existing;
+          if(payload.event&&JSON.stringify(existing.event)!==JSON.stringify(payload.event)){
+            await saveLocalEvent(updated);
+            if(cancelled||!registrationIsCurrent(registrationVersion))return;
+          }
+          cachedEvent=updated;
+          setLocalEvent(updated);
           if(screenRef.current==="reception")return;
-          setLocalEvent(existing);
           setAuthPayload({
             type:"qr-ticket-event-auth",
-            eventId:existing.event.eventId,
-            eventName:existing.event.eventName,
-            dataVersion:existing.event.dataVersion,
+            eventId:updated.event.eventId,
+            eventName:updated.event.eventName,
+            dataVersion:updated.event.dataVersion,
             authToken:payload.authToken
           });
           setError("");
@@ -415,7 +434,7 @@ export default function App(){
         }
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
-        if(cancelled)return;
+        if(cancelled||!registrationIsCurrent(registrationVersion))return;
         const code=reason instanceof Error?reason.message:"";
         if(code==="NO_PUBLISHED_EVENT"){
           // Keep the durable queue even after publication ends.
@@ -426,6 +445,8 @@ export default function App(){
           setResult(null);
           setScreen("auth");
           setError("受付対象の公開イベントが見つかりません。管理アプリの公開設定を確認して、イベントデータを受信してください。");
+        }else if(code==="LOCAL_EVENT_PENDING_SYNC"){
+          setError("未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。");
         }else if(code==="MULTIPLE_PUBLISHED_EVENTS"){
           setError("受付対象の公開イベントが複数あります。管理アプリで受付対象を1件だけにしてください。");
         }else if(code==="INVALID_PUBLISHED_EVENT"){
@@ -448,7 +469,7 @@ export default function App(){
       window.clearInterval(interval);
       window.removeEventListener("online",handleOnline);
     };
-  },[terminalRegistration?.approved,requireApprovalForNewEvent]);
+  },[terminalRegistration?.approved,terminalRegistration?.eventId,requireApprovalForNewEvent]);
 
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
@@ -578,13 +599,14 @@ export default function App(){
   const handleAuthScan=useCallback(async(text:string)=>{
     let offline=false;try{offline=JSON.parse(text)?.type==="qr-ticket-offline-v1";}catch{}
     if(offline){
+      const version=registrationVersionRef.current,scanVersion=offlineScanVersion.current;
+      const scanIsCurrent=()=>registrationIsCurrent(version)&&screenRef.current==="authScan"&&scanVersion===offlineScanVersion.current;
       try{
-        const version=registrationVersionRef.current,scanVersion=offlineScanVersion.current;
         const data=await offlineCollector.current.add(text);
-        if(!registrationIsCurrent(version)||screenRef.current!=="authScan"||scanVersion!==offlineScanVersion.current)return;
+        if(!scanIsCurrent())return;
         setOfflineProgress({...offlineCollector.current.progress});setError("");
         if(data){setOfflineData(data);setAuthPayload({type:"qr-ticket-event-auth",eventId:data.event.eventId,eventName:data.event.eventName,dataVersion:data.event.dataVersion,authToken:"offline"});setScreen("confirm");}
-      }catch(e){setOfflineProgress({...offlineCollector.current.progress});setError(e instanceof Error?e.message:"オフラインQRを読み取れませんでした。");}
+      }catch(e){if(!scanIsCurrent())return;setOfflineProgress({...offlineCollector.current.progress});setError(e instanceof Error?e.message:"オフラインQRを読み取れませんでした。");}
       return;
     }
     const payload=parseAuthPayload(text);
@@ -622,7 +644,9 @@ export default function App(){
       setAuthCodeMode(false);
     }catch(reason){
       if(!registrationIsCurrent(registrationVersion))return;
-      setError(offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
+      setError(reason instanceof Error&&reason.message==="LOCAL_EVENT_PENDING_SYNC"
+        ?"未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。"
+        :offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
     }finally{eventLoadingRef.current=false;setBusy(false);}
   };
@@ -649,6 +673,18 @@ export default function App(){
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
     if(!localEvent||busy||!receptionAllowedRef.current||!canReceive(workflowRef.current)||scanProcessingRef.current)return;
+    const registrationVersion=registrationVersionRef.current;
+    const scanGeneration=scanGenerationRef.current;
+    const scanIsCurrent=()=>registrationIsCurrent(registrationVersion)&&
+      scanGeneration===scanGenerationRef.current&&receptionAllowedRef.current&&
+      canReceive(workflowRef.current)&&!eventAuthenticationRequiredRef.current&&
+      workflowRef.current.localEvent?.event.eventId===localEvent.event.eventId&&
+      workflowRef.current.localEvent?.terminalId===localEvent.terminalId;
+    const capturedAt=new Date().toISOString();
+    const showTrial=()=>{
+      setResult({kind:'success',title:'試験チケット',detail:'イベント開始前のため、来場者数・入退場記録には反映しません。'});
+      announceReception(mode==='entry'?'entry':'exit');
+    };
     let ticketId=rawText.trim();
     let qrEventId:string|null=null;
     if(!ticketId)return;
@@ -686,6 +722,7 @@ export default function App(){
         return;
       }
       const expectedLocalTicket=await getTicket(ticketId);
+      if(!scanIsCurrent())return;
       let ticket=expectedLocalTicket;
       if(navigator.onLine){
         void syncPendingRecords();
@@ -699,12 +736,12 @@ export default function App(){
           try{ticket=await getLatestReceptionTicket(localEvent.event.eventId,ticketId);}
           catch(reason){
             const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
-            if(code!=="unavailable"&&code!=="deadline-exceeded")throw reason;
+            if(code!=="unavailable"&&code!=="deadline-exceeded"&&code!=="auth/network-request-failed")throw reason;
             // A temporary network outage may still use the downloaded inventory.
           }
         }
       }
-      if(!receptionAllowedRef.current||eventAuthenticationRequiredRef.current)return;
+      if(!scanIsCurrent())return;
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
         void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
         setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});
@@ -716,7 +753,16 @@ export default function App(){
         return;
       }
 
-      const receptionType=getReceptionType(mode,ticket.currentStatus,localEvent.settings);
+      const currentEvent=workflowRef.current.localEvent!;
+      // Older versions may have consumed this ticket during a pre-opening test.
+      // Apply the same correction to server reads as to the offline inventory.
+      ticket=productionTicketStates([ticket],currentEvent.event)[0];
+      if(isBeforeEventStart(currentEvent.event,capturedAt)){
+        showTrial();
+        return;
+      }
+
+      const receptionType=getReceptionType(mode,ticket.currentStatus,currentEvent.settings);
       if(!receptionType){
         const detail=mode==="entry"
           ?ticket.currentStatus==="inside"?"このチケットはすでに入場しています。":"このチケットは受付できません。"
@@ -727,7 +773,7 @@ export default function App(){
       }
 
       const nextStatus=receptionType==="exit"?"exited":"inside";
-      const now=new Date().toISOString();
+      const now=capturedAt;
       const updatedTicket:Ticket={...ticket,currentStatus:nextStatus,updatedAt:now};
       const record:ReceptionRecord={
         recordId:crypto.randomUUID(),
@@ -738,7 +784,12 @@ export default function App(){
         terminalId:localEvent.terminalId
       };
 
-      await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket);
+      const saved=await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket);
+      if(!scanIsCurrent())return;
+      if(saved==='trial'){
+        showTrial();
+        return;
+      }
       void syncPendingRecords();
       setResult({
         kind:"success",
@@ -747,6 +798,7 @@ export default function App(){
       });
       announceReception(receptionType);
     }catch(reason){
+      if(!scanIsCurrent())return;
       console.error("受付処理に失敗しました",reason);
       void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed");
       setResult({
@@ -759,7 +811,7 @@ export default function App(){
       setBusy(false);
       const nextMode=pendingRemoteModeRef.current;
       pendingRemoteModeRef.current=null;
-      if(nextMode && registrationActiveRef.current && !eventAuthenticationRequiredRef.current){setMode(nextMode);setResult(null);}
+      if(nextMode&&registrationIsCurrent(registrationVersion)&&!eventAuthenticationRequiredRef.current&&!workflowRef.current.remoteStopped){setMode(nextMode);setResult(null);}
       // カメラは連続稼働するため、受付のたびに再生成しない。
     }
   },[localEvent,mode,busy,remoteStopped,syncPendingRecords]);
@@ -1076,6 +1128,7 @@ export default function App(){
   const entry=mode==="entry";
   const eventName=localEvent?.event.eventName??"イベント";
   const receptionClass=result?.kind==="success"?"ticket-success":result?.kind==="error"?"error":"waiting";
+  const trialResult=result?.kind==="success"&&result.title==="試験チケット";
 
   return <div className={`entry-reception-page ${receptionClass} reception-mode-${mode}`}>
     <div className="entry-background-circle entry-background-circle-one" aria-hidden="true"/>
@@ -1170,20 +1223,20 @@ export default function App(){
               </svg>
             </div>
             <span className={entry ? "entry-result-eyebrow" : "exit-result-eyebrow"}>
-              {entry ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}
+              {trialResult ? "TEST TICKET" : entry ? "ADMISSION COMPLETE" : "EXIT COMPLETE"}
             </span>
             <h2 className={entry ? "entry-ticket-success-title" : "exit-ticket-success-title"}>
-              {entry ? (result.title.includes("再入場") ? "再入場OK" : "入場OK") : "退出OK"}
+              {trialResult ? "試験チケット" : entry ? (result.title.includes("再入場") ? "再入場OK" : "入場OK") : "退出OK"}
             </h2>
-            {entry ? (
+            {trialResult ? <p className="entry-result-secondary">{result.detail}</p> : entry ? (
               <p className="entry-ticket-success-message">{result.title}</p>
             ) : (
               <p className="exit-thank-you-message">御来場いただきありがとうございました</p>
             )}
-            <p className={entry ? "entry-result-number" : "exit-result-number"}>
+            {!trialResult&&<p className={entry ? "entry-result-number" : "exit-result-number"}>
               <span>TICKET</span>{result.detail}
-            </p>
-            {!entry && <p className="exit-result-secondary">{result.title}</p>}
+            </p>}
+            {!entry&&!trialResult && <p className="exit-result-secondary">{result.title}</p>}
             <div className={entry ? "entry-result-return" : "exit-result-return"} aria-hidden="true">
               <span>次の読み取り画面へ戻ります</span>
               <div className={entry ? "entry-result-return-track" : "exit-result-return-track"}><span/></div>

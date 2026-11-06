@@ -18,7 +18,7 @@ export function receptionDataCollected(terminals: ReceptionTerminalState[], even
     (terminal.receptionEventId === eventId && terminal.receptionMode !== undefined)
   )).every(terminal => {
     const reported = terminal.receptionReportedAt;
-    const reportedAt = typeof reported === "string" ? Date.parse(reported) : reported?.toMillis();
+    const reportedAt = typeof reported === "string" ? Date.parse(reported) : typeof reported?.toMillis === "function" ? reported.toMillis() : NaN;
     const age = now - (reportedAt ?? NaN);
     return terminal.status === "online" && Number.isFinite(age) && age >= -5000 && age <= 30000 &&
       terminal.syncPendingCount === 0 && terminal.receptionMode === "stopped" &&
@@ -36,7 +36,8 @@ export function csvCell(value: unknown): string {
   return '"'+text.replace(/"/g,'""')+'"';
 }
 
-/** Prepared reserve QR data is inventory, not an issued paper ticket. */
-export function isCountedTicket(ticket:{ticketId:string;basicInfo:Record<string,unknown>},confirmed:readonly string[]=[],reserved:readonly string[]=[]){
-  return (ticket.basicInfo.reserve!==true&&!reserved.includes(ticket.ticketId))||ticket.basicInfo.reservePrinted===true||confirmed.includes(ticket.ticketId);
+/** A real admission establishes issuance even before print confirmation syncs. */
+export function isCountedTicket(ticket:{ticketId:string;basicInfo:Record<string,unknown>;currentStatus?:string},confirmed:readonly string[]=[],reserved:readonly string[]=[]){
+  return ticket.currentStatus==='inside'||ticket.currentStatus==='exited'||
+    (ticket.basicInfo.reserve!==true&&!reserved.includes(ticket.ticketId))||ticket.basicInfo.reservePrinted===true||confirmed.includes(ticket.ticketId);
 }

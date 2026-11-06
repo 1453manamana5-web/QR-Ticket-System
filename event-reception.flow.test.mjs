@@ -50,6 +50,7 @@ function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {},
   // rejects plain objects created with another vm context's Object prototype.
   new Function("exports", "require", "indexedDB", "crypto", "localStorage", "navigator", compiled)(
     exports, name => {
+      if (name === "../../shared/src/receptionTiming") return loadClientModule("./shared/src/receptionTiming.ts", db, uid, terminalId);
       if (!(name in dependencies)) throw Error("Unexpected module " + name);
       return dependencies[name];
     },
@@ -217,8 +218,36 @@ test("aborted inventory metadata transaction cannot leave event and bundle on di
 test("download rejects an incomplete ticket inventory instead of marking local data ready", async () => {
   const c = clients();
   const bundle = await createPublished(c);
+  await updateDoc(doc(c.managerDb, "events", bundle.event.eventId), { ticketCount: 2 });
   await updateDoc(doc(c.managerDb, "eventBundles", bundle.authToken), { ticketCount: 2 });
   await assert.rejects(c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION"), /EVENT_TICKET_COUNT_MISMATCH/);
+});
+
+test("restoring a legacy preopening trial permits the first real entry and preserves trial history", async () => {
+  const c = clients();
+  await createPublished(c);
+  const oldRecord = {
+    recordId: "legacy-trial", eventId: "flow-event", ticketId: "ticket-1",
+    terminalId: "T-FLOW-RECEPTION", type: "entry", timestamp: "2026-10-24T23:59:59.999Z",
+  };
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await updateDoc(doc(db, "events", "flow-event", "tickets", "ticket-1"), {
+      currentStatus: "inside", updatedAt: oldRecord.timestamp, lastReceptionRecordId: oldRecord.recordId,
+    });
+    await setDoc(doc(db, "events", "flow-event", "receptionRecords", oldRecord.recordId), oldRecord);
+  });
+  const restored = await c.publisher.loadPublishedEventBundle("flow-event");
+  assert.equal(restored.tickets[0].currentStatus, "unused");
+  const downloaded = await c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION");
+  assert.equal(downloaded.tickets[0].currentStatus, "unused");
+  const realRecord = { ...oldRecord, recordId: "first-real-entry", timestamp: "2026-10-25T00:00:00.000Z" };
+  await c.reception.syncReceptionRecord(realRecord);
+  const ticket = (await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data();
+  assert.equal(ticket.currentStatus, "inside");
+  assert.equal(ticket.lastReceptionRecordId, realRecord.recordId);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "receptionRecords", oldRecord.recordId))).exists(), true);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 2);
 });
 
 test("stale publication cannot roll back a status changed by another manager", async () => {
@@ -487,9 +516,11 @@ test("manager field edits preserve a newer reception and cannot resurrect delete
   await c.management.saveTicket("flow-event", {...stale,valid:false}, ["valid"]);
   let current=(await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data();
   assert.equal(current.currentStatus,"inside");assert.equal(current.valid,false);
+  assert.equal(current.updatedAt,"2026-10-25T01:00:00.000Z");
   await c.management.saveTicket("flow-event", {...stale,basicInfo:{ticketNumber:42}}, ["basicInfo"]);
   current=(await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data();
   assert.equal(current.currentStatus,"inside");assert.equal(current.valid,false);assert.equal(current.basicInfo.ticketNumber,42);
+  assert.equal(current.updatedAt,"2026-10-25T01:00:00.000Z");
   await c.management.deleteTicket("flow-event","ticket-1");
   await assert.rejects(c.management.saveTicket("flow-event",stale,["valid"]));
   assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).exists(),false);

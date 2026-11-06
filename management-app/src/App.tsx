@@ -5,6 +5,7 @@ import OfflineEventTransfer from "./OfflineEventTransfer";
 import {SurfacePresence,TicketZoomSurface,type TicketZoomOrigin} from './SurfaceMotion';
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
+import {productionReceptionRecords,productionTicketStates} from '../../shared/src/receptionTiming';
 import * as livePublisher from "./eventPublisher";
 import type {PublishedEventBundle} from "./eventPublisher";
 import {createGuidePractice} from "./guidePractice";
@@ -26,6 +27,7 @@ type AnalysisRecord = {
   exited: number;
   savedAt: string;
 };
+const japanHour = (timestamp: number) => new Date(timestamp + 9 * 60 * 60 * 1000).getUTCHours();
 
 function loadAnalysisHistory(storage:Pick<Storage,"getItem">=localStorage): AnalysisRecord[] {
   try {
@@ -224,7 +226,8 @@ export default function App({practice=false}:AppProps={}) {
   const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const [rawReceptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const receptionRecords=useMemo(()=>practice?rawReceptionRecords:productionReceptionRecords(rawReceptionRecords,event),[practice,rawReceptionRecords,event.eventId,event.eventDate,event.startTime]);
   const [receptionErrors, setReceptionErrors] = useState<Awaited<ReturnType<typeof loadReceptionErrors>>>([]);
   const [receptionErrorsLoading, setReceptionErrorsLoading] = useState(false);
   const [historicalAnalysisData, setHistoricalAnalysisData] = useState<{
@@ -232,7 +235,9 @@ export default function App({practice=false}:AppProps={}) {
     tickets: Ticket[];
     records: ReceptionRecord[];
     loading: boolean;
-  }>({ eventId: "", tickets: [], records: [], loading: false });
+    loaded: boolean;
+    error: boolean;
+  }>({ eventId: "", tickets: [], records: [], loading: false, loaded: false, error: false });
   const [aiPreviousEventData, setAiPreviousEventData] = useState<{
     eventId: string;
     eventName: string;
@@ -499,7 +504,7 @@ export default function App({practice=false}:AppProps={}) {
   );
   const guide=useManagementGuide(firebaseDeviceId,!practice&&terminalDataHydrated&&ownManagementTerminalApproved,appStorage);
   const reserveLedger=useReservePrintLedger(event.eventId,ownManagementTerminalApproved&&!practice);
-  const countedTickets=useMemo(()=>tickets.filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[tickets,reserveLedger.confirmed,reserveLedger.reserved]);
+  const countedTickets=useMemo(()=>(practice?tickets:productionTicketStates(tickets,event)).filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[practice,tickets,event.eventId,event.eventDate,event.startTime,reserveLedger.confirmed,reserveLedger.reserved]);
   const waitingReserveCount=tickets.length-countedTickets.length;
   const bundleLoadVersion=useRef(0);
   useEffect(() => {
@@ -510,10 +515,14 @@ export default function App({practice=false}:AppProps={}) {
     }
     let cancelled = false;
     setBundle(null);
-    void loadPublishedEventBundle(event.eventId).then(savedBundle => {
-      if (!cancelled && version===bundleLoadVersion.current) setBundle(savedBundle);
-    }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
-    return () => { cancelled = true; };
+    const restoreBundle = () => {
+      void loadPublishedEventBundle(event.eventId).then(savedBundle => {
+        if (!cancelled && version===bundleLoadVersion.current) setBundle(savedBundle);
+      }).catch(reason => console.error("公開済みイベントデータの復元に失敗しました", reason));
+    };
+    restoreBundle();
+    window.addEventListener("online", restoreBundle);
+    return () => { cancelled = true; window.removeEventListener("online", restoreBundle); };
   }, [event.eventId, event.dataVersion, ownManagementTerminalApproved]);
 
 
@@ -602,12 +611,12 @@ export default function App({practice=false}:AppProps={}) {
     if (!ownManagementTerminalApproved || page !== "分析" || !targetEventId || targetEventId === event.eventId) {
       setHistoricalAnalysisData(current => current.eventId === targetEventId && !current.loading
         ? current
-        : { eventId: targetEventId, tickets: [], records: [], loading: false });
+        : { eventId: targetEventId, tickets: [], records: [], loading: false, loaded: false, error: false });
       return;
     }
 
     let cancelled = false;
-    setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: true });
+    setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: true, loaded: false, error: false });
     Promise.all([
       loadEventTickets(targetEventId),
       loadEventReceptionRecords(targetEventId),
@@ -618,11 +627,13 @@ export default function App({practice=false}:AppProps={}) {
         tickets: loadedTickets,
         records: loadedRecords,
         loading: false,
+        loaded: true,
+        error: false,
       });
     }).catch(reason => {
       console.error("Historical event analysis load failed", reason);
       if (!cancelled) {
-        setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: false });
+        setHistoricalAnalysisData({ eventId: targetEventId, tickets: [], records: [], loading: false, loaded: false, error: true });
       }
     });
 
@@ -676,7 +687,6 @@ export default function App({practice=false}:AppProps={}) {
     setEventSettingsReady("");
     setSettings({ entryEnabled: true, exitEnabled: true, reentryEnabled: true });
     setMembers([]);
-    setAnalysisHistory([]);
     setSelectedMemberIds([]);
     setTicketQrModalTicket(null);
     setTicketDesignModalOpen(false);
@@ -689,7 +699,9 @@ export default function App({practice=false}:AppProps={}) {
       }
     }).catch(reason => console.error("Firebase reception settings load failed", reason));
     void loadMembers(event.eventId).then(remote => { if (active) setMembers(remote); }).catch(reason => console.error("Firebase member load failed", reason));
-    void loadAnalysis(event.eventId).then(remote => { if (active) setAnalysisHistory(remote); }).catch(reason => console.error("Firebase analysis load failed", reason));
+    void loadAnalysis(event.eventId).then(remote => {
+      if (active) setAnalysisHistory(current => [...remote, ...current.filter(record => !remote.some(saved => saved.eventId === record.eventId))]);
+    }).catch(reason => console.error("Firebase analysis load failed", reason));
     return () => { active = false; };
   }, [event.eventId, ownManagementTerminalApproved]);
 
@@ -1604,8 +1616,8 @@ export default function App({practice=false}:AppProps={}) {
           eventId: previousEvent.eventId,
           eventName: previousEvent.eventName,
           eventDate: previousEvent.eventDate || "",
-          tickets: previousTickets,
-          records: previousRecords,
+          tickets: practice?previousTickets:productionTicketStates(previousTickets,previousEvent),
+          records: practice?previousRecords:productionReceptionRecords(previousRecords,previousEvent),
           loading: false,
           error: false,
         });
@@ -1624,7 +1636,7 @@ export default function App({practice=false}:AppProps={}) {
     for (const record of receptionRecords) {
       const timestamp = Date.parse(record.timestamp);
       if (!Number.isFinite(timestamp)) continue;
-      const bucket = buckets.get(new Date(timestamp).getHours());
+      const bucket = buckets.get(japanHour(timestamp));
       if (!bucket) continue;
       if (record.type === "entry") bucket.entry++;
       else if (record.type === "exit") bucket.exit++;
@@ -1637,16 +1649,16 @@ export default function App({practice=false}:AppProps={}) {
 
   const aiPeakHour = useMemo(() => [...aiHourlyAnalysis].sort((a, b) => b.entry - a.entry)[0] ?? null, [aiHourlyAnalysis]);
   const aiPreviousSnapshot = useMemo(() => {
-    if (aiPreviousEventData.eventId) {
-      const previousTickets = aiPreviousEventData.tickets;
+    if (aiPreviousEventData.eventId && !aiPreviousEventData.loading && !aiPreviousEventData.error) {
+      const previousTickets = aiPreviousEventData.tickets.filter(ticket=>isCountedTicket(ticket));
       return {
         eventId: aiPreviousEventData.eventId,
         eventName: aiPreviousEventData.eventName,
         eventDate: aiPreviousEventData.eventDate,
         total: previousTickets.length,
-        unused: previousTickets.filter(ticket => ticket.currentStatus === "unused" && ticket.valid).length,
-        inside: previousTickets.filter(ticket => ticket.currentStatus === "inside" && ticket.valid).length,
-        exited: previousTickets.filter(ticket => ticket.currentStatus === "exited" && ticket.valid).length,
+        unused: previousTickets.filter(ticket => ticket.currentStatus === "unused").length,
+        inside: previousTickets.filter(ticket => ticket.currentStatus === "inside").length,
+        exited: previousTickets.filter(ticket => ticket.currentStatus === "exited").length,
         entryRecords: aiPreviousEventData.records.filter(record => record.type === "entry").length,
         exitRecords: aiPreviousEventData.records.filter(record => record.type === "exit").length,
         reentryRecords: aiPreviousEventData.records.filter(record => record.type === "reentry").length,
@@ -1656,7 +1668,7 @@ export default function App({practice=false}:AppProps={}) {
             if (record.type !== "entry") continue;
             const timestamp = Date.parse(record.timestamp);
             if (!Number.isFinite(timestamp)) continue;
-            const hour = new Date(timestamp).getHours();
+            const hour = japanHour(timestamp);
             counts.set(hour, (counts.get(hour) ?? 0) + 1);
           }
           return [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
@@ -1665,7 +1677,7 @@ export default function App({practice=false}:AppProps={}) {
       };
     }
     const snapshot = analysisHistory
-      .filter(item => item.eventId !== event.eventId)
+      .filter(item => item.eventId !== event.eventId && (!aiPreviousEventData.eventId || item.eventId === aiPreviousEventData.eventId))
       .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt))[0];
     return snapshot ? { ...snapshot, entryRecords: null, exitRecords: null, reentryRecords: null, peakHour: null, source: "snapshot" as const } : null;
   }, [aiPreviousEventData, analysisHistory, event.eventId]);
@@ -1741,7 +1753,7 @@ export default function App({practice=false}:AppProps={}) {
     const invalidTimestampCount = receptionRecords.length - validTimedRecords.length;
     const hourly = new Map<number, { entry: number; exit: number; reentry: number }>();
     validTimedRecords.forEach(({ record, timestamp }) => {
-      const hour = new Date(timestamp).getHours();
+      const hour = japanHour(timestamp);
       const bucket = hourly.get(hour) ?? { entry: 0, exit: 0, reentry: 0 };
       if (record.type === "entry") bucket.entry++;
       else if (record.type === "exit") bucket.exit++;
@@ -1775,7 +1787,7 @@ export default function App({practice=false}:AppProps={}) {
             : ""
         ].filter(Boolean).join("\n")
       : "比較対象となる過去イベントのデータはありません。";
-    const generatedAt = new Date().toLocaleString("ja-JP");
+    const generatedAt = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const report = [
       "QR受付管理システム｜イベント終了レポート（確認用下書き）",
       "作成日時：" + generatedAt,
@@ -1802,11 +1814,11 @@ export default function App({practice=false}:AppProps={}) {
       "受付記録合計：" + receptionRecords.length + "件",
       "時刻を集計できた記録：" + validTimedRecords.length + "件",
       "時刻が不正・未設定の記録：" + invalidTimestampCount + "件",
-      "記録上の最初の受付時刻：" + (firstRecord ? firstRecord.toLocaleString("ja-JP") : "集計可能な記録なし"),
-      "記録上の最後の受付時刻：" + (lastRecord ? lastRecord.toLocaleString("ja-JP") : "集計可能な記録なし"),
+      "記録上の最初の受付時刻：" + (firstRecord ? firstRecord.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "集計可能な記録なし"),
+      "記録上の最後の受付時刻：" + (lastRecord ? lastRecord.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "集計可能な記録なし"),
       "入場記録が最も多い時間帯：" + (peak && peak[1].entry > 0 ? String(peak[0]).padStart(2, "0") + "時台（" + peak[1].entry + "件）" : "集計可能な入場記録なし"),
       "",
-      "■ 4. 時間帯別の受付状況（端末のローカル時刻）",
+      "■ 4. 時間帯別の受付状況（日本時間）",
       hourlyRows.length ? hourlyRows.join("\n") : "時間帯別に集計できる記録はありません。",
       "",
       "■ 5. 過去イベントとの比較",
@@ -2042,7 +2054,7 @@ export default function App({practice=false}:AppProps={}) {
             <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
-                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・印刷済み":"未印刷予備"}）</small>}</strong></div>
+                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
                 <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
@@ -2522,11 +2534,13 @@ export default function App({practice=false}:AppProps={}) {
         : eventHistory.find(item => item.eventId === selectedEventId);
       const analysisTickets = isCurrentAnalysis
         ? countedTickets
-        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.tickets.filter(t=>isCountedTicket(t)) : [];
+        : historicalAnalysisData.eventId === selectedEventId && selectedEvent
+          ? (practice ? historicalAnalysisData.tickets : productionTicketStates(historicalAnalysisData.tickets, selectedEvent)).filter(t=>isCountedTicket(t)) : [];
       const analysisReceptionRecords = isCurrentAnalysis
         ? receptionRecords
-        : historicalAnalysisData.eventId === selectedEventId ? historicalAnalysisData.records : [];
-      const analysisLoaded=isCurrentAnalysis||historicalAnalysisData.eventId===selectedEventId;
+        : historicalAnalysisData.eventId === selectedEventId && selectedEvent
+          ? practice ? historicalAnalysisData.records : productionReceptionRecords(historicalAnalysisData.records, selectedEvent) : [];
+      const analysisLoaded=isCurrentAnalysis||(historicalAnalysisData.eventId===selectedEventId&&historicalAnalysisData.loaded&&Boolean(selectedEvent));
       const analysisTicketStats = {
         total: analysisLoaded?analysisTickets.length:selectedRecord?.total??0,
         unused: analysisLoaded
@@ -2640,7 +2654,7 @@ export default function App({practice=false}:AppProps={}) {
                   const counts = hours.map(hour => analysisReceptionRecords.filter(record => {
                     if (record.type !== "entry") return false;
                     const timestamp = Date.parse(record.timestamp);
-                    return Number.isFinite(timestamp) && new Date(timestamp).getHours() === hour;
+                    return Number.isFinite(timestamp) && japanHour(timestamp) === hour;
                   }).length);
                   const max = Math.max(1, ...counts);
                   return <>
@@ -2663,8 +2677,8 @@ export default function App({practice=false}:AppProps={}) {
             <div className="analysis-card-heading"><div><small>TICKET STATUS</small><h3>チケット利用状況</h3></div><span>{total}枚</span></div>
             <div className="analysis-status-list">
               <div className="analysis-status-row"><div><span className="analysis-status-dot unused" /><b>未使用</b><strong>{unused}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(unused / total) * 100}%` : "0%"}} /></div></div>
-              <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{ticketStats.inside}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(inside / total) * 100}%` : "0%"}} /></div></div>
-              <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{ticketStats.exited}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(exited / total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot inside" /><b>入場中</b><strong>{inside}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(inside / total) * 100}%` : "0%"}} /></div></div>
+              <div className="analysis-status-row"><div><span className="analysis-status-dot exited" /><b>退場済み</b><strong>{exited}</strong></div><div className="analysis-progress"><i style={{width: total ? `${(exited / total) * 100}%` : "0%"}} /></div></div>
             </div>
             <div className="analysis-total-box"><span>利用済み</span><strong>{analyzedTotal}枚</strong><small>全チケットの {utilization}%</small></div>
           </section>
@@ -2678,9 +2692,9 @@ export default function App({practice=false}:AppProps={}) {
             <div className="analysis-card-heading"><div><small>REPORT</small><h3>データ操作</h3></div></div>
             <div className="analysis-actions">
               <button className="secondary" onClick={() => saveAnalysisSnapshot(event)}>現在のデータを保存</button>
-              <button className="secondary" onClick={exportAnalysisCsv} disabled={!selectedEventId || historicalAnalysisData.loading}>CSV出力</button>
+              <button className="secondary" onClick={exportAnalysisCsv} disabled={!selectedEventId || historicalAnalysisData.loading || !analysisLoaded}>CSV出力</button>
             </div>
-            <p className="analysis-note">{isCurrentAnalysis ? "受付記録とチケットのリアルタイムデータを集計しています。" : historicalAnalysisData.loading ? "選択したイベントの受付記録とチケットを読み込んでいます。" : "選択したイベントの保存済み受付記録・チケットを集計しています。CSVにはイベント概要と入退場記録が含まれます。"}</p>
+            <p className="analysis-note">{isCurrentAnalysis ? "受付記録とチケットのリアルタイムデータを集計しています。" : historicalAnalysisData.loading ? "選択したイベントの受付記録とチケットを読み込んでいます。" : historicalAnalysisData.error ? "過去データを取得できませんでした。保存済みの集計を表示しています。通信を確認してイベントを選び直してください。" : "選択したイベントの保存済み受付記録・チケットを集計しています。CSVにはイベント概要と入退場記録が含まれます。"}</p>
           </section>
         </div>
       </div>;
@@ -2801,7 +2815,7 @@ export default function App({practice=false}:AppProps={}) {
             {recentReceptionRecords.map((record, index) => <div className="home-activity-row" key={(record.recordId || record.ticketId || "record") + "-" + record.timestamp + "-" + index}>
               <span className={"home-activity-icon " + record.type}>{record.type === "entry" ? "↘" : "↗"}</span>
               <span className="home-activity-info"><strong>{record.type === "entry" ? "入場受付" : "退場受付"}</strong><small>{record.ticketId || "チケットID不明"}</small></span>
-              <time>{new Date(record.timestamp).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</time>
+              <time>{new Date(record.timestamp).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}</time>
             </div>)}
           </div> : <div className="home-empty home-activity-empty"><span className="home-empty-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15l3-4 3 2 5-7"/></svg></span><strong>受付記録はまだありません</strong><p>受付が行われると、最新の記録がここに表示されます。</p></div>}
         </section>
@@ -3057,7 +3071,7 @@ function NavIcon({type}:{type:string}){
               <div className="ai-hour-legend"><span><i className="entry" />入場</span><span><i className="exit" />退場</span><span><i className="reentry" />再入場</span></div>
             </div> : <div className="ai-assistant-welcome">時間帯別の受付記録がまだありません。記録が同期されると、入退場の推移を表示します。</div>}
             <h4>過去イベントとの比較</h4>
-            {aiPreviousEventData.loading ? <div className="ai-assistant-welcome">過去イベントの受付記録を読み込んでいます…</div> : aiPreviousEventData.error ? <div className="ai-assistant-welcome">過去イベントのデータを読み込めませんでした。Firebaseの接続・閲覧権限を確認してください。保存済みの分析結果がある場合は、その数値を表示します。{aiPreviousSnapshot?.source === "snapshot" ? <p>保存済み分析：{aiPreviousSnapshot.eventName}／チケット {aiPreviousSnapshot.total}枚／入場中 {aiPreviousSnapshot.inside}人</p> : null}</div> : aiPreviousSnapshot ? <div className="ai-event-comparison"><strong>{aiPreviousSnapshot.eventName}（{aiPreviousSnapshot.eventDate || "開催日不明"}）</strong><p>過去イベント：総チケット {aiPreviousSnapshot.total}枚・未使用 {aiPreviousSnapshot.unused}枚・入場中 {aiPreviousSnapshot.inside}人・退場済み {aiPreviousSnapshot.exited}人</p><p>今回との差：総チケット {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚、入場中 {ticketStats.inside - aiPreviousSnapshot.inside >= 0 ? "+" : ""}{ticketStats.inside - aiPreviousSnapshot.inside}人、退場済み {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}人</p>{aiPreviousSnapshot.source === "records" ? <><p>受付記録比較：過去イベントは入場 {aiPreviousSnapshot.entryRecords}件・退場 {aiPreviousSnapshot.exitRecords}件・再入場 {aiPreviousSnapshot.reentryRecords}件、今回は入場 {receptionRecords.filter(record => record.type === "entry").length}件・退場 {receptionRecords.filter(record => record.type === "exit").length}件・再入場 {receptionRecords.filter(record => record.type === "reentry").length}件</p><p>入場ピーク：過去は {aiPreviousSnapshot.peakHour ? String(aiPreviousSnapshot.peakHour[0]).padStart(2, "0") + "時台（" + aiPreviousSnapshot.peakHour[1] + "件）" : "記録なし"}、今回は {aiPeakHour && aiPeakHour.entry > 0 ? String(aiPeakHour.hour).padStart(2, "0") + "時台（" + aiPeakHour.entry + "件）" : "記録なし"}</p><small>過去イベントの実際のチケット・受付記録を読み込んで比較しています。時間帯は端末のローカル時刻で集計します。</small></> : <small>過去イベントの受付記録を取得できないため、保存済み分析の数値のみで比較しています。</small>}</div> : <div className="ai-assistant-welcome">比較対象となる過去イベントがありません。別のイベントを登録し、受付記録が保存されると、実データによる比較が可能になります。</div>}
+            {aiPreviousEventData.loading ? <div className="ai-assistant-welcome">過去イベントの受付記録を読み込んでいます…</div> : aiPreviousEventData.error ? <div className="ai-assistant-welcome">過去イベントのデータを読み込めませんでした。Firebaseの接続・閲覧権限を確認してください。保存済みの分析結果がある場合は、その数値を表示します。{aiPreviousSnapshot?.source === "snapshot" ? <p>保存済み分析：{aiPreviousSnapshot.eventName}／チケット {aiPreviousSnapshot.total}枚／入場中 {aiPreviousSnapshot.inside}人</p> : null}</div> : aiPreviousSnapshot ? <div className="ai-event-comparison"><strong>{aiPreviousSnapshot.eventName}（{aiPreviousSnapshot.eventDate || "開催日不明"}）</strong><p>過去イベント：総チケット {aiPreviousSnapshot.total}枚・未使用 {aiPreviousSnapshot.unused}枚・入場中 {aiPreviousSnapshot.inside}人・退場済み {aiPreviousSnapshot.exited}人</p><p>今回との差：総チケット {ticketStats.total - aiPreviousSnapshot.total >= 0 ? "+" : ""}{ticketStats.total - aiPreviousSnapshot.total}枚、入場中 {ticketStats.inside - aiPreviousSnapshot.inside >= 0 ? "+" : ""}{ticketStats.inside - aiPreviousSnapshot.inside}人、退場済み {ticketStats.exited - aiPreviousSnapshot.exited >= 0 ? "+" : ""}{ticketStats.exited - aiPreviousSnapshot.exited}人</p>{aiPreviousSnapshot.source === "records" ? <><p>受付記録比較：過去イベントは入場 {aiPreviousSnapshot.entryRecords}件・退場 {aiPreviousSnapshot.exitRecords}件・再入場 {aiPreviousSnapshot.reentryRecords}件、今回は入場 {receptionRecords.filter(record => record.type === "entry").length}件・退場 {receptionRecords.filter(record => record.type === "exit").length}件・再入場 {receptionRecords.filter(record => record.type === "reentry").length}件</p><p>入場ピーク：過去は {aiPreviousSnapshot.peakHour ? String(aiPreviousSnapshot.peakHour[0]).padStart(2, "0") + "時台（" + aiPreviousSnapshot.peakHour[1] + "件）" : "記録なし"}、今回は {aiPeakHour && aiPeakHour.entry > 0 ? String(aiPeakHour.hour).padStart(2, "0") + "時台（" + aiPeakHour.entry + "件）" : "記録なし"}</p><small>過去イベントの実際のチケット・受付記録を読み込んで比較しています。時間帯は日本時間で集計します。</small></> : <small>過去イベントの受付記録を取得できないため、保存済み分析の数値のみで比較しています。</small>}</div> : <div className="ai-assistant-welcome">比較対象となる過去イベントがありません。別のイベントを登録し、受付記録が保存されると、実データによる比較が可能になります。</div>}
             <h4>今回の運営で改善できそうな点</h4>
             <div className="ai-operational-insights">{aiOperationalInsights.map((insight, index) => <article className={"ai-operational-insight " + insight.priority} key={insight.title}><span>{index + 1}</span><div><strong>{insight.title}</strong><p>{insight.detail}</p></div></article>)}</div>
           </section>
@@ -3077,10 +3091,10 @@ function NavIcon({type}:{type:string}){
             <div className="ai-report-panels">
               <section className="ai-report-panel ai-report-hourly">
                 <h4>時間帯別の受付状況</h4>
-                <p className="ai-report-subtitle">受付記録のタイムスタンプを端末のローカル時刻で集計</p>
+                <p className="ai-report-subtitle">受付記録のタイムスタンプを日本時間で集計</p>
                 {(() => {
                   const rows = Array.from({ length: 24 }, (_, hour) => {
-                    const records = receptionRecords.filter(record => Number.isFinite(Date.parse(record.timestamp)) && new Date(record.timestamp).getHours() === hour);
+                    const records = receptionRecords.filter(record => Number.isFinite(Date.parse(record.timestamp)) && japanHour(Date.parse(record.timestamp)) === hour);
                     return { hour, entry: records.filter(record => record.type === "entry").length, exit: records.filter(record => record.type === "exit").length, reentry: records.filter(record => record.type === "reentry").length };
                   }).filter(row => row.entry + row.exit + row.reentry > 0);
                   const max = Math.max(1, ...rows.flatMap(row => [row.entry, row.exit, row.reentry]));
@@ -3122,7 +3136,7 @@ function NavIcon({type}:{type:string}){
             const hourly = Array.from({ length: 24 }, (_, hour) => {
               const records = receptionRecords.filter(record =>
                 Number.isFinite(Date.parse(record.timestamp)) &&
-                new Date(record.timestamp).getHours() === hour &&
+                japanHour(Date.parse(record.timestamp)) === hour &&
                 (record.type === "entry" || record.type === "exit" || record.type === "reentry")
               );
               return { hour, count: records.length, entries: records.filter(record => record.type === "entry").length, exits: records.filter(record => record.type === "exit").length, reentries: records.filter(record => record.type === "reentry").length };

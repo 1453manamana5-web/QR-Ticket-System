@@ -4,15 +4,24 @@ import { getPendingSyncItems, getPendingReceptionErrorLogs } from "./localDb";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 import { collection, doc, getDoc, getDocFromServer, getDocsFromServer, getDocs, limit, query, runTransaction, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 
-
+async function withReceptionDeadline<T>(operation: Promise<T>, timeoutMs = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([operation, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error("受付の通信がタイムアウトしました"), {code: "deadline-exceeded"})), timeoutMs);
+    })]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
-  await ensureFirebaseAuth();
+  await withReceptionDeadline(ensureFirebaseAuth());
   const terminalId = getTerminalIdForRegistration();
   if (log.terminalId !== terminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
   const db = getFirebaseDb();
   const errorRef = doc(db, "receptionErrors", log.errorId);
-  await runTransaction(db, async transaction => {
+  await withReceptionDeadline(runTransaction(db, async transaction => {
     const existing = await transaction.get(errorRef);
     if (existing.exists()) {
       const saved = existing.data();
@@ -33,7 +42,7 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
       timestamp: log.timestamp,
       receivedAt: serverTimestamp(),
     });
-  });
+  }));
 }
 
 type OwnTerminalState = {
@@ -87,7 +96,23 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
 }
 
 export async function getTerminalRegistration(): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null> {
+  // navigator.onLine can stay true on Wi-Fi that cannot reach Firebase. Bound
+  // the complete approval read (including identity restoration), so callers can
+  // use their existing, event-specific offline approval without hanging.
+  let active = true;
+  const checkActive = () => {
+    if (!active) throw Object.assign(new Error("受付端末の確認は終了しました"), {code: "cancelled"});
+  };
+  try {
+    return await withReceptionDeadline(readTerminalRegistration(checkActive));
+  } finally {
+    active = false;
+  }
+}
+
+async function readTerminalRegistration(checkActive: () => void): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null> {
   const state = await readOwnTerminalState();
+  checkActive();
   if (state.terminal) {
     const terminal = state.terminal;
     if (terminal.approved === false && !state.pendingApplication) return null;
@@ -97,23 +122,24 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
       ? await getDocFromServer(doc(getFirebaseDb(), "terminalOwners", state.terminalId!)) : null;
     const managementAllowed = managementOwner?.exists() === true &&
       managementOwner.data().enabled === true && managementOwner.data().ownerUid === await getFirebaseUid();
+    checkActive();
     const approved = terminal.approved === true && (managementAllowed ||
       (terminal.receptionApproved !== false && (role === "reception" || role === "both")));
-    if (approved && state.terminalId) {
-      localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
-      localStorage.setItem("qr-ticket-device-id", state.terminalId);
-    }
     let eventId: string | undefined;
     let eventApproved = false;
     if (approved && state.terminalId) {
       const events = await getDocsFromServer(query(collection(getFirebaseDb(), "events"), where("receptionTarget", "==", true)));
+      checkActive();
       const active = events.docs.filter(item => item.data().eventStatus !== "finished");
       if (active.length === 1) {
         eventId = active[0].id;
         const approvalRef = doc(getFirebaseDb(), "events", eventId, "receptionApprovals", state.terminalId);
         const uid = await getFirebaseUid();
+        checkActive();
         eventApproved = await runTransaction(getFirebaseDb(), async tx => {
+          checkActive();
           const approval = await tx.get(approvalRef);
+          checkActive();
           if (!approval.exists()) {
             tx.set(approvalRef, { eventId, terminalId: state.terminalId, requestedByUid: uid,
               name: typeof terminal.name === "string" ? terminal.name : "受付端末", status: "pending", requestedAt: new Date().toISOString() });
@@ -122,6 +148,13 @@ export async function getTerminalRegistration(): Promise<{approved:boolean;statu
           return approval.data().status === "approved" && approval.data().requestedByUid === uid;
         });
       }
+    }
+    checkActive();
+    // Commit the local identity only after the complete live check succeeds.
+    // A timed-out query must not invalidate the cached offline registration.
+    if (approved && state.terminalId) {
+      localStorage.setItem("qr-ticket-terminal-id", state.terminalId);
+      localStorage.setItem("qr-ticket-device-id", state.terminalId);
     }
     return {
       approved: approved && eventApproved,
@@ -293,7 +326,7 @@ function getTerminalIdForRegistration(): string {
   return id;
 }
 export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Ticket): Promise<void> {
-  await ensureFirebaseAuth();
+  await withReceptionDeadline(ensureFirebaseAuth());
   const terminalId = getTerminalIdForRegistration();
   if (record.terminalId !== terminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
   if (!record.recordId || !record.eventId || !record.ticketId ||
@@ -306,7 +339,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
   const db = getFirebaseDb();
   const ticketRef = doc(db, "events", record.eventId, "tickets", record.ticketId);
   const recordRef = doc(db, "events", record.eventId, "receptionRecords", record.recordId);
-  const existingRecord = await getDocFromServer(recordRef);
+  const existingRecord = await withReceptionDeadline(getDocFromServer(recordRef));
   if (existingRecord.exists()) {
     const saved = existingRecord.data();
     const sameRecord = saved.eventId === record.eventId &&
@@ -334,19 +367,17 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
     type: record.type,
     timestamp: record.timestamp,
   });
-  await batch.commit();
+  // A timed-out commit can still be acknowledged later. The deterministic
+  // record ID above makes a subsequent retry safe in that case.
+  await withReceptionDeadline(batch.commit());
 }
 
 export async function getLatestReceptionTicket(eventId: string, ticketId: string): Promise<Ticket | null> {
-  await ensureFirebaseAuth();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const snapshot = await Promise.race([
-      getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId)),
-      new Promise<never>((_resolve,reject) => { timer=setTimeout(()=>reject(Object.assign(new Error("受付確認の通信がタイムアウトしました"),{code:"deadline-exceeded"})),1500); })
-    ]);
+  return withReceptionDeadline((async () => {
+    await ensureFirebaseAuth();
+    const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId));
     return snapshot.exists() ? snapshot.data() as Ticket : null;
-  } finally { if(timer!==undefined)clearTimeout(timer); }
+  })(), 1500);
 }
 
 function getBrowserDownlink(): number | null {
@@ -357,7 +388,7 @@ function getBrowserDownlink(): number | null {
 }
 
 export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | "exit" | "stopped", syncPendingCount?: number, eventId?: string): Promise<number | null> {
-  await ensureFirebaseAuth();
+  await withReceptionDeadline(ensureFirebaseAuth());
   const pendingCount = typeof syncPendingCount === "number" ? syncPendingCount : (await getPendingSyncItems()).length + (await getPendingReceptionErrorLogs()).length;
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0 || pendingCount > 100000) {
     throw new Error("INVALID_PENDING_SYNC_COUNT");
@@ -366,22 +397,22 @@ export async function saveTerminalHeartbeat(terminalId: string, mode: "entry" | 
   const db = getFirebaseDb();
   const timestamp = new Date().toISOString();
   const terminalRef = doc(db, "terminals", terminalId);
-  await updateDoc(terminalRef, {
+  await withReceptionDeadline(updateDoc(terminalRef, {
     status: "online",
     lastSeen: timestamp,
     updatedAt: timestamp,
     syncPendingCount: pendingCount,
     ...(eventId ? {receptionMode: mode, receptionEventId: eventId, receptionReportedAt:serverTimestamp()} : {}),
     ...(networkMbps !== null ? { networkMbps } : {}),
-  });
+  }));
 
   // Only the owning, management-approved installation may update the stored
   // operating mode. Handed-off reception installations are intentionally denied.
   try {
-    await updateDoc(terminalRef, {
+    await withReceptionDeadline(updateDoc(terminalRef, {
       mode: mode === "entry" ? "入口受付" : mode === "exit" ? "出口受付" : "停止",
       updatedAt: timestamp,
-    });
+    }));
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error
       ? (error as { code?: string }).code : undefined;
@@ -395,7 +426,7 @@ export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = async () => {
     try {
-      const state = await readOwnTerminalState();
+      const state = await withReceptionDeadline(readOwnTerminalState());
       const terminal = state.terminal;
       const desiredMode = terminal?.desiredMode;
       if (active && state.terminalId === terminalId &&

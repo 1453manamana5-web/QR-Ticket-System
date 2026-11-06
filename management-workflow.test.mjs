@@ -9,6 +9,7 @@ import {act,create} from 'react-test-renderer';
 const require=createRequire(import.meta.url),ts=require('typescript');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 function load(path,deps={},globals={}) {
+  if(path==='management-app/src/App.tsx')deps={...deps,'../../shared/src/receptionTiming':load('shared/src/receptionTiming.ts')};
   const out={};new Function('exports','require',...Object.keys(globals),ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n in deps?deps[n]:require(n),...Object.values(globals));return out;
 }
 const safety=load('management-app/src/operationSafety.ts');
@@ -356,10 +357,24 @@ test('occupancy renders a visible line with numeric axes and touch/keyboard insp
 });
 test('analysis page includes the occupancy line chart from current reception subscriptions',async()=>{
   const h=await harness();try{
-    await act(async()=>h.recordCallbacks.get('event-a')([occupancyRecord('a','entry',0),occupancyRecord('b','exit',1)]));await h.flush();
+    const official=[occupancyRecord('a','entry',0),occupancyRecord('b','exit',1)].map(record=>({...record,timestamp:record.timestamp.replace('2026-10-28','2099-10-27')}));
+    await act(async()=>h.recordCallbacks.get('event-a')([occupancyRecord('trial','entry',0),...official]));await h.flush();
     await h.nav('分析');assert.equal(h.renderer.root.findAllByType('polyline').length,1);
     assert.ok(h.renderer.root.findAllByType('svg').some(node=>String(node.props['aria-label']).includes('会場内人数の折れ線グラフ')));
+    assert.ok(h.renderer.root.findAllByType('svg').some(node=>String(node.props['aria-label']).includes('受付記録2件')));
   }finally{await h.close();}
+});
+
+test('pre-opening records and old ticket use are excluded without altering saved history',()=>{
+  const timing=load('shared/src/receptionTiming.ts');
+  const target={...event(),eventDate:'2026-11-06'};
+  const records=[{...occupancyRecord('trial','entry',0),timestamp:'2026-11-05T23:59:59.999Z'},
+    {...occupancyRecord('real','entry',0),timestamp:'2026-11-06T00:00:00.000Z'}];
+  assert.deepEqual(timing.productionReceptionRecords(records,target).map(record=>record.recordId),['real']);
+  const original={...ticket(),currentStatus:'inside',updatedAt:records[0].timestamp};
+  assert.equal(timing.productionTicketStates([original],target)[0].currentStatus,'unused');
+  assert.equal(original.currentStatus,'inside');
+  assert.equal(timing.productionTicketStates([{...original,updatedAt:records[1].timestamp}],target)[0].currentStatus,'inside');
 });
 
 test('issuance quantities can be cleared completely and retyped without restoring zero or concatenating counts',async()=>{

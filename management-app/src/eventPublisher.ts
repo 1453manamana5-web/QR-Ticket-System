@@ -12,11 +12,74 @@ export type PublishedEventBundle = {
   publishedAt: string;
 };
 
+/** Restore only legacy trial states which still predate the canonical opening.
+ * A transaction rechecks every ticket so an intervening real admission wins.
+ * Reception records and ticket metadata are deliberately retained.
+ */
+export async function repairPreopeningTicketStates(eventId: string, candidates?: readonly Ticket[]): Promise<number> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return 0;
+  const db = getFirebaseDb();
+  const tickets = candidates ?? (await getDocsFromServer(collection(db, "events", eventId, "tickets"))).docs.map(item => item.data() as Ticket);
+  const candidatesToCheck = tickets.filter(ticket => ticket.eventId === eventId && ticket.currentStatus !== "unused" &&
+    typeof ticket.ticketId === "string" && ticket.ticketId.length > 0 && !ticket.ticketId.includes("/") &&
+    Number.isFinite(Date.parse(ticket.updatedAt)));
+  if (!candidatesToCheck.length) return 0;
+  const initialEvent = await getDocFromServer(doc(db, "events", eventId));
+  if (!initialEvent.exists()) return 0;
+  const initialTimetable = initialEvent.data();
+  const initialOpening = Date.parse(`${initialTimetable.eventDate}T${initialTimetable.startTime}:00+09:00`);
+  if (!Number.isFinite(initialOpening) || initialTimetable.eventStatus === "finished") return 0;
+  // Ordinary production tickets need no additional transactional reads.
+  const ids = [...new Set(candidatesToCheck.filter(ticket => Date.parse(ticket.updatedAt) < initialOpening).map(ticket => ticket.ticketId))];
+  let repaired = 0;
+  // Leave room for event and last-record reads in each Firestore transaction.
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const count = await runTransaction(db, async tx => {
+      const savedEvent = await tx.get(doc(db, "events", eventId));
+      if (!savedEvent.exists()) return 0;
+      const timetable = savedEvent.data();
+      const opening = Date.parse(`${timetable.eventDate}T${timetable.startTime}:00+09:00`);
+      if (!Number.isFinite(opening) || timetable.eventStatus === "finished") return 0;
+      const snapshots = await Promise.all(ids.slice(offset, offset + 100).map(id => tx.get(doc(db, "events", eventId, "tickets", id))));
+      const eligible = snapshots.filter(snapshot => {
+        if (!snapshot.exists()) return false;
+        const ticket = snapshot.data();
+        const updatedAt = Date.parse(ticket.updatedAt);
+        return ticket.eventId === eventId && ticket.ticketId === snapshot.id &&
+          (ticket.currentStatus === "inside" || ticket.currentStatus === "exited") &&
+          Number.isFinite(updatedAt) && updatedAt < opening;
+      });
+      const recordIds = [...new Set(eligible.flatMap(snapshot => {
+        const id = snapshot.data()?.lastReceptionRecordId;
+        return typeof id === "string" && id.length > 0 && id.length <= 160 && !id.includes("/") ? [id] : [];
+      }))];
+      const records = new Map(await Promise.all(recordIds.map(async id => [id, await tx.get(doc(db, "events", eventId, "receptionRecords", id))] as const)));
+      let changed = 0;
+      for (const snapshot of eligible) {
+        const ticket = snapshot.data();
+        if (!ticket) continue;
+        if (ticket.lastReceptionRecordId !== undefined) {
+          const record = records.get(ticket.lastReceptionRecordId)?.data();
+          const recordedAt = Date.parse(record?.timestamp);
+          if (!record || record.eventId !== eventId || record.ticketId !== snapshot.id ||
+              !Number.isFinite(recordedAt) || recordedAt >= opening) continue;
+        }
+        tx.update(snapshot.ref, { currentStatus: "unused", updatedAt: new Date().toISOString() });
+        changed++;
+      }
+      return changed;
+    });
+    repaired += count;
+  }
+  return repaired;
+}
+
 export async function loadPublishedEventBundle(eventId: string): Promise<PublishedEventBundle | null> {
   const db = getFirebaseDb();
   const eventSnapshot = await getDoc(doc(db, "events", eventId));
   if (!eventSnapshot.exists()) return null;
-  const authToken = eventSnapshot.data().authToken;
+  const savedEvent = eventSnapshot.data();
+  const authToken = savedEvent.authToken;
   if (typeof authToken !== "string" || !authToken) return null;
   const bundleSnapshot = await getDoc(doc(db, "eventBundles", authToken));
   if (!bundleSnapshot.exists()) return null;
@@ -31,7 +94,14 @@ export async function loadPublishedEventBundle(eventId: string): Promise<Publish
   if (tickets.length === 0 && data.ticketCount !== 0 && Array.isArray(data.tickets) && data.tickets.length > 0) {
     tickets = data.tickets;
   }
-  return { ...data, tickets, ticketCount: tickets.length } as PublishedEventBundle;
+  // A display-only trial reset leaves the canonical ticket consumed. Repair
+  // genuine old trial states before preparing a manager's reception export.
+  if (await repairPreopeningTicketStates(eventId, tickets)) {
+    tickets = (await getDocsFromServer(collection(db, "events", eventId, "tickets"))).docs.map(item => item.data() as Ticket);
+  }
+  // Status changes are saved on the canonical event after publication. Exports
+  // must not restore the older status or timetable embedded in the bundle.
+  return { ...data, event: { ...data.event, ...savedEvent, eventId }, tickets, ticketCount: tickets.length } as PublishedEventBundle;
 }
 
 export async function saveEventMetadata(event: Event, onlyIfMissing = false): Promise<void> {

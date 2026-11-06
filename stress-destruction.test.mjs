@@ -50,6 +50,7 @@ function loadClientModule(file, db, uid, terminalId, local = {}, overrides = {},
   // rejects plain objects created with another vm context's Object prototype.
   new Function("exports", "require", "indexedDB", "crypto", "localStorage", "navigator", compiled)(
     exports, name => {
+      if (name === "../../shared/src/receptionTiming") return loadClientModule("./shared/src/receptionTiming.ts", db, uid, terminalId);
       if (!(name in dependencies)) throw Error("Unexpected module " + name);
       return dependencies[name];
     },

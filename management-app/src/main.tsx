@@ -10,7 +10,7 @@ import OfflineReserveRoot from './ReservePrinting';
 const installAutomaticAppUpdate = () => {
   if (!("serviceWorker" in navigator)) return;
   const register=() => {
-    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`,{scope:import.meta.env.BASE_URL}).catch((error) => {
+    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`,{scope:import.meta.env.BASE_URL,updateViaCache:'none'}).catch((error) => {
       console.warn("アプリの更新確認に失敗しました。", error);
     });
   };
