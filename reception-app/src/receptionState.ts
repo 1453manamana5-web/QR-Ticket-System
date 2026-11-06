@@ -11,7 +11,7 @@ export type ReceptionAction=
 export const initialReceptionState:ReceptionState={screen:"registration",registration:null,localEvent:null,remoteStopped:false,stopped:false};
 function matches(registration:Registration|null,event:LocalEventData|null):boolean{
   return registration?.approved===true && event?.dataReady===true &&
-    (!registration.eventId || registration.eventId===event.event.eventId);
+    registration.eventId===event.event.eventId;
 }
 export function canReceive(state:ReceptionState):boolean{
   return state.screen==="reception" && !state.remoteStopped && matches(state.registration,state.localEvent);

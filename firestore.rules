@@ -6,10 +6,18 @@ rules_version = '2';
 // Owner/installation mappings and all approval/role fields remain immutable.
 // Heartbeat additions (optional): receptionMode entry/exit/stopped; receptionEventId
 // string 1..160; receptionReportedAt server timestamp. They confer no permissions.
+// Mutable terminal/application ISO date strings are bounded to 1..40 characters;
+// offline reception timestamps retain their existing ISO format, without a
+// freshness requirement. Every heartbeat requires an enabled owner mapping and
+// a currently approved installation, including the original owner's browser.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
+    }
+
+    function validTerminalTime(value) {
+      return value is string && value.size() > 0 && value.size() <= 40;
     }
 
     // A browser UID is not a role. Management writes require a server-issued
@@ -144,9 +152,8 @@ service cloud.firestore {
       let next = request.resource.data;
       let ownerPath = /databases/$(database)/documents/terminalOwners/$(terminalId);
       let installationPath = /databases/$(database)/documents/terminalInstallations/$(request.auth.uid);
-      let ownerMatches = exists(ownerPath)
-        && get(ownerPath).data.enabled == true
-        && get(ownerPath).data.ownerUid == request.auth.uid;
+      let ownerEnabled = exists(ownerPath) && get(ownerPath).data.enabled == true;
+      let ownerMatches = ownerEnabled && get(ownerPath).data.ownerUid == request.auth.uid;
       let installationMatches = exists(installationPath)
         && get(installationPath).data.authUid == request.auth.uid
         && get(installationPath).data.terminalId == terminalId
@@ -159,14 +166,14 @@ service cloud.firestore {
           || (!current.keys().hasAny(["receptionApproved"]) && current.approved == true))
         && (current.role == "reception" || current.role == "both");
       return signedIn()
-        && ((ownerMatches && (managementActive || receptionActive))
-          || (installationMatches && receptionActive))
+        && ownerEnabled && installationMatches
+        && ((ownerMatches && managementActive) || receptionActive)
         && next.diff(current).affectedKeys().hasOnly([
           "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name", "receptionMode", "receptionEventId", "receptionReportedAt"
         ])
         && next.status == "online"
-        && next.lastSeen is string
-        && next.updatedAt is string
+        && validTerminalTime(next.lastSeen)
+        && validTerminalTime(next.updatedAt)
         && next.syncPendingCount is int
         && next.syncPendingCount >= 0
         && next.syncPendingCount <= 100000
@@ -193,7 +200,7 @@ service cloud.firestore {
         && current.approved == true
         && next.diff(current).affectedKeys().hasOnly(["desiredMode", "desiredModeUpdatedAt"])
         && next.desiredMode in ["入口受付", "出口受付", "停止"]
-        && next.desiredModeUpdatedAt is string
+        && validTerminalTime(next.desiredModeUpdatedAt)
         && next.desiredModeUpdatedAt.size() > 0
         && next.desiredModeUpdatedAt.size() <= 40;
     }
@@ -243,7 +250,7 @@ service cloud.firestore {
         && data.admin == false && data.subAdmin == false
         && data.status == "pending"
         && data.mode == "停止" && data.desiredMode == "停止"
-        && data.requestedAt is string && data.updatedAt is string
+        && validTerminalTime(data.requestedAt) && validTerminalTime(data.updatedAt)
         && data.syncPendingCount == 0;
     }
 
@@ -294,7 +301,7 @@ service cloud.firestore {
         && !existsAfter(applicationPath(terminalId))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
         && request.resource.data.status == "offline"
-        && request.resource.data.updatedAt is string
+        && validTerminalTime(request.resource.data.updatedAt)
         && request.resource.data.updatedAt.size() > 0 && request.resource.data.updatedAt.size() <= 40;
     }
 
@@ -323,9 +330,9 @@ service cloud.firestore {
         && next.approved == true && next.status == "offline"
         && next.managementApproved == (role in ["management", "both"])
         && next.receptionApproved == (role in ["reception", "both"])
-        && next.approvalUpdatedAt is string
+        && validTerminalTime(next.approvalUpdatedAt)
         && next.approvalUpdatedByUid == request.auth.uid
-        && next.updatedAt is string
+        && validTerminalTime(next.updatedAt)
         && owner.terminalId == terminalId
         && owner.ownerUid == app.requestedByUid
         && owner.enabled == true
@@ -384,7 +391,7 @@ service cloud.firestore {
         && install.approved == true
         && next.diff(current).affectedKeys().hasOnly(["subAdmin", "subAdminUpdatedAt", "subAdminUpdatedByUid"])
         && next.subAdmin is bool
-        && next.subAdminUpdatedAt is string
+        && validTerminalTime(next.subAdminUpdatedAt)
         && next.subAdminUpdatedByUid == request.auth.uid;
     }
 
@@ -406,8 +413,8 @@ service cloud.firestore {
         && next.receptionApprovalVersion == (current.get("receptionApprovalVersion", 0) is int ? current.get("receptionApprovalVersion", 0) + 1 : 1)
         && next.approved == (current.managementApproved == true)
         && next.mode == "停止" && next.desiredMode == "停止"
-        && next.desiredModeUpdatedAt is string && next.updatedAt is string
-        && next.approvalUpdatedAt is string
+        && validTerminalTime(next.desiredModeUpdatedAt) && validTerminalTime(next.updatedAt)
+        && validTerminalTime(next.approvalUpdatedAt)
         && next.approvalUpdatedByUid == request.auth.uid
         && next.role == (current.role == "both" ? "management" : current.role);
     }
@@ -431,8 +438,8 @@ service cloud.firestore {
         && next.receptionApprovalVersion == (current.get("receptionApprovalVersion", 0) is int ? current.get("receptionApprovalVersion", 0) + 1 : 1)
         && next.approved == (current.managementApproved == true)
         && next.mode == "停止" && next.desiredMode == "停止"
-        && next.desiredModeUpdatedAt is string && next.updatedAt is string
-        && next.approvalUpdatedAt is string
+        && validTerminalTime(next.desiredModeUpdatedAt) && validTerminalTime(next.updatedAt)
+        && validTerminalTime(next.approvalUpdatedAt)
         && next.approvalUpdatedByUid == request.auth.uid
         && next.role == (current.role == "both" && current.managementApproved == true ? "management" : current.role);
     }
@@ -476,7 +483,7 @@ service cloud.firestore {
         && next.terminalId == terminalId
         && next.enabled == false
         && next.deletedByUid == request.auth.uid
-        && next.updatedAt is string
+        && validTerminalTime(next.updatedAt)
         && (!next.keys().hasAny(["ownerUid"]) || next.ownerUid == target.requestedByUid);
     }
 
@@ -507,7 +514,7 @@ service cloud.firestore {
           && resource.data.approved == true
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["approved", "releasedAt"])
           && request.resource.data.approved == false
-          && request.resource.data.releasedAt is string);
+          && validTerminalTime(request.resource.data.releasedAt));
       allow delete: if false;
     }
 
@@ -541,8 +548,8 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 80
         && request.resource.data.type in ["Web / iPad", "Web / PC"]
         && request.resource.data.status == "pending"
-        && request.resource.data.requestedAt is string
-        && request.resource.data.updatedAt is string);
+        && validTerminalTime(request.resource.data.requestedAt)
+        && validTerminalTime(request.resource.data.updatedAt));
       allow delete: if (signedIn()
           && resource.data.requestedByUid == request.auth.uid
           && resource.data.status == "pending")
@@ -557,8 +564,8 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "status", "decidedAt", "decidedByUid", "updatedAt"
         ])
-        && request.resource.data.decidedAt is string
-        && request.resource.data.updatedAt is string
+        && validTerminalTime(request.resource.data.decidedAt)
+        && validTerminalTime(request.resource.data.updatedAt)
         && request.resource.data.decidedByUid == request.auth.uid
         && getAfter(terminalPath(terminalId)).data.approved == true
         && getAfter(ownerPath(terminalId)).data.enabled == true
@@ -619,7 +626,7 @@ service cloud.firestore {
           && request.resource.data.status == "approved"
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "decidedAt", "decidedByUid"])
           && request.resource.data.decidedByUid == request.auth.uid
-          && request.resource.data.decidedAt is string && request.resource.data.decidedAt.size() <= 40
+          && validTerminalTime(request.resource.data.decidedAt) && request.resource.data.decidedAt.size() <= 40
           && exists(ownerPath(terminalId)) && get(ownerPath(terminalId)).data.enabled == true
           && get(installationPath(resource.data.requestedByUid)).data.approved == true
           && get(installationPath(resource.data.requestedByUid)).data.terminalId == terminalId;

@@ -129,7 +129,7 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal",eventId:"event-one"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];

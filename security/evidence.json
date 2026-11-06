@@ -1,0 +1,77 @@
+{
+  "baseline_commit": "c88322dbe12670fbd55b26f160786ec973582296",
+  "environment": "loopback Firestore emulator, demo project IDs for attack suites",
+  "interpretation": "before.fail counts are security assertions that reproduced permitted attacks, not distinct vulnerability counts; one red-rules control explicitly records the unresolved multi-pending request case",
+  "results": {
+    "rules_before": {
+      "tests": 17,
+      "pass": 11,
+      "fail": 6,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "rules_after": {
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "functions_before": {
+      "tests": 7,
+      "pass": 0,
+      "fail": 7,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "functions_after": {
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "inputs_before": {
+      "tests": 7,
+      "pass": 5,
+      "fail": 2,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "inputs_after": {
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "security_final": {
+      "tests": 43,
+      "pass": 43,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "client_normal": {
+      "tests": 160,
+      "pass": 160,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "rules_normal": {
+      "tests": 67,
+      "pass": 67,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "functions_normal": {
+      "tests": 21,
+      "pass": 21,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  }
+}
