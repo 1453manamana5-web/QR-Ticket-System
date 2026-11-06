@@ -131,18 +131,19 @@ test('failed event publication preserves the saved event instead of showing unsa
 
 test('publication enables automatic start without waiting for a reload',async()=>{
   let h;const writes=[];
-  const today=safety.localDateValue();
-  const pending={...event(),eventDate:today,startTime:'00:00',endTime:'23:59'};
-  h=await harness({subscribeEvents:cb=>{cb([pending]);return()=>{};},publisher:{
-    publishEventBundle:async e=>({event:{...e,eventStatus:'ready'},tickets:[],authToken:'published',ticketCount:0}),
-    saveEventStatus:async(id,status)=>writes.push({id,status}),
-  }});
+  const realNow=Date.now;
+  Date.now=()=>Date.parse('2035-10-27T03:00:00.000Z');
+  const pending={...event(),eventDate:'2035-10-27',startTime:'09:00',endTime:'17:00'};
   try{
+    h=await harness({subscribeEvents:cb=>{cb([pending]);return()=>{};},publisher:{
+      publishEventBundle:async e=>({event:{...e,eventStatus:'ready'},tickets:[],authToken:'published',ticketCount:0}),
+      saveEventStatus:async(id,status)=>writes.push({id,status}),
+    }});
     await h.nav('イベント管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'event-aを選択'}).props.onClick());await h.flush();
     await h.click('保存してFirebaseへ公開');
     assert.ok(writes.some(item=>item.status==='active'),'publication must retain its reception target flag for automatic start');
-  }finally{await h.close();}
+  }finally{Date.now=realNow;if(h)await h.close();}
 });
 
 test('issuing after deleting the highest numbers uses the server issuance floor',async()=>{
