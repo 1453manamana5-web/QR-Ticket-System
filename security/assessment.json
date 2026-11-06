@@ -1,0 +1,24 @@
+{
+  "score": 4,
+  "summary": "確認した失効権限・過大入力・イベント承認迂回を修正し、同じ隔離テストで拒否を確認した。検証範囲に限った評価であり、攻撃全般への保証ではない。",
+  "findings": [
+    {
+      "check": "Registration volume",
+      "severity": "moderate",
+      "issue": "同じ匿名UIDから複数の未承認申請を保存できる。自己承認は禁止されるが、申請数の制限は未実装。",
+      "recommendation": "複数UIDでの再試行も考慮して、申請受付制限と監視を設計する。"
+    },
+    {
+      "check": "Offline transfer authenticity",
+      "severity": "moderate",
+      "issue": "イベント一致は確認するが、同一イベントのQRの発行元を署名で認証していない。",
+      "recommendation": "管理者からの直接受渡しを維持し、暗号による認証には事前配布する信頼鍵を含めた設計が必要。"
+    },
+    {
+      "check": "Trusted management schema",
+      "severity": "minor",
+      "issue": "承認済み管理端末が書き込む全データの詳細スキーマ上限は検証・強化しきっていない。",
+      "recommendation": "既存データとの互換性を確認しながら管理データの検証を段階的に追加する。"
+    }
+  ]
+}

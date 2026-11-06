@@ -160,7 +160,8 @@ export default function App(){
         const raw=localStorage.getItem("qr-ticket-reception-approved");
         if(!raw)return null;
         const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:string};
-        if(saved.approved!==true||saved.terminalId!==getTerminalId())return null;
+        if(saved.approved!==true||saved.terminalId!==getTerminalId()||
+          typeof saved.eventId!=="string"||saved.eventId.length===0||saved.eventId.length>160||saved.eventId.includes("/"))return null;
         return {
           approved:true,
           eventId:saved.eventId,
@@ -307,7 +308,7 @@ export default function App(){
 
     const restoreCachedEvent=async()=>{
       const saved=await loadLocalEvent(true);
-      if(terminalRegistration?.eventId && saved?.event.eventId!==terminalRegistration.eventId)return null;
+      if(!terminalRegistration?.eventId || saved?.event.eventId!==terminalRegistration.eventId)return null;
       if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||!registrationIsCurrent(registrationVersion)||eventAuthenticationRequiredRef.current)return null;
       if(cancelled||!["auth","ready","registration"].includes(screenRef.current))return null;
       cachedEvent=saved;
@@ -606,6 +607,11 @@ export default function App(){
       const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
       if(!registrationIsCurrent(registrationVersion))return;
       if(offlineData){
+        // The QR transports inventory; it cannot grant this terminal approval
+        // for an event, including a legacy cache without an event binding.
+        if(!terminalRegistration?.approved || terminalRegistration.eventId!==offlineData.event.eventId){
+          throw Error("このイベントの受付承認が確認できません。オンラインで管理者の承認を受けてから、オフラインQRを読み取ってください。");
+        }
         const saved=await loadLocalEvent();
         if(saved&&saved.event.eventId!==offlineData.event.eventId)throw Error("別イベントへの切替にはオンラインで受付端末の再承認が必要です。");
       }else if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;

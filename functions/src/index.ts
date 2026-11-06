@@ -26,6 +26,14 @@ function readId(value: unknown, field: string): string {
   return value.trim();
 }
 
+// Keep Admin SDK writes within the same timestamp boundary as client rules.
+// Historical offline captures are valid; this intentionally imposes no age limit.
+function validReceptionTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 20 && value.length <= 40 &&
+    /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,3})?Z$/.test(value) &&
+    Number.isFinite(Date.parse(value));
+}
+
 // Legacy terminals without a generation start at zero. Invalid values fail closed.
 function readReceptionApprovalVersion(value: unknown): number {
   if (value === undefined) return 0;
@@ -1135,7 +1143,7 @@ export const recordReception = onCall(async (call) => {
   const type = input.type;
   const timestamp = input.timestamp;
   if (!ticketId || (type !== "entry" && type !== "exit" && type !== "reentry") ||
-      typeof timestamp !== "string" || !Number.isFinite(Date.parse(timestamp))) {
+      !validReceptionTimestamp(timestamp)) {
     throw new HttpsError("invalid-argument", "受付記録の内容が正しくありません。");
   }
 
@@ -1247,7 +1255,7 @@ export const recordReceptionError = onCall(async (call) => {
   ]);
   if (!categories.has(input.category) ||
       (input.mode !== "entry" && input.mode !== "exit") ||
-      typeof input.timestamp !== "string" || !Number.isFinite(Date.parse(input.timestamp))) {
+      !validReceptionTimestamp(input.timestamp)) {
     throw new HttpsError("invalid-argument", "受付エラーログの内容が正しくありません。");
   }
 
@@ -1309,8 +1317,8 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
       tx.get(ownerRef),
       tx.get(installationRef),
     ]);
-    const ownerMatches = ownerSnap.exists && ownerSnap.get("enabled") === true &&
-      ownerSnap.get("ownerUid") === uid;
+    const ownerEnabled = ownerSnap.exists && ownerSnap.get("enabled") === true;
+    const ownerMatches = ownerEnabled && ownerSnap.get("ownerUid") === uid;
     const installationMatches = installationSnap.exists &&
       installationSnap.get("terminalId") === terminalId &&
       installationSnap.get("authUid") === uid &&
@@ -1326,9 +1334,8 @@ export const updateTerminalHeartbeat = onCall(async (call) => {
       (existing.receptionApproved === undefined && existing.approved === true);
     const receptionActive = existing.approved === true && receptionApproved &&
       (role === "reception" || role === "both");
-    if (!terminalSnap.exists ||
-        !((ownerMatches && (managementActive || receptionActive)) ||
-          (installationMatches && receptionActive))) {
+    if (!terminalSnap.exists || !ownerEnabled || !installationMatches ||
+        !((ownerMatches && managementActive) || receptionActive)) {
       throw new HttpsError("permission-denied", "この端末を更新する権限がありません。");
     }
 
@@ -1361,9 +1368,14 @@ export const updateManagedTerminalName = onCall(async (call) => {
   }
   const terminalRef = db.doc("terminals/" + terminalId);
   const ownerRef = db.doc("terminalOwners/" + terminalId);
+  const installationRef = db.doc("terminalInstallations/" + uid);
   await db.runTransaction(async (tx) => {
-    const [terminalSnap, ownerSnap] = await Promise.all([tx.get(terminalRef), tx.get(ownerRef)]);
-    if (!terminalSnap.exists || !ownerSnap.exists ||
+    const [terminalSnap, ownerSnap, installationSnap] = await Promise.all([
+      tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef),
+    ]);
+    if (!installationSnap.exists || installationSnap.get("authUid") !== uid ||
+        installationSnap.get("terminalId") !== terminalId || installationSnap.get("approved") !== true ||
+        !terminalSnap.exists || !ownerSnap.exists ||
         ownerSnap.get("enabled") !== true || ownerSnap.get("ownerUid") !== uid ||
         terminalSnap.get("approved") !== true ||
         terminalSnap.get("managementApproved") !== true ||
