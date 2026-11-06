@@ -1,4 +1,5 @@
-import {getPendingSyncItems, getReceptionRecord, markSyncStatus} from "./localDb";
+import {getPendingSyncItems, getReceptionRecord, markSyncStatus,loadLocalEvent} from "./localDb";
+import {isBeforeEventStart} from '../../shared/src/receptionTiming';
 import {syncReceptionRecord} from "./receptionSync";
 
 let running: Promise<void> | null = null;
@@ -15,6 +16,11 @@ export function syncPendingReceptionRecords(): Promise<void> {
       for (const item of await getPendingSyncItems()) {
         const record = await getReceptionRecord(item.recordId);
         if (!record) continue;
+        const localEvent=await loadLocalEvent();
+        if(localEvent?.event.eventId===record.eventId&&isBeforeEventStart(localEvent.event,record.timestamp)){
+          await markSyncStatus(item.recordId,'synced',item.retryCount);
+          continue;
+        }
         const key = JSON.stringify([record.eventId, record.ticketId]);
         // An exit must never overtake a failed entry for the same ticket.
         if (blockedTickets.has(key)) continue;

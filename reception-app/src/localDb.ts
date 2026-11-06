@@ -4,6 +4,7 @@ import type {
   SyncQueueItem,
   Ticket,
 } from "@qr-ticket-system/shared";
+import {isBeforeEventStart} from '../../shared/src/receptionTiming';
 
 const DB_NAME = "qr-ticket-reception";
 const DB_VERSION = 8;
@@ -296,11 +297,12 @@ export async function saveReceptionTransaction(
   ticket: Ticket,
   record: ReceptionRecord,
   expectedLocalTicket?: Ticket | null
-): Promise<void> {
+): Promise<'saved'|'trial'> {
   const database = await openDatabase();
 
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<'saved'|'trial'>((resolve, reject) => {
+      let trial=false;
       const transaction = database.transaction(
         [STORES.event, STORES.tickets, STORES.receptionRecords, STORES.syncQueue],
         "readwrite"
@@ -321,6 +323,10 @@ export async function saveReceptionTransaction(
         if(expectedLocalTicket!==undefined && (!saved?.dataReady || saved.event.eventId!==record.eventId)){
           reject(new Error("LOCAL_EVENT_CHANGED"));transaction.abort();return;
         }
+        if(saved&&isBeforeEventStart(saved.event,record.timestamp)){
+          trial=true;
+          return;
+        }
         if(!currentTicket.result && saved){
           transaction.objectStore(STORES.event).put({...saved,ticketCount:saved.ticketCount+1});
         }
@@ -334,7 +340,7 @@ export async function saveReceptionTransaction(
         };
       };
 
-      transaction.oncomplete = () => resolve();
+      transaction.oncomplete = () => resolve(trial?'trial':'saved');
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("受付データを保存できませんでした"));
       transaction.onabort = () =>

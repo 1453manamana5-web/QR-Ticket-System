@@ -1,6 +1,7 @@
 import {receptionReducer,initialReceptionState,receptionPhase,canReceive,type ReceptionAction,type Registration,type Screen} from "./receptionState";
 import {useCallback, useEffect, useRef, useState, useReducer} from "react";
 import type {EventAuthPayload,LocalEventData,ReceptionRecord,ReceptionType,Ticket} from "@qr-ticket-system/shared";
+import {isBeforeEventStart} from '../../shared/src/receptionTiming';
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
@@ -649,6 +650,11 @@ export default function App(){
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
     if(!localEvent||busy||!receptionAllowedRef.current||!canReceive(workflowRef.current)||scanProcessingRef.current)return;
+    const capturedAt=new Date().toISOString();
+    const showTrial=()=>{
+      setResult({kind:'success',title:'試験チケット',detail:'イベント開始前のため、来場者数・入退場記録には反映しません。'});
+      announceReception(mode==='entry'?'entry':'exit');
+    };
     let ticketId=rawText.trim();
     let qrEventId:string|null=null;
     if(!ticketId)return;
@@ -716,6 +722,11 @@ export default function App(){
         return;
       }
 
+      if(isBeforeEventStart(localEvent.event,capturedAt)){
+        showTrial();
+        return;
+      }
+
       const receptionType=getReceptionType(mode,ticket.currentStatus,localEvent.settings);
       if(!receptionType){
         const detail=mode==="entry"
@@ -727,7 +738,7 @@ export default function App(){
       }
 
       const nextStatus=receptionType==="exit"?"exited":"inside";
-      const now=new Date().toISOString();
+      const now=capturedAt;
       const updatedTicket:Ticket={...ticket,currentStatus:nextStatus,updatedAt:now};
       const record:ReceptionRecord={
         recordId:crypto.randomUUID(),
@@ -738,7 +749,10 @@ export default function App(){
         terminalId:localEvent.terminalId
       };
 
-      await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket);
+      if(await saveReceptionTransaction(updatedTicket,record,expectedLocalTicket)==='trial'){
+        showTrial();
+        return;
+      }
       void syncPendingRecords();
       setResult({
         kind:"success",

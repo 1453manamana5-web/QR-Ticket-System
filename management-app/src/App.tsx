@@ -5,6 +5,7 @@ import OfflineEventTransfer from "./OfflineEventTransfer";
 import {SurfacePresence,TicketZoomSurface,type TicketZoomOrigin} from './SurfaceMotion';
 import { QRCodeSVG } from "qrcode.react";
 import type { Event, ReceptionRecord, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
+import {productionReceptionRecords,productionTicketStates} from '../../shared/src/receptionTiming';
 import * as livePublisher from "./eventPublisher";
 import type {PublishedEventBundle} from "./eventPublisher";
 import {createGuidePractice} from "./guidePractice";
@@ -224,7 +225,8 @@ export default function App({practice=false}:AppProps={}) {
   const [newEndTime, setNewEndTime] = useState("16:00");
   const [bundle, setBundle] = useState<PublishedEventBundle | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [receptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const [rawReceptionRecords, setReceptionRecords] = useState<ReceptionRecord[]>([]);
+  const receptionRecords=useMemo(()=>practice?rawReceptionRecords:productionReceptionRecords(rawReceptionRecords,event),[practice,rawReceptionRecords,event.eventId,event.eventDate,event.startTime]);
   const [receptionErrors, setReceptionErrors] = useState<Awaited<ReturnType<typeof loadReceptionErrors>>>([]);
   const [receptionErrorsLoading, setReceptionErrorsLoading] = useState(false);
   const [historicalAnalysisData, setHistoricalAnalysisData] = useState<{
@@ -499,7 +501,7 @@ export default function App({practice=false}:AppProps={}) {
   );
   const guide=useManagementGuide(firebaseDeviceId,!practice&&terminalDataHydrated&&ownManagementTerminalApproved,appStorage);
   const reserveLedger=useReservePrintLedger(event.eventId,ownManagementTerminalApproved&&!practice);
-  const countedTickets=useMemo(()=>tickets.filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[tickets,reserveLedger.confirmed,reserveLedger.reserved]);
+  const countedTickets=useMemo(()=>(practice?tickets:productionTicketStates(tickets,event)).filter(t=>isCountedTicket(t,reserveLedger.confirmed,reserveLedger.reserved)),[practice,tickets,event.eventId,event.eventDate,event.startTime,reserveLedger.confirmed,reserveLedger.reserved]);
   const waitingReserveCount=tickets.length-countedTickets.length;
   const bundleLoadVersion=useRef(0);
   useEffect(() => {
@@ -615,8 +617,8 @@ export default function App({practice=false}:AppProps={}) {
       if (cancelled) return;
       setHistoricalAnalysisData({
         eventId: targetEventId,
-        tickets: loadedTickets,
-        records: loadedRecords,
+        tickets: productionTicketStates(loadedTickets,eventHistory.find(item=>item.eventId===targetEventId)??event),
+        records: productionReceptionRecords(loadedRecords,eventHistory.find(item=>item.eventId===targetEventId)??event),
         loading: false,
       });
     }).catch(reason => {
@@ -1604,8 +1606,8 @@ export default function App({practice=false}:AppProps={}) {
           eventId: previousEvent.eventId,
           eventName: previousEvent.eventName,
           eventDate: previousEvent.eventDate || "",
-          tickets: previousTickets,
-          records: previousRecords,
+          tickets: practice?previousTickets:productionTicketStates(previousTickets,previousEvent),
+          records: practice?previousRecords:productionReceptionRecords(previousRecords,previousEvent),
           loading: false,
           error: false,
         });
