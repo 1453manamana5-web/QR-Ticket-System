@@ -663,3 +663,50 @@ test("pending owner can cancel atomically and reapply, without deleting another 
   approvedCancel.delete(doc(db, "terminalApplications", terminalId));
   await assertFails(approvedCancel.commit());
 });
+
+async function seedTerminalOperator(uid, admin, subAdmin) {
+  const terminalId = "T-OPERATOR-" + uid;
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminals", terminalId), { terminalId, approved: true,
+      role: "management", managementApproved: true, receptionApproved: false, admin, subAdmin });
+    await setDoc(doc(db, "terminalOwners", terminalId), { terminalId, ownerUid: uid, enabled: true });
+    await setDoc(doc(db, "terminalInstallations", uid), { terminalId, authUid: uid, approved: true });
+  });
+  return env.authenticatedContext(uid).firestore();
+}
+async function seedReceptionTargetForOperator() {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminals", "T-OPERATOR-TARGET"), { terminalId: "T-OPERATOR-TARGET",
+      requestedByUid: "target-uid", approved: true, role: "reception", receptionApproved: true,
+      managementApproved: false, admin: false, subAdmin: false, desiredMode: "停止" });
+    await setDoc(doc(db, "terminalOwners", "T-OPERATOR-TARGET"), {
+      terminalId: "T-OPERATOR-TARGET", ownerUid: "target-uid", enabled: true });
+  });
+}
+
+test("only admin or sub-admin management terminals may remotely change another terminal mode", async () => {
+  await seedReceptionTargetForOperator();
+  for (const [uid, admin, subAdmin] of [["ordinary-mode", false, false], ["deputy-mode", false, true], ["primary-mode", true, false]]) {
+    const db = await seedTerminalOperator(uid, admin, subAdmin);
+    const operation = updateDoc(doc(db, "terminals", "T-OPERATOR-TARGET"), {
+      desiredMode: "入口受付", desiredModeUpdatedAt: new Date().toISOString(),
+    });
+    await (admin || subAdmin ? assertSucceeds(operation) : assertFails(operation));
+  }
+});
+
+test("ordinary management terminals cannot delete reception terminals through an atomic tombstone write", async () => {
+  for (const [uid, admin, subAdmin] of [["ordinary-delete", false, false], ["deputy-delete", false, true], ["primary-delete", true, false]]) {
+    await seedReceptionTargetForOperator();
+    const db = await seedTerminalOperator(uid, admin, subAdmin);
+    const batch = writeBatch(db);
+    batch.delete(doc(db, "terminals", "T-OPERATOR-TARGET"));
+    batch.set(doc(db, "terminalOwners", "T-OPERATOR-TARGET"), {
+      terminalId: "T-OPERATOR-TARGET", ownerUid: "target-uid", enabled: false,
+      deletedByUid: uid, updatedAt: new Date().toISOString(),
+    });
+    await (admin || subAdmin ? assertSucceeds(batch.commit()) : assertFails(batch.commit()));
+  }
+});

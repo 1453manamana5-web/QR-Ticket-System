@@ -77,9 +77,12 @@ export default function OfflineReserveRoot({eventId}:{eventId:string}){
       if(!('serviceWorker' in navigator)||!('caches' in window))return;
       const reg=await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL);
       if(!reg?.active||new URL(reg.scope).pathname!==import.meta.env.BASE_URL)return;
-      const cache=await caches.open('qr-ticket-management-shell-v1');
-      const saved=await cache.match(new URL('index.html',reg.scope).href);
-      if(active)setOfflineReady(Boolean(saved));
+      const index=new URL('index.html',reg.scope).href;
+      // The service worker versions its shell cache; follow existing versions
+      // instead of opening an obsolete empty cache after an app update.
+      const names=(await caches.keys()).filter(name=>name.startsWith('qr-ticket-management-shell-'));
+      const saved=await Promise.all(names.map(async name=>(await caches.open(name)).match(index)));
+      if(active)setOfflineReady(saved.some(Boolean));
     };
     void check().catch(()=>{});const timer=setInterval(()=>void check().catch(()=>{}),1500);
     return()=>{active=false;clearInterval(timer);};

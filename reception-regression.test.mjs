@@ -229,6 +229,24 @@ test('offline event QR preparation saves all tickets without calling the Firebas
   }finally{await h.close();}
 });
 
+test('offline QR reauthentication explains why accepted history must be refreshed by communication',async()=>{
+  const h=await harness({saved:false,automatic:async()=>{throw Error('NO_PUBLISHED_EVENT');}});
+  try{
+    await h.local.prepareLocalEventData(makeEvent(),[makeTicket()]);
+    await h.local.saveReceptionTransaction({...makeTicket(),currentStatus:'inside'},record('already-accepted'));
+    await h.local.markSyncStatus('already-accepted','synced',0);
+    h.navigator.onLine=false;
+    await h.click('イベントデータQRを読み取る');
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click('このイベントで認証');
+    assert.match(h.text(),/オフラインQRでは再読み込みできません/);
+    assert.match(h.text(),/通信で最新データ/);
+    assert.equal((await h.local.getTicket('ticket-one')).currentStatus,'inside');
+    assert.equal((await h.local.getReceptionRecord('already-accepted')).type,'entry');
+  }finally{await h.close();}
+});
+
 test('offline event transfer cannot replace another event or bypass its reapproval',async()=>{
   let switched=false;
   const h=await harness({automatic:async()=>({localEvent:makeEvent(switched?'event-two':'event-one'),tickets:[makeTicket(switched?'event-two':'event-one')],authPayload:{authToken:'token'}})});

@@ -67,7 +67,7 @@ function clients() {
     managerDb, receptionDb, local,
     management: loadClientModule("./management-app/src/firebaseData.ts", managerDb, "flow-manager", "T-FLOW-MANAGER"),
     publisher: loadClientModule("./management-app/src/eventPublisher.ts", managerDb, "flow-manager", "T-FLOW-MANAGER"),
-    downloader: loadClientModule("./reception-app/src/eventDownloader.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION"),
+    downloader: loadClientModule("./reception-app/src/eventDownloader.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION", local),
     reception: loadClientModule("./reception-app/src/receptionSync.ts", receptionDb, "flow-reception", "T-FLOW-RECEPTION", local),
   };
 }
@@ -310,7 +310,7 @@ test("real reception registration can be approved by the manager and immediately
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalOwners", terminalId))).data().ownerUid, uid);
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalInstallations", uid))).data().approved, true);
   assert.equal((await getDocFromServer(doc(c.managerDb, "terminalApplications", terminalId))).data().status, "approved");
-  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", db, uid, terminalId);
+  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", db, uid, terminalId, local);
   const event = await downloader.downloadCurrentFirebaseEventData(terminalId);
   assert.equal(event.tickets.length, 1);
 });
@@ -441,7 +441,7 @@ test("one verified manager installation can download and operate reception witho
   assert.equal((await reception.getTerminalRegistration()).approved, true);
   assert.equal(ids.get("qr-ticket-terminal-id"), "T-FLOW-MANAGER");
   assert.equal(ids.get("qr-ticket-device-id"), "T-FLOW-MANAGER");
-  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER");
+  const downloader = loadClientModule("./reception-app/src/eventDownloader.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER", c.local);
   const downloaded = await downloader.downloadCurrentFirebaseEventData(ids.get("qr-ticket-terminal-id"));
   let ticket = downloaded.tickets[0];
   for (const [recordId, type, status, timestamp] of [
