@@ -210,10 +210,12 @@ test("a stale later local opening never discards a production receipt accepted u
   await c.local.saveReceptionTransaction({...downloaded.tickets[0],currentStatus:"inside",updatedAt:receipt.timestamp},receipt);
   const saved = await c.local.loadLocalEvent();
   await c.local.saveLocalEvent({...saved,event:{...saved.event,startTime:"10:00"}});
+  assert.equal((await c.local.getTicket("ticket-1")).currentStatus,"inside","a pending real receipt must keep its accepted local state");
   await queueWorker(c.local,c.reception).syncPendingReceptionRecords();
   assert.equal((await c.local.getPendingSyncItems()).length,0);
   assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","receptionRecords",receipt.recordId))).exists(),true);
   assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data().currentStatus,"inside");
+  assert.equal((await c.local.getTicket("ticket-1")).currentStatus,"inside","an acknowledged real receipt must not become unused under stale local metadata");
 });
 
 test("a timetable change during sync retries the transaction before admitting an old trial", async () => {

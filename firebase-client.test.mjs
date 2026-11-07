@@ -86,6 +86,7 @@ test("reception registration atomically creates the application and pending term
     exports, require: name => dependencies[name],
     localStorage: { getItem: () => "T-TEST-RECEPTION-01" },
     navigator: { userAgent: "iPad" },
+    setTimeout, clearTimeout,
   });
   await exports.registerReceptionTerminal("  Entrance  ");
   assert.equal(commits, 1);

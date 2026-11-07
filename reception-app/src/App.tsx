@@ -221,6 +221,7 @@ export default function App(){
       const approved=value?.approved===true;
       if(registrationActiveRef.current!==approved || workflowRef.current.registration?.eventId!==value?.eventId){
         ++registrationVersionRef.current;
+        lastRemoteCommandRef.current="";
         ++eventLoadVersionRef.current;
         eventLoadingRef.current=false;
         setBusy(false);
@@ -344,6 +345,7 @@ export default function App(){
       setScreen("ready");
     }catch(reason){
       console.error("通信によるイベントデータ受信に失敗しました",reason);
+      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){revokeCurrentApproval();return;}
       if(!registrationIsCurrent(registrationVersion))return;
       const code=reason instanceof Error?reason.message:"";
       if(code==="NO_PUBLISHED_EVENT"){
@@ -359,7 +361,7 @@ export default function App(){
       if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;
       if(registrationIsCurrent(registrationVersion))setBusy(false);
     }
-  },[busy,requireApprovalForNewEvent]);
+  },[busy,requireApprovalForNewEvent,revokeCurrentApproval]);
 
   useEffect(()=>{
     if(!terminalRegistration?.approved)return;
@@ -690,6 +692,7 @@ export default function App(){
       const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
       if(!registrationIsCurrent(registrationVersion))return;
       if(offlineData){
+        if(workflowRef.current.registration?.eventId!==offlineData.event.eventId)throw Error("このイベントの受付承認が必要です。別イベントのデータは保存できません。");
         const saved=await loadLocalEvent();
         if(saved&&saved.event.eventId!==offlineData.event.eventId)throw Error("別イベントへの切替にはオンラインで受付端末の再承認が必要です。");
       }else if(await requireApprovalForNewEvent(downloaded.localEvent.event.eventId))return;
@@ -706,6 +709,7 @@ export default function App(){
       setAuthCodeMode(false);
     }catch(reason){
       if(!registrationIsCurrent(registrationVersion))return;
+      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){revokeCurrentApproval();return;}
       setError(reason instanceof Error&&reason.message==="LOCAL_EVENT_PENDING_SYNC"
         ?"未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。"
         :offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
@@ -727,8 +731,9 @@ export default function App(){
       setAuthPayload(payload);
       setAuthCodeMode(false);
       setScreen("confirm");
-    }catch{
+    }catch(reason){
       if(!registrationIsCurrent(registrationVersion))return;
+      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){revokeCurrentApproval();return;}
       setError("イベント連携コードが正しくないか、イベントデータが見つかりません。");
     }finally{if(registrationIsCurrent(registrationVersion))setBusy(false);}
   };
@@ -819,7 +824,8 @@ export default function App(){
       const currentEvent=workflowRef.current.localEvent!;
       // Older versions may have consumed this ticket during a pre-opening test.
       // Apply the same correction to server reads as to the offline inventory.
-      ticket=productionTicketStates([ticket],currentEvent.event)[0];
+      const sameAcceptedLocalState=expectedLocalTicket && ticket.currentStatus===expectedLocalTicket.currentStatus && ticket.updatedAt===expectedLocalTicket.updatedAt;
+      if(!sameAcceptedLocalState)ticket=productionTicketStates([ticket],currentEvent.event)[0];
       if(isBeforeEventStart(currentEvent.event,capturedAt)){
         showTrial();
         return;

@@ -69,17 +69,21 @@ type OwnTerminalState = {
   pendingApplication: Record<string, unknown> | null;
 };
 
-async function readOwnTerminalState(): Promise<OwnTerminalState> {
+async function readOwnTerminalState(checkCurrent: () => void = () => {}): Promise<OwnTerminalState> {
   await ensureFirebaseAuth();
+  checkCurrent();
   const uid = await getFirebaseUid();
+  checkCurrent();
   const db = getFirebaseDb();
   const installationSnapshot = await getDoc(doc(db, "terminalInstallations", uid));
+  checkCurrent();
   if (installationSnapshot.exists()) {
     const installation = installationSnapshot.data();
     if (installation.authUid === uid && installation.approved === true &&
         typeof installation.terminalId === "string") {
       try {
         const terminalSnapshot = await getDoc(doc(db, "terminals", installation.terminalId));
+        checkCurrent();
         if (terminalSnapshot.exists()) {
           return {
             authUid: uid,
@@ -141,7 +145,7 @@ export async function getTerminalRegistration(isCurrent: () => boolean = () => t
 }
 
 async function readTerminalRegistration(checkActive: () => void, commitIdentity: (terminalId: string) => void): Promise<{approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null> {
-  const state = await readOwnTerminalState();
+  const state = await readOwnTerminalState(checkActive);
   checkActive();
   const checkedUid = async () => {
     const uid = await getFirebaseUid();
@@ -211,12 +215,35 @@ async function readTerminalRegistration(checkActive: () => void, commitIdentity:
   return null;
 }
 
+async function withRegistrationOperation<T>(operation: (checkCurrent: () => void, bindUid: (uid: string) => void) => Promise<T>): Promise<T> {
+  let active = true;
+  let authUid: string | undefined;
+  const initialTerminalId = localStorage.getItem("qr-ticket-terminal-id");
+  const checkCurrent = () => {
+    if (!active) throw Object.assign(new Error("受付登録の処理は終了しました"), {code: "cancelled"});
+    if (localStorage.getItem("qr-ticket-terminal-id") !== initialTerminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
+    const known = knownFirebaseUid?.();
+    if (authUid !== undefined && known !== undefined && known !== authUid) throw Object.assign(new Error("RECEPTION_AUTH_CHANGED"), {code: "cancelled"});
+  };
+  const bindUid = (uid: string) => {
+    if (authUid !== undefined && authUid !== uid) throw Object.assign(new Error("RECEPTION_AUTH_CHANGED"), {code: "cancelled"});
+    authUid = uid;
+    checkCurrent();
+  };
+  try { return await withReceptionDeadline(operation(checkCurrent, bindUid)); }
+  finally { active = false; }
+}
+
 export async function resetReceptionTerminalRegistration(): Promise<string | null> {
-  const current = await readOwnTerminalState();
+  return withRegistrationOperation(async (checkCurrent, bindUid) => {
+  const current = await readOwnTerminalState(checkCurrent);
+  bindUid(current.authUid);
   await ensureFirebaseAuth();
   const uid = await getFirebaseUid();
+  bindUid(uid);
   const db = getFirebaseDb();
   const applications = await getDocsFromServer(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
+  checkCurrent();
   const pending = applications.docs.find(item => item.data().status === "pending");
   if (!pending) {
     if (current.terminalId) throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
@@ -225,11 +252,14 @@ export async function resetReceptionTerminalRegistration(): Promise<string | nul
   const localTerminalId = pending.id;
   const applicationRef = doc(db, "terminalApplications", localTerminalId);
   await runTransaction(db, async tx => {
+    checkCurrent();
     const application = await tx.get(applicationRef);
+    checkCurrent();
     if (!application.exists() || application.data().requestedByUid !== uid ||
         application.data().status !== "pending") return;
     const terminalRef = doc(db, "terminals", localTerminalId);
     const terminal = await tx.get(terminalRef);
+    checkCurrent();
     if (terminal.exists()) {
       if (terminal.data().approved !== false || terminal.data().requestedByUid !== uid) {
         throw new Error("RECEPTION_RELEASE_REQUIRES_MANAGEMENT_APPROVAL");
@@ -242,27 +272,35 @@ export async function resetReceptionTerminalRegistration(): Promise<string | nul
     }
     tx.delete(applicationRef);
   });
+  checkCurrent();
   return current.terminalId;
+  });
 }
 
 export async function registerReceptionTerminal(name: string): Promise<void> {
   const terminalId = getTerminalIdForRegistration();
+  return withRegistrationOperation(async (checkCurrent, bindUid) => {
   const type = typeof navigator !== "undefined" && /Macintosh|Windows|Linux/i.test(navigator.userAgent)
     ? "Web / PC" : "Web / iPad";
   await ensureFirebaseAuth();
+  checkCurrent();
   const uid = await getFirebaseUid();
+  bindUid(uid);
   const db = getFirebaseDb();
-  const state = await readOwnTerminalState();
+  const state = await readOwnTerminalState(checkCurrent);
+  bindUid(state.authUid);
   if (state.terminalId && state.terminal?.approved === false) {
     const id = state.terminalId;
     const now = new Date().toISOString();
     await runTransaction(db, async tx => {
+      checkCurrent();
       const terminalRef = doc(db, "terminals", id);
       const ownerRef = doc(db, "terminalOwners", id);
       const installationRef = doc(db, "terminalInstallations", uid);
       const [terminal, owner, installation] = await Promise.all([
         tx.get(terminalRef), tx.get(ownerRef), tx.get(installationRef),
       ]);
+      checkCurrent();
       const data = terminal.data();
       if (!data || data.approved !== false || data.receptionApproved !== false ||
           data.managementApproved !== false || data.role !== "reception" || data.requestedRole !== "reception" ||
@@ -277,6 +315,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
       tx.set(doc(db, "terminalApplications", id), application);
       tx.update(terminalRef, {name: application.name, type, status: "pending", requestedAt: now, updatedAt: now});
     });
+    checkCurrent();
     localStorage.setItem("qr-ticket-terminal-id", id);
     localStorage.setItem("qr-ticket-device-id", id);
     return;
@@ -286,6 +325,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     where("requestedByUid", "==", uid),
     limit(5),
   ));
+  checkCurrent();
   if (existing.docs.some(item => item.data().status === "pending")) {
     throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
   }
@@ -305,6 +345,8 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
     syncPendingCount: 0,
   });
   await batch.commit();
+  checkCurrent();
+  });
 }
 
 /** Release only reception-only permission before an event-specific reapplication.
@@ -312,15 +354,20 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
  * the event locally instead of changing their management role.
  */
 export async function requestReceptionEventReapproval(name: string): Promise<boolean> {
-  const state = await readOwnTerminalState();
+  return withRegistrationOperation(async (checkCurrent, bindUid) => {
+  const state = await readOwnTerminalState(checkCurrent);
+  bindUid(state.authUid);
   if (!state.terminalId || !state.terminal) throw new Error("TERMINAL_NOT_FOUND");
   if (state.terminal.managementApproved === true) return false;
   const uid = await getFirebaseUid();
+  bindUid(uid);
   const db = getFirebaseDb();
   const now = new Date().toISOString();
   await runTransaction(db, async tx => {
+    checkCurrent();
     const ref = doc(db, "terminals", state.terminalId!);
     const snapshot = await tx.get(ref);
+    checkCurrent();
     const data = snapshot.data();
     if (!data || data.role !== "reception" || data.managementApproved !== false || data.requestedByUid !== uid) {
       throw new Error("RECEPTION_REAPPLICATION_NOT_AUTHORIZED");
@@ -333,8 +380,11 @@ export async function requestReceptionEventReapproval(name: string): Promise<boo
       approvalUpdatedAt: now, approvalUpdatedByUid: uid, updatedAt: now,
     });
   });
+  checkCurrent();
   await registerReceptionTerminal(name);
+  checkCurrent();
   return true;
+  });
 }
 
 export function subscribeTerminalRegistration(onChange: (value: {approved:boolean;status:"online"|"offline"|"pending";name:string;eventId?:string}|null) => void, onError: (error: unknown) => void): () => void {
@@ -363,7 +413,7 @@ function getTerminalIdForRegistration(): string {
   localStorage.setItem("qr-ticket-device-id", id);
   return id;
 }
-export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Ticket): Promise<void> {
+export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Ticket): Promise<"saved" | "trial"> {
   const auth = await withReceptionDeadline(ensureFirebaseAuth());
   const authUid = auth?.currentUser?.uid;
   const terminalId = getTerminalIdForRegistration();
@@ -388,7 +438,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
     checkIdentity();
   };
   try {
-    await withReceptionDeadline(runTransaction(db, async tx => {
+    return await withReceptionDeadline(runTransaction<"saved" | "trial">(db, async tx => {
       checkCurrent();
       const existingRecord = await tx.get(recordRef);
       checkCurrent();
@@ -400,7 +450,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
           saved.type === record.type &&
           saved.timestamp === record.timestamp;
         if (!sameRecord) throw new Error("RECEPTION_RECORD_ID_COLLISION");
-        return;
+        return "saved";
       }
 
       // Local event data can be cleared while its unsent history is deliberately
@@ -416,7 +466,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
           typeof time !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
         throw new Error("INVALID_RECEPTION_EVENT");
       }
-      if (Date.parse(record.timestamp) < Date.parse(`${date}T${time}:00+09:00`)) return;
+      if (Date.parse(record.timestamp) < Date.parse(`${date}T${time}:00+09:00`)) return "trial";
 
       // The event read participates in the transaction: a simultaneous timetable
       // edit retries the trial boundary check before either write can be accepted.
@@ -434,6 +484,7 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
         type: record.type,
         timestamp: record.timestamp,
       });
+      return "saved";
     }));
   } finally {
     // Already committed writes are retried by deterministic receipt ID. Do not

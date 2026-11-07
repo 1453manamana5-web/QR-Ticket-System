@@ -214,7 +214,7 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           eventStore.put(readyEvent);
           for (const ticket of tickets) {
             const pending = pendingRecords.get(ticket.ticketId)?.record;
-            const normalized = normalizePreopeningTicket(ticket, readyEvent);
+            const normalized = ticket;
             ticketStore.put(pending
               ? {...normalized, currentStatus: pending.type === "exit" ? "exited" : "inside",
                 updatedAt: pending.timestamp}
@@ -241,7 +241,7 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
             const record = request.result as ReceptionRecord | undefined;
             if (!record || record.eventId !== eventId) {
               hasOtherEventRecords = true;
-            } else if (!isBeforeEventStart(readyEvent.event, record.timestamp)) {
+            } else {
               const previous = pendingRecords.get(record.ticketId);
               const sequence = sequences.get(recordId);
               const newer = !previous || (sequence !== undefined
@@ -313,7 +313,7 @@ export async function getTicket(ticketId: string): Promise<Ticket | null> {
   const database = await openDatabase();
   try {
     return await new Promise<Ticket | null>((resolve, reject) => {
-      const transaction = database.transaction([STORES.tickets, STORES.event], "readwrite");
+      const transaction = database.transaction([STORES.tickets, STORES.event, STORES.receptionRecords, STORES.syncQueue], "readwrite");
       const store = transaction.objectStore(STORES.tickets);
       const request = store.get(ticketId);
       let ticket: Ticket | null = null;
@@ -325,8 +325,18 @@ export async function getTicket(ticketId: string): Promise<Ticket | null> {
         eventRequest.onsuccess = () => {
           const event = eventRequest.result as LocalEventData | undefined;
           if (!event) return;
-          ticket = normalizePreopeningTicket(saved, event);
-          if (ticket !== saved) store.put(ticket);
+          const records = transaction.objectStore(STORES.receptionRecords).index("ticketId").getAll(saved.ticketId);
+          records.onsuccess = () => {
+            const matches = (records.result as ReceptionRecord[]).filter(record => record.eventId === saved.eventId &&
+              record.timestamp === saved.updatedAt && (record.type === "exit" ? "exited" : "inside") === saved.currentStatus);
+            let remaining = matches.length, protect = false;
+            const finish = () => {ticket = protect ? saved : normalizePreopeningTicket(saved,event); if(ticket !== saved)store.put(ticket);};
+            if(!remaining){finish();return;}
+            for(const record of matches){const row=transaction.objectStore(STORES.syncQueue).get(record.recordId);
+              row.onsuccess=()=>{const item=row.result as (SyncQueueItem & {canonicalDisposition?:string})|undefined;
+                if(item && (item.status !== "synced" || item.canonicalDisposition === "saved"))protect=true;
+                if(--remaining===0)finish();};}
+          };
         };
       };
       transaction.oncomplete = () => resolve(ticket);
@@ -467,13 +477,14 @@ export async function getPendingSyncItems(): Promise<SyncQueueItem[]> {
 export async function markSyncStatus(
   recordId: string,
   status: SyncQueueItem["status"],
-  retryCount: number
+  retryCount: number,
+  canonicalDisposition?: "saved" | "trial"
 ): Promise<void> {
   const database = await openDatabase();
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORES.syncQueue, "readwrite");
+      const transaction = database.transaction([STORES.syncQueue, STORES.tickets, STORES.receptionRecords], "readwrite");
       const store = transaction.objectStore(STORES.syncQueue);
       const request = store.get(recordId);
       request.onsuccess = () => {
@@ -481,7 +492,16 @@ export async function markSyncStatus(
         // Different tabs can finish the same upload in either order. A late
         // failure cannot resurrect an acknowledgement already persisted here.
         if (previous && previous.status !== "synced") store.put({...previous, status,
-          retryCount: Math.max(previous.retryCount, retryCount), lastAttemptAt: new Date().toISOString()});
+          retryCount: Math.max(previous.retryCount, retryCount), lastAttemptAt: new Date().toISOString(),
+          ...(status === "synced" && canonicalDisposition ? {canonicalDisposition} : {})});
+        if(previous && previous.status !== "synced" && status === "synced" && canonicalDisposition === "trial"){
+          const recordRequest=transaction.objectStore(STORES.receptionRecords).get(recordId);
+          recordRequest.onsuccess=()=>{const record=recordRequest.result as ReceptionRecord|undefined;if(!record)return;
+            const ticketRequest=transaction.objectStore(STORES.tickets).get(record.ticketId);
+            ticketRequest.onsuccess=()=>{const ticket=ticketRequest.result as Ticket|undefined;
+              if(ticket && ticket.eventId===record.eventId && ticket.updatedAt===record.timestamp &&
+                ticket.currentStatus===(record.type==="exit"?"exited":"inside"))transaction.objectStore(STORES.tickets).put({...ticket,currentStatus:"unused"});};};
+        }
       };
 
       transaction.oncomplete = () => resolve();

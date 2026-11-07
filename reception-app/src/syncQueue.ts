@@ -36,8 +36,8 @@ export function syncPendingReceptionRecords(): Promise<void> {
         // An exit must never overtake a failed entry for the same ticket.
         if (blockedTickets.has(key)) continue;
         try {
-          await syncReceptionRecord(record);
-          await markSyncStatus(item.recordId, "synced", item.retryCount);
+          const outcome = await syncReceptionRecord(record);
+          await markSyncStatus(item.recordId, "synced", item.retryCount, outcome === "trial" ? "trial" : "saved");
         } catch (error) {
           blockedTickets.add(key);
           deferUntilNextRequest = isConnectionFailure(error);

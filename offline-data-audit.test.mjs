@@ -147,7 +147,7 @@ test("invalid schedules and malformed canonical counts cannot silently enable pr
   }
 });
 
-test("legacy trial state is removed from refresh overlay while records and queue survive", async () => {
+test("pending legacy state is retained until canonical trial classification", async () => {
   const factory = new IDBFactory(), local = localDb(factory);
   await local.prepareLocalEventData(localEvent(), [ticket()]);
   const trial = record("legacy-trial", "entry", "2026-11-05T23:59:59.999Z");
@@ -155,9 +155,11 @@ test("legacy trial state is removed from refresh overlay while records and queue
     ["receptionRecords", trial], ["syncQueue", {recordId: trial.recordId, status: "pending", retryCount: 0, sequence: 1}],
   ]);
   await local.prepareLocalEventData(localEvent("audit-event", 2), [{...ticket(), currentStatus: "inside", updatedAt: trial.timestamp}]);
-  assert.equal((await local.getTicket("audit-ticket")).currentStatus, "unused");
+  assert.equal((await local.getTicket("audit-ticket")).currentStatus, "inside");
+  await local.markSyncStatus(trial.recordId,"synced",0,"trial");
+  assert.equal((await local.getTicket("audit-ticket")).currentStatus,"unused");
   assert.deepEqual(await local.getReceptionRecord(trial.recordId), trial);
-  assert.equal((await local.getPendingSyncItems()).length, 1);
+  assert.equal((await local.getPendingSyncItems()).length, 0);
 });
 
 test("offline startup normalizes old trial state atomically and permits the first official entry", async () => {

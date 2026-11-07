@@ -1,6 +1,6 @@
 import { collection, doc, getDocFromServer, getDocsFromServer, query, where } from "firebase/firestore";
 import type { EventAuthPayload, Event, LocalEventData, ReceptionSettings, Ticket } from "@qr-ticket-system/shared";
-import { getFirebaseDb } from "./firebaseClient";
+import { getFirebaseDb, getKnownFirebaseUid } from "./firebaseClient";
 
 type EventBundle = {
   event: Event;
@@ -161,8 +161,15 @@ export async function downloadEventData(
     throw new Error("EVENT_DATA_INVALID");
   }
   let active = true;
+  const initialUid = typeof getKnownFirebaseUid === "function" ? getKnownFirebaseUid() : undefined;
+  const checkIdentity = () => {
+    const current = typeof getKnownFirebaseUid === "function" ? getKnownFirebaseUid() : undefined;
+    if(initialUid === null || (initialUid !== undefined && current !== undefined && current !== initialUid)) {
+      throw Object.assign(new Error("RECEPTION_AUTH_CHANGED"),{code:"cancelled"});
+    }
+  };
   const read = async <T>(operation: () => Promise<T>): Promise<T> => {
-    const check = () => {if (!active) throw Object.assign(new Error("イベント取得の通信がタイムアウトしました"), {code: "deadline-exceeded"});};
+    const check = () => {checkIdentity();if (!active) throw Object.assign(new Error("イベント取得の通信がタイムアウトしました"), {code: "deadline-exceeded"});};
     check();
     const result = await operation();
     check();

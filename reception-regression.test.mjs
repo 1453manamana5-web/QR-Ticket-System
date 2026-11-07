@@ -283,7 +283,7 @@ test("event QR authentication saves the complete downloaded event and is not int
 });
 
 test('offline event QR preparation saves all tickets without calling the Firebase downloader',async()=>{
-  const h=await harness({saved:false,automatic:async()=>{throw Error('NO_PUBLISHED_EVENT');},download:async()=>{throw Error('OFFLINE_DOWNLOAD_MUST_NOT_RUN');}});
+  const h=await harness({initialRegistration:{approved:true,status:'online',name:'Test',eventId:'event-one'},saved:false,automatic:async()=>{throw Error('NO_PUBLISHED_EVENT');},download:async()=>{throw Error('OFFLINE_DOWNLOAD_MUST_NOT_RUN');}});
   try{
     h.navigator.onLine=false;
     await h.click('イベントデータQRを読み取る');
