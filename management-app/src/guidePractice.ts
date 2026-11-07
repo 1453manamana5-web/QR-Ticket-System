@@ -46,7 +46,7 @@ export function createGuidePractice(){
     setManagedTerminalMode:async(id:string,mode:string)=>{terminals=terminals.map(t=>t.terminalId===id?{...t,mode,desiredMode:mode,lastSeen:now()}:t);emitTerminals();},
     setManagedSubAdmin:async(id:string,subAdmin:boolean)=>{terminals=terminals.map(t=>t.terminalId===id?{...t,subAdmin}:t);emitTerminals();},
     deleteTerminal:async(id:string)=>{terminals=terminals.filter(t=>t.terminalId!==id);emitTerminals();},
-    revokeManagedReception:async()=>{},releaseOwnReception:async()=>{},requestTerminalRegistration:async()=>{},saveMember:async()=>{},deleteMember:async()=>{},
+    revokeManagedReception:async()=>{},releaseOwnReception:async()=>{},requestTerminalRegistration:async()=>{},saveMember:async(_eventId?:string,_member?:unknown,_mode?:"create"|"update")=>{},deleteMember:async()=>{},
   } as unknown as typeof Data;
   const publisher={saveEventMetadata:saveEvent,saveEventStatus:async(id:string,status:Event["eventStatus"])=>{const e=events.find(e=>e.eventId===id);if(e)await saveEvent({...e,eventStatus:status});},loadPublishedEventBundle:async(id:string)=>copy(bundles.get(id)??null),publishEventBundle:async(e:Event,s:ReceptionSettings)=>{
     const result={event:{...e,receptionTarget:true},settings:copy(s),tickets:getTickets(e.eventId),ticketCount:getTickets(e.eventId).length,authToken:'GUIDE-INVALID-TOKEN',publishedAt:now()};bundles.set(e.eventId,result);await saveEvent(result.event);return copy(result);

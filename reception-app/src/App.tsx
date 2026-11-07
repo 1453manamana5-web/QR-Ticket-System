@@ -121,7 +121,8 @@ export default function App(){
   const [pendingSyncCount,setPendingSyncCount]=useState(0);
   const pendingSyncStatus=pendingSyncCount>0?<span role="status" className="connection-status">未同期 {pendingSyncCount}件（端末内保存済み）</span>:null;
   const [networkMbps,setNetworkMbps]=useState<number|null>(null);
-  const eventLoadingRef=useRef(false);
+  const eventLoadingRef=useRef<number|null>(null);
+  const metadataLoadingRef=useRef<number|null>(null);
   const eventLoadVersionRef=useRef(0);
   const eventAuthenticationRequiredRef=useRef(false);
   const scanProcessingRef=useRef(false);
@@ -141,7 +142,8 @@ export default function App(){
     registrationActiveRef.current=false;
     ++registrationVersionRef.current;
     ++eventLoadVersionRef.current;
-    eventLoadingRef.current=false;
+    eventLoadingRef.current=null;
+    metadataLoadingRef.current=null;
     eventAuthenticationRequiredRef.current=true;
     pendingRemoteModeRef.current=null;
     receptionAllowedRef.current=false;
@@ -200,8 +202,8 @@ export default function App(){
       try{
         const raw=localStorage.getItem("qr-ticket-reception-approved");
         if(!raw)return null;
-        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:string;authUid?:unknown};
-        if(saved.approved!==true||saved.terminalId!==getTerminalId())return null;
+        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:unknown;authUid?:unknown};
+        if(saved.approved!==true||saved.terminalId!==getTerminalId()||typeof saved.eventId!=="string"||!saved.eventId.trim())return null;
         // An unresolved offline Auth restoration is not a revocation. Once the
         // identity is known, never transfer another identity's cached approval.
         const knownUid=typeof getKnownFirebaseUid==='function'?getKnownFirebaseUid():undefined;
@@ -223,7 +225,8 @@ export default function App(){
         ++registrationVersionRef.current;
         lastRemoteCommandRef.current="";
         ++eventLoadVersionRef.current;
-        eventLoadingRef.current=false;
+        eventLoadingRef.current=null;
+        metadataLoadingRef.current=null;
         setBusy(false);
       }
       registrationActiveRef.current=approved;
@@ -288,16 +291,17 @@ export default function App(){
     };
   },[]);
 
-  const requireApprovalForNewEvent=useCallback(async(eventId:string)=>{
+  const requireApprovalForNewEvent=useCallback(async(eventId:string,operationIsCurrent:()=>boolean=()=>true)=>{
     const version=registrationVersionRef.current;
     const registration=await getTerminalRegistration();
     // A subscription may revoke or approve another event while this read is pending.
-    if(!registrationIsCurrent(version))return true;
+    if(!registrationIsCurrent(version)||!operationIsCurrent())return true;
     if(registration?.approved && registration.eventId===eventId)return false;
     registrationActiveRef.current=false;
     ++registrationVersionRef.current;
     ++eventLoadVersionRef.current;
-    eventLoadingRef.current=false;
+    eventLoadingRef.current=null;
+    metadataLoadingRef.current=null;
     setBusy(false);
     pendingRemoteModeRef.current=null;
     setLocalEvent(null); setAuthPayload(null); setResult(null);
@@ -308,13 +312,14 @@ export default function App(){
   },[]);
 
   const receiveEventByCommunication=useCallback(async()=>{
-    if(busy||eventLoadingRef.current)return;
+    if(busy||eventLoadingRef.current!==null)return;
     if(!navigator.onLine){
       setError("通信で受信するにはインターネット接続が必要です。保存済みイベントがある場合はオフラインで利用できます。");
       return;
     }
-    eventLoadingRef.current=true;
     const loadVersion=++eventLoadVersionRef.current;
+    metadataLoadingRef.current=null;
+    eventLoadingRef.current=loadVersion;
     const registrationVersion=registrationVersionRef.current;
     setBusy(true);
     setError("");
@@ -345,8 +350,8 @@ export default function App(){
       setScreen("ready");
     }catch(reason){
       console.error("通信によるイベントデータ受信に失敗しました",reason);
-      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){revokeCurrentApproval();return;}
       if(!registrationIsCurrent(registrationVersion))return;
+      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){revokeCurrentApproval();return;}
       const code=reason instanceof Error?reason.message:"";
       if(code==="NO_PUBLISHED_EVENT"){
         setError("管理アプリで受付対象イベントを公開してください。");
@@ -358,7 +363,7 @@ export default function App(){
         setError("通信でイベントデータを受信できませんでした。通信状態と管理アプリの公開設定を確認してください。");
       }
     }finally{
-      if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;
+      if(eventLoadingRef.current===loadVersion)eventLoadingRef.current=null;
       if(registrationIsCurrent(registrationVersion))setBusy(false);
     }
   },[busy,requireApprovalForNewEvent,revokeCurrentApproval]);
@@ -370,11 +375,12 @@ export default function App(){
     const registrationVersion=registrationVersionRef.current;
     let cachedEvent:LocalEventData|null=null;
     let cacheValidationFailed=false;
+    let ownedMetadata:number|null=null;
 
-    const restoreCachedEvent=async()=>{
+    const restoreCachedEvent=async(loadVersion:number)=>{
       const saved=await loadLocalEvent(true);
       if(terminalRegistration?.eventId && saved?.event.eventId!==terminalRegistration.eventId)return null;
-      if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||!registrationIsCurrent(registrationVersion)||eventAuthenticationRequiredRef.current)return null;
+      if(!saved?.dataReady||saved.terminalId!==getTerminalId()||cancelled||!registrationIsCurrent(registrationVersion)||eventAuthenticationRequiredRef.current||metadataLoadingRef.current!==loadVersion||eventLoadVersionRef.current!==loadVersion)return null;
       if(cancelled||!["auth","ready","registration"].includes(screenRef.current))return null;
       cachedEvent=saved;
       setLocalEvent(saved);
@@ -392,36 +398,39 @@ export default function App(){
     };
 
     const loadCurrentFirebaseEvent=async()=>{
-      if(eventLoadingRef.current||eventAuthenticationRequiredRef.current)return;
+      if(eventLoadingRef.current!==null||metadataLoadingRef.current!==null||eventAuthenticationRequiredRef.current)return;
       if(!["auth","ready","reception","registration"].includes(screenRef.current))return;
-      eventLoadingRef.current=true;
       const loadVersion=++eventLoadVersionRef.current;
+      metadataLoadingRef.current=loadVersion;
+      ownedMetadata=loadVersion;
+      const current=()=>!cancelled&&registrationIsCurrent(registrationVersion)&&metadataLoadingRef.current===loadVersion&&eventLoadVersionRef.current===loadVersion;
       try{
         // まず端末内の保存済みデータを復元する。Firebaseの応答を待たず受付準備画面を開ける。
         if(!cachedEvent && screenRef.current!=="reception"){
           try{
-            await restoreCachedEvent();
+            await restoreCachedEvent(loadVersion);
           }catch(reason){
             console.error("端末内イベントデータの復元に失敗しました",reason);
             if(reason instanceof Error&&reason.message==="LOCAL_EVENT_INCOMPLETE"){
               cacheValidationFailed=true;
-              if(!cancelled)setError("端末に保存されたイベントデータが不完全です。もう一度イベントデータを受信してください。");
+              if(current())setError("端末に保存されたイベントデータが不完全です。もう一度イベントデータを受信してください。");
             }
           }
         }
-        if(cancelled||!registrationIsCurrent(registrationVersion)||!navigator.onLine)return;
+        if(!current()||!navigator.onLine)return;
 
         // Poll only the small publication document. Downloading every ticket on
         // every 10-second check could exhaust Firestore reads during reception.
         const payload=await getCurrentFirebaseEventAuthPayload();
-        if(cancelled||!registrationIsCurrent(registrationVersion))return;
+        if(!current())return;
 
         const existing=await loadLocalEvent();
-        if(cancelled||!registrationIsCurrent(registrationVersion))return;
+        if(!current())return;
         // Event authentication is reset without overwriting the approved terminal
         // or deleting its unsent records. A fresh event must be selected explicitly.
         if(existing?.dataReady && existing.event.eventId!==payload.eventId){
-          if(await requireApprovalForNewEvent(payload.eventId))return;
+          if(await requireApprovalForNewEvent(payload.eventId,current))return;
+          if(!current())return;
           eventAuthenticationRequiredRef.current=true;
           cachedEvent=null;
           setLocalEvent(null);
@@ -445,8 +454,10 @@ export default function App(){
           // Keep it current while preserving the local ticket states and queue.
           const updated=payload.event?{...existing,event:payload.event}:existing;
           if(payload.event&&JSON.stringify(existing.event)!==JSON.stringify(payload.event)){
+            if(eventLoadingRef.current!==null)return;
+            eventLoadingRef.current=loadVersion;
             await saveLocalEvent(updated);
-            if(cancelled||!registrationIsCurrent(registrationVersion))return;
+            if(!current())return;
           }
           cachedEvent=updated;
           setLocalEvent(updated);
@@ -465,16 +476,18 @@ export default function App(){
         }
 
         const downloaded=await downloadEventData(payload,getTerminalId());
-        if(cancelled||!registrationIsCurrent(registrationVersion)||!["ready","auth","registration","reception"].includes(screenRef.current))return;
+        if(!current()||!["ready","auth","registration","reception"].includes(screenRef.current))return;
         const nextEvent:LocalEventData={
           ...downloaded.localEvent,
           ticketCount:downloaded.tickets.length,
           dataReady:false,
         };
+        if(eventLoadingRef.current!==null)return;
+        eventLoadingRef.current=loadVersion;
         await prepareLocalEventData(nextEvent,downloaded.tickets);
         cacheValidationFailed=false;
         nextEvent.dataReady=true;
-        if(cancelled||!registrationIsCurrent(registrationVersion))return;
+        if(!current())return;
         cachedEvent=nextEvent;
         setLocalEvent(nextEvent);
         setAuthPayload({
@@ -491,7 +504,7 @@ export default function App(){
         }
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
-        if(cancelled||!registrationIsCurrent(registrationVersion))return;
+        if(!current())return;
         if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){
           revokeCurrentApproval();return;
         }
@@ -516,7 +529,8 @@ export default function App(){
         }
         // 通信失敗時は、正常に保存済みのイベントとチケットを端末内でそのまま使う。
       }finally{
-        if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;
+        if(eventLoadingRef.current===loadVersion)eventLoadingRef.current=null;
+        if(metadataLoadingRef.current===loadVersion)metadataLoadingRef.current=null;
       }
     };
 
@@ -526,6 +540,7 @@ export default function App(){
     window.addEventListener("online",handleOnline);
     return()=>{
       cancelled=true;
+      if(metadataLoadingRef.current===ownedMetadata)metadataLoadingRef.current=null;
       window.clearInterval(interval);
       window.removeEventListener("online",handleOnline);
     };
@@ -684,9 +699,10 @@ export default function App(){
     if(!authPayload||busy)return;
     setBusy(true);
     setError("");
-    if(eventLoadingRef.current){setBusy(false);return;}
-    eventLoadingRef.current=true;
+    if(eventLoadingRef.current!==null){setBusy(false);return;}
     const loadVersion=++eventLoadVersionRef.current;
+    metadataLoadingRef.current=null;
+    eventLoadingRef.current=loadVersion;
     const registrationVersion=registrationVersionRef.current;
     try{
       const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
@@ -714,7 +730,7 @@ export default function App(){
         ?"未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。"
         :offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
-    }finally{if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;if(registrationIsCurrent(registrationVersion))setBusy(false);}
+    }finally{if(eventLoadingRef.current===loadVersion){eventLoadingRef.current=null;if(registrationIsCurrent(registrationVersion))setBusy(false);}}
   };
 
   const handleAuthCodeSubmit=async()=>{

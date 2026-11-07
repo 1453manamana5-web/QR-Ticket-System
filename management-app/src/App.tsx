@@ -444,6 +444,8 @@ export default function App({practice=false}:AppProps={}) {
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [memberBulkModalOpen, setMemberBulkModalOpen] = useState(false);
   const [memberBulkText, setMemberBulkText] = useState("");
+  const [memberBulkSaving, setMemberBulkSaving] = useState(false);
+  const memberBulkWriteRunning = useRef(false);
   const [memberQrModal, setMemberQrModal] = useState<{ memberId: string; memberNumber: number; name: string } | null>(null);
   type TerminalStatus = "online" | "offline" | "pending";
   type TerminalMode = "入口受付" | "出口受付" | "停止";
@@ -1283,7 +1285,7 @@ export default function App({practice=false}:AppProps={}) {
           }
           if (parsed.eventId) {
             const existing = new Set((await loadMembers(parsed.eventId)).map(member => member.memberId));
-            for (const member of parsed.members) if (!existing.has(member.memberId)) await saveMember(parsed.eventId, member);
+            for (const member of parsed.members) if (!existing.has(member.memberId)) await saveMember(parsed.eventId, member, "create");
             if (parsed.receptionSettings && !await loadReceptionSettings(parsed.eventId)) await saveReceptionSettings(parsed.eventId, parsed.receptionSettings);
           }
           if (parsed.appSettings) {
@@ -1305,33 +1307,98 @@ export default function App({practice=false}:AppProps={}) {
     input.click();
   };
 
-  const addMember = () => {
+  const memberCreationRunning = useRef(false);
+  const addMember = async () => {
+    if (memberCreationRunning.current) return;
     const normalized = memberName.trim();
-    if (!normalized) return;
+    const eventId = event.eventId;
+    if (!normalized || !eventId) return;
     const nextNumber = members.reduce((max, member) => Math.max(max, member.memberNumber), 0) + 1;
     const nextMember = {
       memberId: `MBR-${String(nextNumber).padStart(4, "0")}`,
       memberNumber: nextNumber,
       name: normalized,
     };
-    setMembers(current => [...current, nextMember]);
-    void saveMember(event.eventId, nextMember).catch(reason => { console.error(reason); setError("部員情報をFirebaseへ保存できませんでした。"); });
-    setMemberName("");
+    memberCreationRunning.current = true;
+    try {
+      await saveMember(eventId, nextMember, "create");
+      if (currentEventId.current !== eventId) return;
+      setMembers(current => [...current.filter(member => member.memberId !== nextMember.memberId), nextMember]);
+      setMemberName(current => current.trim() === normalized ? "" : current);
+    } catch (reason) {
+      console.error(reason);
+      if (currentEventId.current === eventId) setError("部員情報をFirebaseへ保存できませんでした。");
+    } finally {
+      memberCreationRunning.current = false;
+    }
   };
 
-  const updateMemberName = (memberId: string, name: string) => {
+  const memberDeletionRunning = useRef(new Set<string>());
+  const memberNameWrites = useRef(new Map<string, {version:number;confirmedName:string;pending:Promise<void>;cancelled:boolean}>());
+  const queueMemberNameWrite = (memberId: string, name: string): Promise<boolean> => {
+    const eventId = event.eventId;
+    const key = JSON.stringify([eventId, memberId]);
     const target = members.find(member => member.memberId === memberId);
-    if (!target) return;
+    if (!target || memberDeletionRunning.current.has(key)) return Promise.resolve(false);
+    let write = memberNameWrites.current.get(key);
+    if (!write) {
+      write = {version:0,confirmedName:target.name,pending:Promise.resolve(),cancelled:false};
+      memberNameWrites.current.set(key, write);
+    }
+    const entry = write;
+    const version = ++entry.version;
     const nextMember = { ...target, name };
-    setMembers(current => current.map(member => member.memberId === memberId ? nextMember : member));
-    void saveMember(event.eventId, nextMember).catch(reason => { console.error(reason); setError("部員情報をFirebaseへ保存できませんでした。"); });
+    setMembers(current => current.map(member => member.memberId === memberId ? { ...member, name } : member));
+    const result = entry.pending.then(async () => {
+      if (entry.cancelled || version !== entry.version) return false;
+      try {
+        await saveMember(eventId, nextMember, "update");
+        entry.confirmedName = name;
+        return true;
+      } catch (reason) {
+        console.error(reason);
+        if (!entry.cancelled && version === entry.version && currentEventId.current === eventId) {
+          setMembers(current => current.map(member => member.memberId === memberId && member.name === name
+            ? { ...member, name:entry.confirmedName } : member));
+          setError("部員情報をFirebaseへ保存できませんでした。");
+        }
+        return false;
+      }
+    });
+    entry.pending = result.then(() => {});
+    void entry.pending.then(() => {
+      if (memberNameWrites.current.get(key) === entry && entry.version === version) memberNameWrites.current.delete(key);
+    });
+    return result;
+  };
+  const updateMemberName = (memberId: string, name: string) => {
+    void queueMemberNameWrite(memberId, name);
   };
 
-  const deleteMember = (memberId: string) => {
+  const deleteMember = async (memberId: string) => {
+    const eventId = event.eventId;
+    const key = JSON.stringify([eventId, memberId]);
+    if (memberDeletionRunning.current.has(key)) return;
     const target = members.find(member => member.memberId === memberId);
     if (!target || !window.confirm(`「${target.name}」を部員一覧から削除しますか？`)) return;
-    setMembers(current => current.filter(member => member.memberId !== memberId));
-    void deleteFirebaseMember(event.eventId, memberId).catch(reason => { console.error(reason); setError("部員情報をFirebaseから削除できませんでした。"); });
+    memberDeletionRunning.current.add(key);
+    const nameWrite = memberNameWrites.current.get(key);
+    if (nameWrite) nameWrite.cancelled = true;
+    try {
+      if (nameWrite) await nameWrite.pending;
+      await deleteFirebaseMember(eventId, memberId);
+      if (currentEventId.current !== eventId) return;
+      setMembers(current => current.filter(member => member.memberId !== memberId));
+      setSelectedMemberIds(current => current.filter(id => id !== memberId));
+    } catch (reason) {
+      console.error(reason);
+      if (currentEventId.current === eventId) {
+        if (nameWrite) setMembers(current => current.map(member => member.memberId === memberId ? { ...member, name:nameWrite.confirmedName } : member));
+        setError("部員情報をFirebaseから削除できませんでした。");
+      }
+    } finally {
+      memberDeletionRunning.current.delete(key);
+    }
   };
 
   const toggleMemberSelection = (memberId: string) => {
@@ -1346,22 +1413,29 @@ export default function App({practice=false}:AppProps={}) {
     });
   };
 
-  const applyBulkMemberNames = () => {
+  const applyBulkMemberNames = async () => {
+    if (memberBulkWriteRunning.current) return;
     const names = memberBulkText.split(/\r?\n/).map(name => name.trim());
     const orderedIds = filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => member.memberId);
     if (!orderedIds.length || names.length !== orderedIds.length || names.some(name => !name)) return;
-    setMembers(current => current.map(member => {
-      const index = orderedIds.indexOf(member.memberId);
-      return index >= 0 ? { ...member, name: names[index] } : member;
-    }));
-    const nextMembers = members.map(member => {
-      const index = orderedIds.indexOf(member.memberId);
-      return index >= 0 ? { ...member, name: names[index] } : member;
-    });
-    void Promise.all(nextMembers.filter(member => orderedIds.includes(member.memberId)).map(member => saveMember(event.eventId, member))).catch(reason => console.error("Firebase member bulk save failed", reason));
-    setSelectedMemberIds([]);
-    setMemberBulkText("");
-    setMemberBulkModalOpen(false);
+    const eventId = event.eventId;
+    memberBulkWriteRunning.current = true;
+    setMemberBulkSaving(true);
+    setError("");
+    try {
+      const results = await Promise.all(orderedIds.map((memberId, index) => queueMemberNameWrite(memberId, names[index])));
+      if (currentEventId.current !== eventId) return;
+      if (results.some(saved => !saved)) {
+        setError("一部の部員名を保存できませんでした。未保存の氏名は元に戻しました。確認して再試行してください。");
+        return;
+      }
+      setSelectedMemberIds([]);
+      setMemberBulkText("");
+      setMemberBulkModalOpen(false);
+    } finally {
+      memberBulkWriteRunning.current = false;
+      setMemberBulkSaving(false);
+    }
   };
 
   const filteredMembers = useMemo(() => {
@@ -2399,6 +2473,8 @@ export default function App({practice=false}:AppProps={}) {
           <span className="pill">{members.length}人</span>
         </div>
 
+        {error && !memberBulkModalOpen && <p className="notice error" role="alert">{error}</p>}
+
         <div className="member-summary">
           <div><small>REGISTERED MEMBERS</small><strong>{members.length}</strong><span>登録部員</span></div>
           <div><small>AUTHENTICATION</small><strong>{members.length}</strong><span>認証QR発行可能</span></div>
@@ -2457,14 +2533,15 @@ export default function App({practice=false}:AppProps={}) {
         )}
       </section>
 
-      <SurfacePresence>{memberBulkModalOpen && <div className="member-registration-backdrop" onMouseDown={() => setMemberBulkModalOpen(false)}>
+      <SurfacePresence>{memberBulkModalOpen && <div className="member-registration-backdrop" onMouseDown={() => { if (!memberBulkSaving) setMemberBulkModalOpen(false); }}>
         <section className="member-registration-modal member-bulk-modal" onMouseDown={e => e.stopPropagation()}>
-          <button className="member-registration-close" onClick={() => setMemberBulkModalOpen(false)} aria-label="閉じる">×</button>
+          <button className="member-registration-close" disabled={memberBulkSaving} onClick={() => setMemberBulkModalOpen(false)} aria-label="閉じる">×</button>
           <div className="member-registration-heading"><small>BULK MEMBER EDIT</small><h2>部員名をまとめて変更</h2><p>選択した部員の順番に合わせて、1行に1人ずつ入力してください。</p></div>
           <div className="member-bulk-info">{selectedMemberIds.length}人を変更</div>
-          <textarea className="member-bulk-textarea" value={memberBulkText} onChange={e => setMemberBulkText(e.target.value)} placeholder={filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => member.name || "未登録").join("\n")} rows={Math.max(5, selectedMemberIds.length)} />
+          <textarea className="member-bulk-textarea" disabled={memberBulkSaving} value={memberBulkText} onChange={e => setMemberBulkText(e.target.value)} placeholder={filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => member.name || "未登録").join("\n")} rows={Math.max(5, selectedMemberIds.length)} />
           <div className="member-bulk-order">{filteredMembers.filter(member => selectedMemberIds.includes(member.memberId)).map(member => <span key={member.memberId}>#{member.memberNumber}</span>)}</div>
-          <div className="member-registration-actions"><button className="secondary" onClick={() => setMemberBulkModalOpen(false)}>キャンセル</button><button className="primary-action" disabled={memberBulkText.split(/\r?\n/).filter(name => name.trim()).length !== selectedMemberIds.length} onClick={applyBulkMemberNames}>変更を適用</button></div>
+          {error && <p className="notice error">{error}</p>}
+          <div className="member-registration-actions"><button className="secondary" disabled={memberBulkSaving} onClick={() => setMemberBulkModalOpen(false)}>キャンセル</button><button className="primary-action" disabled={memberBulkSaving || memberBulkText.split(/\r?\n/).filter(name => name.trim()).length !== selectedMemberIds.length} onClick={() => void applyBulkMemberNames()}>{memberBulkSaving ? "保存中…" : "変更を適用"}</button></div>
         </section>
       </div>}</SurfacePresence>
 

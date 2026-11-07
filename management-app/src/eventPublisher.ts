@@ -149,6 +149,11 @@ export async function publishEventBundle(
   const db = getFirebaseDb();
   const authToken = createAuthToken();
   // Firestore is authoritative even when a stale UI still contains deleted tickets.
+  // Capture inventory metadata before the query so a concurrent issue, edit or
+  // deletion cannot pair an older ticket snapshot with newer event metadata.
+  const inventoryBefore = await getDocFromServer(doc(db, "events", event.eventId));
+  if (!inventoryBefore.exists()) throw new Error("EVENT_NOT_FOUND");
+  const inventoryRevision = Number(inventoryBefore.data().inventoryRevision) || 0;
   const savedTicketsSnapshot = await getDocsFromServer(collection(db, "events", event.eventId, "tickets"));
   const publishedTickets = savedTicketsSnapshot.docs.map(item => item.data() as Ticket);
   // A stale UI/backup must never resurrect tickets deliberately removed on the server.
@@ -167,6 +172,10 @@ export async function publishEventBundle(
     const storedEvent=events.find(item=>item.id===event.eventId)?.data();
     if(!storedEvent)throw new Error("EVENT_NOT_FOUND");
     if(storedEvent?.eventStatus==="finished")throw new Error("EVENT_FINISHED");
+    if ((Number(storedEvent.inventoryRevision) || 0) !== inventoryRevision ||
+        (Number.isSafeInteger(storedEvent.ticketCount) && Number(storedEvent.ticketCount) !== publishedTickets.length)) {
+      throw new Error("EVENT_INVENTORY_CHANGED_RETRY");
+    }
     const savedVersion=Number.isSafeInteger(storedEvent?.dataVersion)?Number(storedEvent?.dataVersion):1;
     const savedStatus=storedEvent.eventStatus;
     const publishedEvent:Event={eventId:event.eventId,eventName:event.eventName,eventDate:event.eventDate,startTime:event.startTime,endTime:event.endTime,dataVersion:Math.max(1,event.dataVersion,savedVersion)+(storedEvent?.authToken?1:0),eventStatus:savedStatus==="active"||savedStatus==="finalizing"?savedStatus:"ready"};
