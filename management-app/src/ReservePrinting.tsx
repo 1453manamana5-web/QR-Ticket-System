@@ -2,13 +2,15 @@ import {useEffect,useRef,useState} from 'react';
 import {useReservePrintLedger} from './reservePrintLedger';
 import * as realStore from './reservePrintStore';
 import {loadReservePackage,selectReserveTickets,type ReservePackage} from './reservePrintStore';
+import {printContentSecurityPolicy} from '../../shared/src/browserSecurity';
 type PrintStore=Pick<typeof realStore,'loadReservePackage'|'saveReservePackage'|'claimReserveBatch'|'finishReserveBatch'>;
 
 export function openReservePrint(packet:ReservePackage,popup:Window){
   if(!packet.pending)throw Error('印刷対象がありません。');
   const ids=new Set(packet.pending.ids),tickets=packet.tickets.filter(t=>ids.has(t.id));
   if(tickets.length!==ids.size)throw Error('印刷対象のデータが不足しています。');
-  const doc=popup.document;doc.open();doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>予備チケット印刷</title><style>${packet.css}\n.reserve-print-actions{padding:16px;font:16px sans-serif}.reserve-print-actions button{padding:12px;font-size:18px}@media print{.reserve-print-actions{display:none!important}}</style></head><body></body></html>`);
+  popup.opener=null;
+  const doc=popup.document;doc.open();doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${printContentSecurityPolicy}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><title>予備チケット印刷</title><style>${packet.css}\n.reserve-print-actions{padding:16px;font:16px sans-serif}.reserve-print-actions button{padding:12px;font-size:18px}@media print{.reserve-print-actions{display:none!important}}</style></head><body></body></html>`);
   doc.title=packet.eventName+' - 予備チケット';
   const actions=doc.createElement('nav');actions.className='reserve-print-actions';
   const retry=doc.createElement('button');retry.textContent='印刷する';retry.onclick=()=>popup.print();

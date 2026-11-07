@@ -6,6 +6,7 @@ import "./motion.css";
 import "../../shared/src/controlMotion.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
 import OfflineReserveRoot from './ReservePrinting';
+import {blockEmbeddedApp} from '../../shared/src/browserSecurity';
 
 const installAutomaticAppUpdate = () => {
   if (!("serviceWorker" in navigator)) return;
@@ -28,6 +29,7 @@ function describeFirebaseStartupError(error: unknown): string {
 async function startApp() {
   const rootElement = document.getElementById("root");
   if (!rootElement) throw new Error("Reactの表示領域が見つかりません。");
+  if (blockEmbeddedApp(rootElement, window)) return;
   installAutomaticAppUpdate();
   const reserveEventId=new URLSearchParams(window.location.search).get('reserve-print');
   if(reserveEventId){ReactDOM.createRoot(rootElement).render(<OfflineReserveRoot eventId={reserveEventId}/>);return;}

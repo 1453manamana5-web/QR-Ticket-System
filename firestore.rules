@@ -6,6 +6,8 @@ rules_version = '2';
 // Owner/installation mappings and all approval/role fields remain immutable.
 // Heartbeat additions (optional): receptionMode entry/exit/stopped; receptionEventId
 // string 1..160; receptionReportedAt server timestamp. They confer no permissions.
+// New registration IDs are 1..160 characters; requestedAt/updatedAt are
+// nonempty strings up to 40 characters, including during reapplication.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -212,10 +214,16 @@ service cloud.firestore {
       return /databases/$(database)/documents/terminalInstallations/$(uid);
     }
 
+    function boundedRegistrationMetadata(data, terminalId) {
+      return terminalId.size() > 0 && terminalId.size() <= 160
+        && data.requestedAt is string && data.requestedAt.size() > 0 && data.requestedAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 40;
+    }
+
     function validTerminalRegistrationCreate(terminalId) {
       let data = request.resource.data;
       let app = getAfter(applicationPath(terminalId)).data;
-      return signedIn()
+      return signedIn() && boundedRegistrationMetadata(data, terminalId)
         && !exists(ownerPath(terminalId))
         && !exists(terminalPath(terminalId))
         && existsAfter(applicationPath(terminalId))
@@ -532,6 +540,7 @@ service cloud.firestore {
           "status", "requestedAt", "updatedAt"
         ])
         && request.resource.data.terminalId == terminalId
+        && boundedRegistrationMetadata(request.resource.data, terminalId)
         && request.resource.data.requestedByUid == request.auth.uid
         && request.resource.data.requestedRole in ["management", "reception", "both"]
         && request.resource.data.name is string
