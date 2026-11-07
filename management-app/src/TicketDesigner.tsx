@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type Dispatch, type SetStateAction,
   type CSSProperties,
   useEffect,
   useLayoutEffect,
@@ -27,6 +28,12 @@ export type TicketDesignerTicket = {
   reserve?:boolean;
 };
 
+async function designDeadline<T>(promise:Promise<T>,ms=5000):Promise<T>{
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("通信がタイムアウトしました。")),ms);})]);}
+  finally{if(timer!==undefined)clearTimeout(timer);}
+}
+
 type TicketDesignerProps = {
   tickets: TicketDesignerTicket[];
   eventName: string;
@@ -36,6 +43,8 @@ type TicketDesignerProps = {
   practice?:boolean;
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
+  loadSharedDesign?: () => Promise<string|null>;
+  saveSharedDesign?: (serialized:string) => Promise<void>;
 };
 
 type CardRatio =
@@ -371,7 +380,7 @@ function TicketDesigner({
   initialReserveOpen=false,
   practice=false,
   qrValue,
-  onClose,
+  onClose, loadSharedDesign, saveSharedDesign,
 }: TicketDesignerProps) {
   const memoryStorage=useRef(new Map<string,string>());
   const designStorage=practice?{getItem:(key:string)=>memoryStorage.current.get(key)??null,setItem:(key:string,value:string)=>memoryStorage.current.set(key,value),removeItem:(key:string)=>memoryStorage.current.delete(key)}:localStorage;
@@ -424,10 +433,29 @@ function TicketDesigner({
   const restore=(from:typeof undo,to:typeof redo)=>{const value=from.current.pop();if(value){++detectionId.current;++imageReadVersion.current;to.current.push(settingsRef.current);setSettings(value);refreshHistory(n=>n+1);setSaved(false);}};
 
 
-  const [settings, setSettings] =
+  const dirtyDesign=useRef(false);
+  const [sharing,setSharing]=useState(false),[shareNotice,setShareNotice]=useState("");
+  const [settings, setSettingsState] =
     useState<TicketDesignSettings>(
       () => loadDesignSettings(eventName, eventId,designStorage)
     );
+  const setSettings:Dispatch<SetStateAction<TicketDesignSettings>>=value=>{dirtyDesign.current=true;setSaved(false);setSettingsState(value);};
+  const sharedCallbacks=useRef({loadSharedDesign,saveSharedDesign});sharedCallbacks.current={loadSharedDesign,saveSharedDesign};
+  const printSheetRef=useRef<HTMLDivElement|null>(null);
+  useEffect(()=>{
+    let active=true;
+    if(practice||!sharedCallbacks.current.loadSharedDesign)return;
+    setSharing(true);
+    void designDeadline(sharedCallbacks.current.loadSharedDesign()).then(value=>{
+      if(!active||dirtyDesign.current||value===null)return;
+      const loaded=loadDesignSettings(eventName,eventId,{getItem:()=>value});
+      setSettingsState(loaded);setShowEditor(Boolean(loaded.backgroundImage||loaded.title||loaded.images?.length));setSaved(true);
+      try{designStorage.setItem(createDesignStorageKey(eventName,eventId),value);}catch{}
+      setShareNotice("共有デザインを読み込みました。");
+    }).catch(()=>{if(active)setShareNotice("共有デザインを取得できませんでした。この端末の保存データを表示しています。");})
+      .finally(()=>{if(active)setSharing(false);});
+    return()=>{active=false;};
+  },[eventId,practice]);
   const settingsRef=useRef(settings);
   settingsRef.current=settings;
   const [showEditor, setShowEditor] = useState(
@@ -463,7 +491,7 @@ function TicketDesigner({
         // Legacy designs used raw pixels. Capture the first rendered width
         // without changing their appearance, then keep that reference fixed.
         if(!settingsRef.current.textReferenceWidth)persistLegacyTextReference(designStorage,eventName,eventId,width);
-        setSettings(current=>current.textReferenceWidth?current:{...current,textReferenceWidth:width});
+        setSettingsState(current=>current.textReferenceWidth?current:{...current,textReferenceWidth:width});
       }
     };
     measure();
@@ -495,7 +523,7 @@ function TicketDesigner({
       : initialIndex
   );
 
-  useEffect(()=>{setSaved(false);},[settings]);
+
   const updateSetting = <
     Key extends keyof TicketDesignSettings,
   >(
@@ -797,26 +825,19 @@ function TicketDesigner({
     reader.readAsDataURL(file);
   };
 
-  const saveDesign = () => {
+  const saveDesign = async () => {
+    if(sharing)return;
+    const snapshot=settingsRef.current;
+    const serialized=JSON.stringify({...snapshot,textReferenceWidth:snapshot.textReferenceWidth??textReferenceWidth});
+    setSharing(true);setShareNotice("");
     try {
-      designStorage.setItem(
-        createDesignStorageKey(
-          eventName, eventId
-        ),
-        JSON.stringify(settings)
-      );
-
-      setSaved(true);
-    } catch (error) {
-      console.error(
-        "チケットデザインの保存に失敗しました。",
-        error
-      );
-
-      alert(
-        "デザインを保存できませんでした。画像が大きすぎる可能性があります。"
-      );
-    }
+      try{designStorage.setItem(createDesignStorageKey(eventName,eventId),serialized);}catch(error){if(practice||!sharedCallbacks.current.saveSharedDesign)throw error;}
+      if(!practice&&sharedCallbacks.current.saveSharedDesign)await designDeadline(sharedCallbacks.current.saveSharedDesign(serialized),15000);
+      if(settingsRef.current===snapshot){dirtyDesign.current=false;setSaved(true);}
+      setShareNotice(practice||!sharedCallbacks.current.saveSharedDesign?"この端末に保存しました。":"他の管理端末と共有するデザインを保存しました。");
+    } catch(error) {
+      setSaved(false);setShareNotice("共有保存できませんでした。通信を確認して再度保存してください。"+(error instanceof Error?error.message:""));
+    } finally {setSharing(false);}
   };
 
   const resetDesign = () => {
@@ -868,6 +889,7 @@ function TicketDesigner({
   };
 
   const printTickets = () => {
+    if(sharing)return;
     if(practice){alert("練習：印刷する操作を確認しました。本番では印刷プレビューで枚数と用紙を確認してください。");return;}
     if(!reserveReady){alert(reserveNotice||"予備の印刷設定を確認しています。少し待ってから印刷してください。");return;}
     if (selectedTickets.length === 0) {
@@ -882,7 +904,7 @@ function TicketDesigner({
       チケット一覧だけを複製して印刷します。
     */
     try {
-      const sourceSheet = document.querySelector<HTMLElement>(".ticket-print-sheet");
+      const sourceSheet = printSheetRef.current ?? document.querySelector<HTMLElement>(".ticket-print-sheet");
       if (!sourceSheet) {
         throw new Error("印刷用チケット一覧が見つかりません。");
       }
@@ -1041,12 +1063,12 @@ function TicketDesigner({
     <div className="ticket-designer-background ticket-designer-glass ticket-studio">
       <section className="ticket-designer-window" role="dialog" aria-modal="true" aria-label="チケットデザイン">
         <header className="studio-header"><div><strong>チケットデザイン</strong><span>{eventName}</span></div>
-          <nav><span className="studio-save-state">{saved?"✓ 保存済み":"編集中"}</span>
+          <nav>{shareNotice&&<span role="status">{shareNotice}</span>}<span className="studio-save-state">{saved?"✓ 保存済み":"編集中"}</span>
           <button type="button" disabled={!undo.current.length} onClick={()=>restore(undo,redo)} aria-label="元に戻す">↶</button>
           <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
           <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
-          <button type="button" className="studio-primary" onClick={saveDesign}>保存</button>
-          <button type="button" onClick={printTickets}>印刷</button><button type="button" disabled={!eventId} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
+          <button type="button" className="studio-primary" onClick={saveDesign} disabled={sharing}>{sharing?"共有データ確認中…":"保存"}</button>
+          <button type="button" onClick={printTickets} disabled={sharing}>印刷</button><button type="button" disabled={!eventId||sharing} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
           <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
         <main className="studio-workspace">
@@ -1677,6 +1699,7 @@ function TicketDesigner({
 
       <div
         className="ticket-print-sheet"
+        ref={printSheetRef}
         style={printSheetStyle}
       >
         {Array.from(
@@ -1706,8 +1729,13 @@ function TicketDesigner({
 
 
 
-export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,practice=false }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string;practice?:boolean }) {
-  const settings = practice?defaultSettings:loadDesignSettings(eventName, eventId);
+export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,practice=false,loadSharedDesign }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string;practice?:boolean;loadSharedDesign?:()=>Promise<string|null> }) {
+  const [settings,setPreviewSettings]=useState(()=>practice?defaultSettings:loadDesignSettings(eventName,eventId));
+  useEffect(()=>{let active=true;
+    setPreviewSettings(practice?defaultSettings:loadDesignSettings(eventName,eventId));
+    if(!practice&&loadSharedDesign)void designDeadline(loadSharedDesign()).then(value=>{if(!active||value===null)return;setPreviewSettings(loadDesignSettings(eventName,eventId,{getItem:()=>value}));try{localStorage.setItem(createDesignStorageKey(eventName,eventId),value);}catch{}}).catch(()=>{});
+    return()=>{active=false;};
+  },[eventId,practice]);
   const cardRef=useRef<HTMLDivElement|null>(null);
   const [width,setWidth]=useState(560);
   useLayoutEffect(()=>{

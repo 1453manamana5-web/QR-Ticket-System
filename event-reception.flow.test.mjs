@@ -817,3 +817,26 @@ test("deleting an event removes its reception approvals and prevents grant reuse
   const reception = loadClientModule("./reception-app/src/receptionSync.ts",c.managerDb,"flow-manager","T-FLOW-MANAGER");
   assert.equal((await reception.getTerminalRegistration()).approved,false);
 });
+
+
+test('saved image designs and number sizes roundtrip to another approved management installation',async()=>{
+ const c=clients();await createPublished(c);
+ await env.withSecurityRulesDisabled(async context=>{
+  const db=context.firestore();const uid='design-manager',terminalId='T-DESIGN-MANAGER';
+  await setDoc(doc(db,'terminals',terminalId),{terminalId,requestedByUid:uid,role:'management',approved:true,managementApproved:true,receptionApproved:false,admin:false,subAdmin:false});
+  await setDoc(doc(db,'terminalOwners',terminalId),{terminalId,ownerUid:uid,enabled:true});
+  await setDoc(doc(db,'terminalInstallations',uid),{terminalId,authUid:uid,approved:true});
+ });
+ const otherDb=env.authenticatedContext('design-manager').firestore();
+ const other=loadClientModule('./management-app/src/firebaseData.ts',otherDb,'design-manager','T-DESIGN-MANAGER');
+ const design=JSON.stringify({title:'文化祭',numberSize:48,textReferenceWidth:400,backgroundImage:'data:image/png;base64,'+'A'.repeat(1100000)});
+ await c.management.saveTicketDesign('flow-event',design);
+ assert.equal(await other.loadTicketDesign('flow-event'),design);
+ const old=(await getDocFromServer(doc(c.managerDb,'events','flow-event','settings','ticketDesign'))).data();
+ const next=JSON.stringify({title:'別端末で編集',numberSize:52,textReferenceWidth:400});
+ await other.saveTicketDesign('flow-event',next);assert.equal(await c.management.loadTicketDesign('flow-event'),next);
+ await assert.rejects(other.saveTicketDesign('flow-event',JSON.stringify({backgroundImage:'A'.repeat(4_000_001)})),/画像が大きすぎます/);
+ assert.equal(await c.management.loadTicketDesign('flow-event'),next,'an oversized save preserves the last shared design');
+ assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event','settings',`ticketDesign-${old.revision}-0`))).exists(),false);
+ await assertFails(getDocFromServer(doc(c.receptionDb,'events','flow-event','settings','ticketDesign')));
+});

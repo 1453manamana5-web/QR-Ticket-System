@@ -886,3 +886,39 @@ export async function approveReceptionEvent(eventId: string, terminalId: string)
     status: "approved", decidedAt: new Date().toISOString(), decidedByUid: await getFirebaseUid(),
   });
 }
+
+/** Event designs are shared; immutable chunks keep embedded images below document limits. */
+export async function saveTicketDesign(eventId: string, serialized: string): Promise<void> {
+  if (offline()) throw new Error("共有保存にはインターネット接続が必要です。");
+  const parsed = JSON.parse(serialized);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("デザインの形式が正しくありません。");
+  // Replacing a revision also deletes its old chunks in the same 10 MiB transaction.
+  if (new TextEncoder().encode(serialized).length > 4_000_000) throw new Error("画像が大きすぎます。画像を小さくしてから保存してください。");
+  const points = Array.from(serialized), chunks: string[] = [];
+  for (let i=0;i<points.length;i+=100000) chunks.push(points.slice(i,i+100000).join(""));
+  const revision=crypto.randomUUID(), db=getFirebaseDb(), manifest=doc(db,"events",eventId,"settings","ticketDesign");
+  await runTransaction(db,async tx=>{
+    const [event,previous]=await Promise.all([tx.get(doc(db,"events",eventId)),tx.get(manifest)]);
+    if(!event.exists())throw new Error("イベントが見つかりません。");
+    const old=previous.data();
+    chunks.forEach((data,index)=>tx.set(doc(db,"events",eventId,"settings",`ticketDesign-${revision}-${index}`),{data}));
+    tx.set(manifest,{revision,count:chunks.length,updatedAt:new Date().toISOString()});
+    if(typeof old?.revision==="string"&&/^[a-zA-Z0-9-]+$/.test(old.revision)&&Number.isSafeInteger(old.count)&&old.count>0&&old.count<=80){
+      for(let i=0;i<old.count;i++)tx.delete(doc(db,"events",eventId,"settings",`ticketDesign-${old.revision}-${i}`));
+    }
+  });
+}
+export async function loadTicketDesign(eventId: string): Promise<string|null> {
+  const db=getFirebaseDb(), ref=doc(db,"events",eventId,"settings","ticketDesign");
+  for(let attempt=0;attempt<3;attempt++){
+    const snapshot=await getDocFromServer(ref);if(!snapshot.exists())return null;
+    const saved=snapshot.data();
+    if(typeof saved.revision!=="string"||!/^[a-zA-Z0-9-]+$/.test(saved.revision)||!Number.isSafeInteger(saved.count)||saved.count<1||saved.count>80)throw new Error("共有デザインを読み込めませんでした。");
+    const parts=await Promise.all(Array.from({length:saved.count},(_,i)=>getDocFromServer(doc(db,"events",eventId,"settings",`ticketDesign-${saved.revision}-${i}`))));
+    const latest=await getDocFromServer(ref);
+    if(latest.data()?.revision!==saved.revision)continue;
+    if(parts.some(p=>!p.exists()||typeof p.data()?.data!=="string"))throw new Error("共有デザインのデータが不足しています。");
+    const value=parts.map(p=>p.data()?.data).join("");JSON.parse(value);return value;
+  }
+  throw new Error("他の端末でデザインが更新されています。開き直してください。");
+}
