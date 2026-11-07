@@ -9,11 +9,11 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
 const snap=value=>({exists:()=>value!==undefined,data:()=>value});
 async function until(check){for(let n=0;n<50&&!check();n++)await tick();assert.ok(check());}
 function clock(){let next=0;const timers=new Map();return {setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id),fire(){const [id,fn]=timers.entries().next().value;timers.delete(id);fn();}};}
-function harness({read,ensure,globals={}}={}){
+function harness({read,ensure,getUid,globals={}}={}){
  const auth={currentUser:{uid}},storage=new Map([['qr-ticket-terminal-id',id]]),writes=[],reads=[];
  const get=async ref=>{reads.push(ref);return read?read(ref):snap(undefined);};
  const api={};
- const dependencies={'./firebaseClient':{ensureFirebaseAuth:()=>ensure?ensure(auth):Promise.resolve(auth),getFirebaseUid:async()=>auth.currentUser?.uid,getFirebaseDb:()=>({})},'./localDb':{},'firebase/firestore':{doc:(_db,...parts)=>parts.join('/'),getDoc:get,getDocFromServer:get,serverTimestamp:()=>({time:true}),runTransaction:async(_db,op)=>op({get,set:(ref,data)=>writes.push({ref,data})})}};
+ const dependencies={'./firebaseClient':{ensureFirebaseAuth:()=>ensure?ensure(auth):Promise.resolve(auth),getFirebaseUid:async()=>getUid?getUid(auth):auth.currentUser?.uid,getKnownFirebaseUid:()=>auth.currentUser?.uid??null,getFirebaseDb:()=>({})},'./localDb':{},'firebase/firestore':{doc:(_db,...parts)=>parts.join('/'),getDoc:get,getDocFromServer:get,serverTimestamp:()=>({time:true}),runTransaction:async(_db,op)=>op({get,set:(ref,data)=>writes.push({ref,data})})}};
  const vars={localStorage:{getItem:key=>storage.get(key)??null},...globals};
  new Function('exports','require',...Object.keys(vars),ts.transpileModule(readFileSync('reception-app/src/receptionSync.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(api,n=>dependencies[n],...Object.values(vars));
  return {api,auth,storage,writes,reads};
@@ -74,4 +74,23 @@ test('known auth identity lookup stays synchronous and does not initialize or si
  auth.currentUser={uid:'new-user'};assert.equal(client.getKnownFirebaseUid(),'new-user');
  auth.currentUser=null;assert.equal(client.getKnownFirebaseUid(),null);
  assert.equal(starts,1);assert.equal(signIns,0);
+});
+
+
+test('control checks live known identity when an awaited UID result is stale',async()=>{
+ for(const replacement of [{uid:'new-user'},null]){
+  const wait=deferred();let reading=false,calls=0,error;
+  const h=harness({getUid:()=>uid,read:async ref=>{
+   if(ref.startsWith('terminalInstallations/'))return snap({authUid:uid,terminalId:id,approved:true});
+   reading=true;return wait.promise;
+  }});
+  const close=h.api.subscribeTerminalControl(id,()=>calls++,e=>error=e);
+  await until(()=>reading);h.auth.currentUser=replacement;wait.resolve(snap({approved:true,desiredMode:'入口受付'}));
+  for(let i=0;i<6;i++)await tick();close();assert.equal(calls,0);assert.equal(error?.code,'cancelled');
+ }
+});
+test('current control identity still receives its requested mode',async()=>{
+ let value;const h=harness({read:async ref=>snap(ref.startsWith('terminalInstallations/')?{authUid:uid,terminalId:id,approved:true}:{approved:true,desiredMode:'出口受付',desiredModeUpdatedAt:'current'})});
+ const close=h.api.subscribeTerminalControl(id,(mode,at)=>value=[mode,at],e=>assert.fail(String(e)));
+ await until(()=>value);close();assert.deepEqual(value,['出口受付','current']);
 });
