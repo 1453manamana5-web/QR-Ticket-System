@@ -263,10 +263,18 @@ export async function saveAnalysis(record: AnalysisRecord): Promise<void> {
   await setDoc(doc(db, "events", record.eventId, "analysis", record.eventId), record, { merge: true });
 }
 
-export async function saveMember(eventId: string, member: MemberRecord): Promise<void> {
+export async function saveMember(eventId: string, member: MemberRecord, mode?: "create" | "update"): Promise<void> {
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
-  await setDoc(doc(db, "events", eventId, "members", member.memberId), member, { merge: true });
+  const eventRef = doc(db, "events", eventId);
+  const memberRef = doc(db, "events", eventId, "members", member.memberId);
+  await runTransaction(db, async tx => {
+    const [event, existing] = await Promise.all([tx.get(eventRef), tx.get(memberRef)]);
+    if (!event.exists()) throw new Error("EVENT_NOT_FOUND");
+    if (mode === "create" && existing.exists()) throw new Error("MEMBER_ALREADY_EXISTS");
+    if (mode === "update" && !existing.exists()) throw new Error("MEMBER_NOT_FOUND");
+    tx.set(memberRef, member, { merge: true });
+  });
 }
 export async function deleteMember(eventId: string, memberId: string): Promise<void> {
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");

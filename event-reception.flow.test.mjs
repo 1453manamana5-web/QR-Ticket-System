@@ -840,3 +840,61 @@ test('saved image designs and number sizes roundtrip to another approved managem
  assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event','settings',`ticketDesign-${old.revision}-0`))).exists(),false);
  await assertFails(getDocFromServer(doc(c.receptionDb,'events','flow-event','settings','ticketDesign')));
 });
+
+for (const mutation of ["append", "delete", "edit"]) {
+  test("publication rejects a ticket inventory that changes after its snapshot: " + mutation, async () => {
+    const c = clients();
+    const first = await createPublished(c);
+    let changed = false;
+    const racing = loadClientModule("./management-app/src/eventPublisher.ts", c.managerDb, "flow-manager", "T-FLOW-MANAGER", {}, {
+      getDocsFromServer: async ref => {
+        const snapshot = await firestore.getDocsFromServer(ref);
+        if (!changed && ref.path === "events/flow-event/tickets") {
+          changed = true;
+          if (mutation === "append") await c.management.appendTickets("flow-event", [makeTicket("flow-event", "concurrent-ticket")]);
+          else if (mutation === "delete") await c.management.deleteTicket("flow-event", "ticket-1");
+          else await c.management.saveTicket("flow-event", {...makeTicket("flow-event"), valid: false}, ["valid"]);
+        }
+        return snapshot;
+      },
+    });
+    await assert.rejects(racing.publishEventBundle(makeEvent(), settings, []), /EVENT_INVENTORY_CHANGED_RETRY/);
+    assert.equal(changed, true);
+    assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event"))).data().authToken, first.authToken);
+    const retried = await c.publisher.publishEventBundle(makeEvent(), settings, []);
+    assert.equal(retried.tickets.length, mutation === "append" ? 2 : mutation === "delete" ? 0 : 1);
+    assert.equal(retried.ticketCount, retried.tickets.length);
+    if (mutation === "edit") assert.equal(retried.tickets[0].valid, false);
+  });
+}
+
+test("concurrent member creation cannot silently overwrite the same cached member ID", async () => {
+  const c = clients();
+  await createPublished(c);
+  const attempts = await Promise.allSettled([
+    c.management.saveMember("flow-event", {memberId: "MBR-0001", memberNumber: 1, name: "First manager"}, "create"),
+    c.management.saveMember("flow-event", {memberId: "MBR-0001", memberNumber: 1, name: "Second manager"}, "create"),
+  ]);
+  assert.equal(attempts.filter(item => item.status === "fulfilled").length, 1);
+  assert.match(String(attempts.find(item => item.status === "rejected").reason), /MEMBER_ALREADY_EXISTS/);
+  const saved = (await getDocFromServer(doc(c.managerDb, "events", "flow-event", "members", "MBR-0001"))).data();
+  assert.equal(saved.name, attempts[0].status === "fulfilled" ? "First manager" : "Second manager");
+});
+
+test("a stale member rename cannot recreate a member deleted by another manager", async () => {
+  const c = clients();
+  await createPublished(c);
+  const member = {memberId: "MBR-0001", memberNumber: 1, name: "Original"};
+  await c.management.saveMember("flow-event", member, "create");
+  await c.management.deleteMember("flow-event", member.memberId);
+  await assert.rejects(c.management.saveMember("flow-event", {...member, name: "Late rename"}, "update"), /MEMBER_NOT_FOUND/);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "members", member.memberId))).exists(), false);
+});
+
+test("member writes reject deleted event parents instead of leaving orphaned members", async () => {
+  const c = clients();
+  await createPublished(c);
+  await c.management.deleteEvent("flow-event");
+  await assert.rejects(c.management.saveMember("flow-event", {memberId: "MBR-0001", memberNumber: 1, name: "Late add"}, "create"), /EVENT_NOT_FOUND/);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "members"))).size, 0);
+});

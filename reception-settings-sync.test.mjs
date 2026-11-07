@@ -8,6 +8,10 @@ const next={entryEnabled:false,exitEnabled:true,reentryEnabled:false};
 const event={eventId:'settings-event',eventName:'Current name',eventDate:'2026-11-07',startTime:'09:00',endTime:'17:00',eventStatus:'active',dataVersion:5,authToken:'token-one',receptionTarget:true,ticketCount:12,inventoryRevision:8};
 const eventPath='events/settings-event',settingsPath=eventPath+'/settings/reception',bundlePath='eventBundles/token-one';
 const bundle={event:{...event,eventName:'Old published name'},settings:{...settings},authToken:'token-one',ticketCount:12,publishedAt:'before'};
+function publicationTickets(){return Object.fromEntries(Array.from({length:event.ticketCount},(_,index)=>{
+  const ticketId='ticket-'+(index+1);
+  return[eventPath+'/tickets/'+ticketId,{eventId:event.eventId,ticketId,basicInfo:{ticketNumber:index+1},currentStatus:'unused',valid:true,updatedAt:'2026-11-07T00:00:00.000Z'}];
+}));}
 function merge(a,b){for(const [key,value] of Object.entries(b)){a[key]=value&&typeof value==='object'&&!Array.isArray(value)?merge(a[key]&&typeof a[key]==='object'?a[key]:{},value):structuredClone(value);}return a;}
 function harness(seed={},options={}){
   const docs=new Map(Object.entries({[eventPath]:event,[settingsPath]:settings,[bundlePath]:bundle,...seed}).filter(([,v])=>v!==null).map(([path,value])=>[path,structuredClone(value)]));
@@ -100,12 +104,20 @@ test('an aborted settings transaction leaves all private and published state unc
 });
 
 test('publishing settings also persists the private copy used after a management reload',async()=>{
-  const h=harness();const result=await h.publisher.publishEventBundle(event,next,[]);
+  const tickets=publicationTickets(),h=harness(tickets);const result=await h.publisher.publishEventBundle(event,next,[]);
   assert.deepEqual(await h.manager.loadReceptionSettings(event.eventId),next);
   assert.deepEqual(h.docs.get('eventBundles/'+result.authToken).settings,next);
+  assert.deepEqual(result.tickets,Object.values(tickets));
+  assert.equal(result.ticketCount,event.ticketCount);
+  assert.equal(h.docs.get(eventPath).ticketCount,result.tickets.length);
+  assert.equal(h.docs.get('eventBundles/'+result.authToken).ticketCount,result.tickets.length);
+  for(const [path,ticket] of Object.entries(tickets))assert.deepEqual(h.docs.get(path),ticket);
 });
 
 test('failed publication never saves settings ahead of the event and its public bundle',async()=>{
-  const h=harness({}, {failCommit:true});await assert.rejects(h.publisher.publishEventBundle(event,next,[]),/SIMULATED_COMMIT_FAILURE/);
+  const tickets=publicationTickets(),h=harness(tickets, {failCommit:true});await assert.rejects(h.publisher.publishEventBundle(event,next,[]),/SIMULATED_COMMIT_FAILURE/);
   assert.deepEqual(h.docs.get(settingsPath),settings);assert.deepEqual(h.docs.get(eventPath),event);assert.deepEqual(h.docs.get(bundlePath),bundle);assert.deepEqual(h.writes,[]);
+  assert.equal(Object.keys(tickets).length,h.docs.get(eventPath).ticketCount);
+  assert.equal(Object.keys(tickets).length,h.docs.get(bundlePath).ticketCount);
+  for(const [path,ticket] of Object.entries(tickets))assert.deepEqual(h.docs.get(path),ticket);
 });
