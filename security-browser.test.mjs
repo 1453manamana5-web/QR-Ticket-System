@@ -3,7 +3,6 @@ import {before, after, test} from 'node:test';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve, extname, sep} from 'node:path';
-import {createRequire} from 'node:module';
 import {build} from 'esbuild';
 import {chromium} from 'playwright';
 import React from 'react';
@@ -49,21 +48,30 @@ async function serve(){
 before(async()=>{
   const html=await readFile(resolve(roots.management,'index.html'),'utf8');
   meta=html.match(/<meta\s+http-equiv="Content-Security-Policy"[^>]*>/i)?.[0]??'';
-  const fixture=await build({stdin:{contents:`import {openReservePrint} from './management-app/src/ReservePrinting.tsx';import {Html5Qrcode,Html5QrcodeSupportedFormats} from 'html5-qrcode';
+  const fixture=await build({stdin:{contents:`import {openReservePrint} from './management-app/src/ReservePrinting.tsx';import {Html5Qrcode,Html5QrcodeSupportedFormats} from 'html5-qrcode';import {ensureFirebaseAuth} from './management-app/src/firebaseClient.ts';
+    window.authProbe=async()=>{const auth=await ensureFirebaseAuth();return auth.currentUser.uid;};
     window.printProbe=packet=>{const popup=window.open('','_blank');const target=new Proxy(popup,{get:(win,key)=>key==='print'?()=>{win.printCalls=(win.printCalls||0)+1;}:key==='focus'?()=>{}:typeof win[key]==='function'?win[key].bind(win):win[key],set:(win,key,value)=>{win[key]=value;return true;}});openReservePrint(packet,target);};
-    window.scanProbe=async(svg)=>{const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=400;canvas.getContext('2d').drawImage(img,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve));const scanner=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],useBarCodeDetectorIfSupported:false});try{return await scanner.scanFile(new File([blob],'probe.png',{type:'image/png'}),false);}finally{scanner.clear();}};`,resolveDir:process.cwd(),loader:'js'},bundle:true,write:false,format:'esm',platform:'browser',define:{'import.meta.env':JSON.stringify({BASE_URL:apps.management})},logLevel:'silent'});
+    window.scanProbe=async(svg)=>{const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=400;canvas.getContext('2d').drawImage(img,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve));const scanner=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],useBarCodeDetectorIfSupported:false});try{return await scanner.scanFile(new File([blob],'probe.png',{type:'image/png'}),false);}finally{scanner.clear();}};`,resolveDir:process.cwd(),loader:'js'},bundle:true,write:false,format:'esm',platform:'browser',define:{'import.meta.env':JSON.stringify({BASE_URL:apps.management,VITE_FIREBASE_API_KEY:'isolated-test-key',VITE_FIREBASE_AUTH_DOMAIN:'isolated-security-test.firebaseapp.com',VITE_FIREBASE_PROJECT_ID:'isolated-security-test',VITE_FIREBASE_STORAGE_BUCKET:'isolated-security-test.appspot.com',VITE_FIREBASE_MESSAGING_SENDER_ID:'123',VITE_FIREBASE_APP_ID:'1:123:web:isolated'})},logLevel:'silent'});
   scripts['/security-fixture.js']=fixture.outputFiles[0].text;
   origin=await serve();attackerOrigin=await serve();
   browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
 });
 after(async()=>{await browser?.close();await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));});
 
-async function isolatedPage(){
+async function isolatedPage({mockFirebase=false}={}){
   const context=await browser.newContext({serviceWorkers:'block'});context.setDefaultTimeout(5000);const remote=[];
   await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
     if(url.hostname==='127.0.0.1')return route.continue();
     remote.push(url.href);
+    if(mockFirebase && ['identitytoolkit.googleapis.com','firestore.googleapis.com'].includes(url.hostname)){
+      const headers={'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'GET,POST,OPTIONS'};
+      if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers,body:''});
+      const now=Math.floor(Date.now()/1000),uid='isolated-user';
+      const token=[{alg:'none',typ:'JWT'},{iss:'https://securetoken.google.com/isolated-security-test',aud:'isolated-security-test',sub:uid,user_id:uid,iat:now,auth_time:now,exp:now+3600,firebase:{identities:{},sign_in_provider:'anonymous'}}].map(value=>Buffer.from(JSON.stringify(value)).toString('base64url')).join('.')+'.isolated';
+      const body=url.hostname==='firestore.googleapis.com'?{isolated:true}:url.pathname.endsWith('/accounts:lookup')?{users:[{localId:uid,createdAt:String(Date.now()),lastLoginAt:String(Date.now()),providerUserInfo:[]}]}:{localId:uid,idToken:token,refreshToken:'isolated-refresh',expiresIn:'3600'};
+      return route.fulfill({headers,contentType:'application/json',body:JSON.stringify(body)});
+    }
     if(url.hostname==='script-probe.invalid')return route.fulfill({contentType:'text/javascript',body:'window.externalProbe=true'});
     return route.abort();
   });
@@ -131,5 +139,15 @@ test('QR image decoding still works with scripts/eval locked down',async()=>{
     await page.goto(origin+'/fixture');await page.waitForFunction(()=>typeof window.scanProbe==='function');
     assert.equal(await page.evaluate(svg=>window.scanProbe(svg),qr),expectedQr);
     assert.equal(remote.length,0);
+  }finally{await context.close();}
+});
+
+test('the real anonymous-auth client and allowed Firestore transport work through intercepted dummy responses',async()=>{
+  const {context,page,remote}=await isolatedPage({mockFirebase:true});try{
+    await page.goto(origin+'/fixture');await page.waitForFunction(()=>typeof window.authProbe==='function');
+    assert.equal(await page.evaluate(()=>window.authProbe()),'isolated-user');
+    assert.deepEqual(await page.evaluate(async()=>{const response=await fetch('https://firestore.googleapis.com/isolated-security-probe');return response.json();}),{isolated:true});
+    assert.ok(remote.some(url=>url.includes('accounts:signUp')));
+    assert.ok(remote.some(url=>url.includes('firestore.googleapis.com/isolated-security-probe')));
   }finally{await context.close();}
 });
