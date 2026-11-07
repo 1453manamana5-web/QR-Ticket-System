@@ -69,7 +69,7 @@ test('pre-opening scans display a test ticket and allow repeated testing without
   }finally{await h.close();}
 });
 
-test('legacy pre-opening queue items never upload after opening',async()=>{
+test('legacy pre-opening queue items are acknowledged after canonical trial verification',async()=>{
   const indexedDB=new IDBFactory(),local=localDb(indexedDB);
   await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const oldTrial=record('old-trial','entry','2026-10-26T23:59:59.000Z');
@@ -83,9 +83,14 @@ test('legacy pre-opening queue items never upload after opening',async()=>{
     };
     open.onerror=()=>reject(open.error);
   });
-  const uploaded=[];
-  const worker=load('./reception-app/src/syncQueue.ts',{'./localDb':local,'./receptionSync':{syncReceptionRecord:async item=>uploaded.push(item)}},{navigator:{onLine:true}});
+  const checked=[],uploaded=[];
+  const timing=load('./shared/src/receptionTiming.ts');
+  const worker=load('./reception-app/src/syncQueue.ts',{'./localDb':local,'./receptionSync':{syncReceptionRecord:async item=>{
+    checked.push(item);
+    if(!timing.isBeforeEventStart(makeEvent().event,item.timestamp))uploaded.push(item);
+  }}},{navigator:{onLine:true}});
   await worker.syncPendingReceptionRecords();
+  assert.equal(checked.length,1);
   assert.equal(uploaded.length,0);
   assert.equal((await local.getPendingSyncItems()).length,0);
   assert.equal((await local.getReceptionRecord('old-trial')).timestamp,oldTrial.timestamp);

@@ -32,10 +32,10 @@ function eventMetadata(value: Partial<Event> | undefined): Event | null {
   };
 }
 
-function receptionSettings(value: unknown): ReceptionSettings {
-  // Older embedded bundles omitted settings. An explicitly malformed setting
-  // must never turn the string "false" into an enabled reception gate.
-  if (value === undefined) return {entryEnabled: true, exitEnabled: true, reentryEnabled: true};
+function receptionSettings(value: unknown, legacy = false): ReceptionSettings {
+  // Only legacy bundles without a canonical event may omit settings. A modern
+  // publication must not enable gates because its policy went missing.
+  if (value === undefined && legacy) return {entryEnabled: true, exitEnabled: true, reentryEnabled: true};
   const settings = value as Partial<ReceptionSettings> | null;
   if (!settings || ![settings.entryEnabled, settings.exitEnabled, settings.reentryEnabled].every(item => typeof item === "boolean")) {
     throw new Error("EVENT_DATA_INVALID");
@@ -57,7 +57,7 @@ function canonicalSignature(event: PublishedEvent | null): string {
 }
 
 function bundleSignature(bundle: Partial<EventBundle>, legacy: boolean): string {
-  return JSON.stringify({event: eventMetadata(bundle.event), settings: receptionSettings(bundle.settings),
+  return JSON.stringify({event: eventMetadata(bundle.event), settings: receptionSettings(bundle.settings, legacy),
     authToken: bundle.authToken, ticketCount: bundle.ticketCount, publishedAt: bundle.publishedAt,
     ...(legacy ? {tickets: bundle.tickets} : {})});
 }
@@ -80,19 +80,12 @@ export async function getCurrentFirebaseEventAuthPayload(): Promise<EventAuthPay
   const publishedEventsQuery = query(collection(db, "events"), where("receptionTarget", "==", true));
   const snapshot = await withDownloadDeadline(getDocsFromServer(publishedEventsQuery));
   const candidates = snapshot.docs
-    .map(item => item.data() as PublishedEvent)
-    .filter(item =>
+    .map(item => ({id: item.id, event: item.data() as PublishedEvent}))
+    .filter(({event: item}) =>
       // receptionTarget が明示されたイベントを優先し、status の表記ゆれや
       // 管理画面側の状態更新だけで受付データを見失わないようにする。
       item.receptionTarget === true &&
-      item.eventStatus !== "finished" &&
-      typeof item.eventId === "string" &&
-      item.eventId.length > 0 &&
-      typeof item.eventName === "string" &&
-      item.eventName.length > 0 &&
-      typeof item.dataVersion === "number" &&
-      typeof item.authToken === "string" &&
-      item.authToken.length > 0
+      item.eventStatus !== "finished"
     );
 
   // 管理アプリで明示的に公開対象に指定されたイベントだけを自動取得する。
@@ -103,8 +96,12 @@ export async function getCurrentFirebaseEventAuthPayload(): Promise<EventAuthPay
   if (candidates.length > 1) {
     throw new Error("MULTIPLE_PUBLISHED_EVENTS");
   }
-  const current = candidates[0];
-  if (!current || typeof current.authToken !== "string") {
+  const candidate = candidates[0];
+  const current = candidate?.event;
+  // Do not hide malformed active targets when deciding uniqueness. A document
+  // must also identify itself, rather than redirecting reception to another ID.
+  if (!current || !validDocId(current.authToken) ||
+      typeof candidate.id === "string" && candidate.id !== current.eventId) {
     throw new Error("INVALID_PUBLISHED_EVENT");
   }
   const event = eventMetadata(current);
@@ -216,7 +213,7 @@ async function downloadEventSnapshot(
 
   // チケットの正本はイベント配下のサブコレクション。単一文書に全件を格納すると
   // Firestoreの文書サイズ上限や古い枚数情報により、受付端末へ反映されなくなる。
-  const settings = receptionSettings(bundle.settings);
+  const settings = receptionSettings(bundle.settings, !canonical);
   const savedTickets = await read(() => getDocsFromServer(collection(db, "events", payload.eventId, "tickets")));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
   const ticketCount = canonical?.ticketCount !== undefined ? canonical.ticketCount : bundle.ticketCount;

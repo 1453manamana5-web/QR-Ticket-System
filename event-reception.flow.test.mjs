@@ -201,6 +201,21 @@ test("a legacy trial receipt remains local after its event inventory was cleared
   assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data().currentStatus, "unused");
 });
 
+test("a stale later local opening never discards a production receipt accepted under the canonical opening", async () => {
+  const c = clients();await createPublished(c);
+  const downloaded = await c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION");
+  await c.local.prepareLocalEventData(downloaded.localEvent, downloaded.tickets);
+  const receipt = {recordId: "preserved-official", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-RECEPTION",
+    type: "entry", timestamp: "2026-10-25T00:30:00.000Z"};
+  await c.local.saveReceptionTransaction({...downloaded.tickets[0],currentStatus:"inside",updatedAt:receipt.timestamp},receipt);
+  const saved = await c.local.loadLocalEvent();
+  await c.local.saveLocalEvent({...saved,event:{...saved.event,startTime:"10:00"}});
+  await queueWorker(c.local,c.reception).syncPendingReceptionRecords();
+  assert.equal((await c.local.getPendingSyncItems()).length,0);
+  assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","receptionRecords",receipt.recordId))).exists(),true);
+  assert.equal((await getDocFromServer(doc(c.managerDb,"events","flow-event","tickets","ticket-1"))).data().currentStatus,"inside");
+});
+
 test("a timetable change during sync retries the transaction before admitting an old trial", async () => {
   const c = clients();await createPublished(c);
   let attempts = 0;

@@ -1,7 +1,7 @@
 import type { ReceptionRecord, Ticket } from "@qr-ticket-system/shared";
 import type { ReceptionErrorLog } from "./localDb";
 import { getPendingSyncItems, getPendingReceptionErrorLogs } from "./localDb";
-import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
+import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid, getKnownFirebaseUid as knownFirebaseUid } from "./firebaseClient";
 import { collection, doc, getDoc, getDocFromServer, getDocsFromServer, getDocs, limit, query, runTransaction, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 
 async function withReceptionDeadline<T>(operation: Promise<T>, timeoutMs = 5000): Promise<T> {
@@ -15,17 +15,31 @@ async function withReceptionDeadline<T>(operation: Promise<T>, timeoutMs = 5000)
   }
 }
 
+export function getKnownFirebaseUid(): string | null | undefined {
+  return knownFirebaseUid?.();
+}
+
 export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<void> {
-  await withReceptionDeadline(ensureFirebaseAuth());
+  const auth = await withReceptionDeadline(ensureFirebaseAuth());
+  const authUid = auth?.currentUser?.uid;
   const terminalId = getTerminalIdForRegistration();
   if (log.terminalId !== terminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
+  let active = true;
+  const checkCurrent = () => {
+    if (!active) throw Object.assign(new Error("受付エラー同期の確認は終了しました"), {code: "cancelled"});
+    if (localStorage.getItem("qr-ticket-terminal-id") !== terminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
+    if (authUid && auth.currentUser?.uid !== authUid) throw Object.assign(new Error("RECEPTION_AUTH_CHANGED"), {code: "cancelled"});
+  };
   const db = getFirebaseDb();
   const errorRef = doc(db, "receptionErrors", log.errorId);
-  await withReceptionDeadline(runTransaction(db, async transaction => {
+  try {
+    await withReceptionDeadline(runTransaction(db, async transaction => {
+    checkCurrent();
     const existing = await transaction.get(errorRef);
+    checkCurrent();
     if (existing.exists()) {
       const saved = existing.data();
-      const sameLog = saved.eventId === log.eventId &&
+      const sameLog = saved.errorId === log.errorId && saved.eventId === log.eventId &&
         saved.terminalId === terminalId &&
         saved.category === log.category &&
         saved.mode === log.mode &&
@@ -42,7 +56,10 @@ export async function syncReceptionErrorLog(log: ReceptionErrorLog): Promise<voi
       timestamp: log.timestamp,
       receivedAt: serverTimestamp(),
     });
-  }));
+    }));
+  } finally {
+    active = false;
+  }
 }
 
 type OwnTerminalState = {
@@ -129,7 +146,8 @@ async function readTerminalRegistration(checkActive: () => void, commitIdentity:
   const checkedUid = async () => {
     const uid = await getFirebaseUid();
     checkActive();
-    if (uid !== state.authUid) throw Object.assign(new Error("確認中に認証情報が変更されました"), {code: "cancelled"});
+    const knownUid = knownFirebaseUid?.();
+    if (uid !== state.authUid || knownUid !== undefined && knownUid !== state.authUid) throw Object.assign(new Error("確認中に認証情報が変更されました"), {code: "cancelled"});
     return uid;
   };
   await checkedUid();
@@ -425,11 +443,25 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
 }
 
 export async function getLatestReceptionTicket(eventId: string, ticketId: string): Promise<Ticket | null> {
-  return withReceptionDeadline((async () => {
-    await ensureFirebaseAuth();
+  let active = true;
+  const terminalId = typeof localStorage === "undefined" ? undefined : localStorage.getItem("qr-ticket-terminal-id");
+  try {
+    return await withReceptionDeadline((async () => {
+    const auth = await ensureFirebaseAuth();
+    const authUid = auth?.currentUser?.uid;
+    const checkCurrent = () => {
+      if (!active) throw Object.assign(new Error("受付確認の通信は終了しました"), {code: "cancelled"});
+      if (terminalId !== undefined && localStorage.getItem("qr-ticket-terminal-id") !== terminalId) throw new Error("RECEPTION_TERMINAL_CHANGED");
+      if (authUid && auth.currentUser?.uid !== authUid) throw Object.assign(new Error("RECEPTION_AUTH_CHANGED"), {code: "cancelled"});
+    };
+    checkCurrent();
     const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId));
+    checkCurrent();
     return snapshot.exists() ? snapshot.data() as Ticket : null;
-  })(), 1500);
+    })(), 1500);
+  } finally {
+    active = false;
+  }
 }
 
 function getBrowserDownlink(): number | null {
@@ -497,6 +529,13 @@ export function subscribeTerminalControl(terminalId: string, onMode: (mode: "入
   const refresh = async () => {
     try {
       const state = await withReceptionDeadline(readOwnTerminalState());
+      if (!active) return;
+      const uid = await withReceptionDeadline(getFirebaseUid());
+      if (!active) return;
+      const knownUid = knownFirebaseUid?.();
+      if (uid !== state.authUid || knownUid !== undefined && knownUid !== state.authUid || (typeof localStorage !== "undefined" && localStorage.getItem("qr-ticket-terminal-id") !== terminalId)) {
+        throw Object.assign(new Error("受付操作の認証情報が変更されました"), {code: "cancelled"});
+      }
       const terminal = state.terminal;
       const desiredMode = terminal?.desiredMode;
       if (active && state.terminalId === terminalId &&

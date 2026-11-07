@@ -1,5 +1,4 @@
-import {getPendingSyncItems, getReceptionRecord, markSyncStatus,loadLocalEvent} from "./localDb";
-import {isBeforeEventStart} from '../../shared/src/receptionTiming';
+import {getPendingSyncItems, getReceptionRecord, markSyncStatus} from "./localDb";
 import {syncReceptionRecord} from "./receptionSync";
 
 let running: Promise<void> | null = null;
@@ -30,11 +29,9 @@ export function syncPendingReceptionRecords(): Promise<void> {
           console.error("受付記録が見つからないため同期できませんでした", item.recordId);
           continue;
         }
-        const localEvent=await loadLocalEvent();
-        if(localEvent?.event.eventId===record.eventId&&isBeforeEventStart(localEvent.event,record.timestamp)){
-          await markSyncStatus(item.recordId,'synced',item.retryCount);
-          continue;
-        }
+        // Only the canonical event checked by syncReceptionRecord can classify
+        // a persisted scan as a trial. Cached timetables may be stale in either
+        // direction and must never silently acknowledge a genuine visit.
         const key = JSON.stringify([record.eventId, record.ticketId]);
         // An exit must never overtake a failed entry for the same ticket.
         if (blockedTickets.has(key)) continue;

@@ -9,7 +9,7 @@ import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopR
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,saveLocalEvent,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
-import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,getLatestReceptionTicket,syncReceptionErrorLog} from "./receptionSync";
+import {getTerminalRegistration,registerReceptionTerminal,resetReceptionTerminalRegistration,saveTerminalHeartbeat,subscribeTerminalControl,subscribeTerminalRegistration,getLatestReceptionTicket,syncReceptionErrorLog,getKnownFirebaseUid} from "./receptionSync";
 
 type Mode="entry"|"exit";
 type Result={kind:"success"|"error";title:string;detail:string};
@@ -154,6 +154,7 @@ export default function App(){
   const syncPendingRecords=useCallback(function sync():Promise<void>{
     syncRequestedRef.current=true;
     if(syncWorkRef.current)return syncWorkRef.current;
+    let deferUntilNextRequest=false;
     const run=async()=>{
       do{
         syncRequestedRef.current=false;
@@ -169,7 +170,10 @@ export default function App(){
               }catch(reason){
                 console.error("受付エラーログの再同期に失敗しました。次回再試行します",reason);
                 const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
-                if(code==="unavailable"||code==="deadline-exceeded"||code==="auth/network-request-failed")break;
+                if(code==="unavailable"||code==="deadline-exceeded"||code==="auth/network-request-failed"){
+                  deferUntilNextRequest=true;
+                  break;
+                }
               }
             }
           }
@@ -178,13 +182,13 @@ export default function App(){
         }finally{
           await Promise.all([getPendingSyncItems(),getPendingReceptionErrorLogs()]).then(([items,errors])=>setPendingSyncCount(items.length+errors.length)).catch(()=>undefined);
         }
-      }while(syncRequestedRef.current);
+      }while(syncRequestedRef.current&&!deferUntilNextRequest);
     };
     const task=run().finally(()=>{
       if(syncWorkRef.current!==task)return;
       syncWorkRef.current=null;
       // A scan can enqueue work between the last loop and this microtask.
-      if(syncRequestedRef.current)return sync();
+      if(syncRequestedRef.current&&!deferUntilNextRequest)return sync();
     });
     syncWorkRef.current=task;
     return task;
@@ -196,8 +200,12 @@ export default function App(){
       try{
         const raw=localStorage.getItem("qr-ticket-reception-approved");
         if(!raw)return null;
-        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:string};
+        const saved=JSON.parse(raw) as {approved?:unknown;name?:unknown;terminalId?:unknown;eventId?:string;authUid?:unknown};
         if(saved.approved!==true||saved.terminalId!==getTerminalId())return null;
+        // An unresolved offline Auth restoration is not a revocation. Once the
+        // identity is known, never transfer another identity's cached approval.
+        const knownUid=typeof getKnownFirebaseUid==='function'?getKnownFirebaseUid():undefined;
+        if(typeof saved.authUid==='string'&&knownUid!==undefined&&saved.authUid!==knownUid)return null;
         return {
           approved:true,
           eventId:saved.eventId,
@@ -229,6 +237,7 @@ export default function App(){
               name:value.name,
               terminalId:getTerminalId(),
               eventId:value.eventId,
+              ...(typeof getKnownFirebaseUid==='function'&&typeof getKnownFirebaseUid()==='string'?{authUid:getKnownFirebaseUid()}:{}),
               savedAt:new Date().toISOString()
             }));
           }catch(reason){console.warn("受付承認状態を端末に保存できませんでした",reason);}

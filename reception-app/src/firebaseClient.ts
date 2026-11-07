@@ -22,6 +22,13 @@ export function getFirebaseApp() {
 }
 
 let authReady: Promise<Auth> | undefined;
+let knownAuth: Auth | undefined;
+let authStateResolved = false;
+
+/** Read only the identity already restored by this client; never sign in. */
+export function getKnownFirebaseUid(): string | null | undefined {
+  return !knownAuth || !authStateResolved ? undefined : knownAuth.currentUser?.uid ?? null;
+}
 
 /**
  * The app uses a persistent anonymous Firebase identity. Server callables use
@@ -31,8 +38,10 @@ let authReady: Promise<Auth> | undefined;
 export function ensureFirebaseAuth(): Promise<Auth> {
   if (!authReady) {
     const auth = getAuth(getFirebaseApp());
+    knownAuth = auth;
     authReady = (async () => {
       await auth.authStateReady();
+      authStateResolved = true;
       if (!auth.currentUser) await signInAnonymously(auth);
       return auth;
     })().finally(() => {
