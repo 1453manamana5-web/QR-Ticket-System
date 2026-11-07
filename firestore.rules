@@ -167,8 +167,8 @@ service cloud.firestore {
           "status", "lastSeen", "updatedAt", "syncPendingCount", "networkMbps", "mode", "name", "receptionMode", "receptionEventId", "receptionReportedAt"
         ])
         && next.status == "online"
-        && next.lastSeen is string
-        && next.updatedAt is string
+        && next.lastSeen is string && next.lastSeen.size() > 0 && next.lastSeen.size() <= 40
+        && next.updatedAt is string && next.updatedAt.size() > 0 && next.updatedAt.size() <= 40
         && next.syncPendingCount is int
         && next.syncPendingCount >= 0
         && next.syncPendingCount <= 100000

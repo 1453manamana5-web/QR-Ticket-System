@@ -114,3 +114,9 @@ test('bounded pending registration remains available but cannot be updated into 
   await assertFails(updateDoc(doc(db,'terminalApplications',id),{status:'approved',decidedByUid:uid,decidedAt:now}));
   await assertFails(updateDoc(doc(db,'terminals',id),{admin:true,approved:true,managementApproved:true}));
 });
+
+for(const field of ['lastSeen','updatedAt'])for(const value of ['', 'X'.repeat(32768)])test(`a reception heartbeat cannot store ${value.length?'oversized':'empty'} ${field}`,async()=>{
+  await seed();const db=env.authenticatedContext('reception').firestore();
+  await assertFails(updateDoc(doc(db,'terminals','T-RECEPTION'),{status:'online',lastSeen:now,updatedAt:now,syncPendingCount:0,[field]:value}));
+  await assertSucceeds(updateDoc(doc(db,'terminals','T-RECEPTION'),{status:'online',lastSeen:now,updatedAt:now,syncPendingCount:0}));
+});
