@@ -674,8 +674,38 @@ export async function saveManagementTerminalHeartbeat(terminalId: string): Promi
 
 export async function saveReceptionSettings(eventId: string, settings: ReceptionSettings): Promise<void> {
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
+  if (!settings || ![settings.entryEnabled, settings.exitEnabled, settings.reentryEnabled].every(value => typeof value === "boolean")) {
+    throw new Error("INVALID_RECEPTION_SETTINGS");
+  }
+  const next = {entryEnabled: settings.entryEnabled, exitEnabled: settings.exitEnabled, reentryEnabled: settings.reentryEnabled};
+  const matches = (value: Record<string, unknown> | undefined) => value?.entryEnabled === next.entryEnabled &&
+    value?.exitEnabled === next.exitEnabled && value?.reentryEnabled === next.reentryEnabled;
   const db = getFirebaseDb();
-  await setDoc(doc(db, "events", eventId, "settings", "reception"), settings, { merge: true });
+  const eventRef = doc(db, "events", eventId), settingsRef = doc(db, "events", eventId, "settings", "reception");
+  await runTransaction(db, async tx => {
+    const [event, savedSettings] = await Promise.all([tx.get(eventRef), tx.get(settingsRef)]);
+    if (!event.exists()) throw new Error("EVENT_NOT_FOUND");
+    const metadata = event.data();
+    const authToken = typeof metadata.authToken === "string" ? metadata.authToken : "";
+    const bundleRef = authToken ? doc(db, "eventBundles", authToken) : null;
+    const savedBundle = bundleRef ? await tx.get(bundleRef) : null;
+    const bundle = savedBundle?.exists() ? savedBundle.data() : null;
+    if (bundleRef && (!bundle || bundle.authToken !== authToken || bundle.event?.eventId !== eventId)) {
+      throw new Error("EVENT_BUNDLE_INVALID");
+    }
+    if (bundle && (!Number.isSafeInteger(metadata.dataVersion) || metadata.dataVersion < 1 ||
+        bundle.event.dataVersion !== metadata.dataVersion)) throw new Error("EVENT_BUNDLE_VERSION_MISMATCH");
+    const publishedChanged = bundle && !matches(bundle.settings);
+    if (publishedChanged && metadata.dataVersion >= Number.MAX_SAFE_INTEGER) throw new Error("EVENT_BUNDLE_VERSION_MISMATCH");
+    // Read every dependency before writing. A concurrent republish or ticket
+    // update retries this callback against its new token, version and metadata.
+    if (!matches(savedSettings.data())) tx.set(settingsRef, next, {merge: true});
+    if (publishedChanged && bundleRef) {
+      const dataVersion = metadata.dataVersion + 1, now = new Date().toISOString();
+      tx.update(eventRef, {dataVersion, updatedAt: now});
+      tx.set(bundleRef, {settings: next, event: {...bundle.event, eventId, dataVersion}, publishedAt: now}, {merge: true});
+    }
+  });
 }
 export async function loadAppSettings(deviceId: string): Promise<Record<string, unknown> | null> {
   const db = getFirebaseDb();

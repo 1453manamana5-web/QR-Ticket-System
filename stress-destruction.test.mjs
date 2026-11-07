@@ -135,7 +135,7 @@ test("destructive: 20 duplicate deliveries converge to one receipt after retry",
 test("fault: lost acknowledgement after server commit does not duplicate reception on retry",async()=>{
   const c=clients();await createPublished(c);let lost=false;
   const failing=loadClientModule("./reception-app/src/receptionSync.ts",c.receptionDb,"flow-reception","T-FLOW-RECEPTION",{},{
-    writeBatch:db=>{const batch=firestore.writeBatch(db);return {update:(...args)=>batch.update(...args),set:(...args)=>batch.set(...args),commit:async()=>{await batch.commit();if(!lost){lost=true;throw Error("simulated lost acknowledgement");}}};}
+    runTransaction:async(db,operation)=>{const result=await firestore.runTransaction(db,operation);if(!lost){lost=true;throw Error("simulated lost acknowledgement");}return result;}
   });
   await assert.rejects(failing.syncReceptionRecord(receipt("lost-ack")),/lost acknowledgement/);
   await c.reception.syncReceptionRecord(receipt("lost-ack"));

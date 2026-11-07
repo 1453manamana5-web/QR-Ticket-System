@@ -199,6 +199,12 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
           if (hasOtherEventRecords) {
             abort("LOCAL_EVENT_PENDING_SYNC");return;
           }
+          // An inventory download may predate a newly discovered, locally
+          // accepted ticket. Reject the refresh rather than lose its offline
+          // state or pretend an incomplete new inventory was installed.
+          if ([...pendingRecords.keys()].some(ticketId => !ticketIds.has(ticketId))) {
+            abort("LOCAL_EVENT_PENDING_SYNC");return;
+          }
           const current=(currentEventRequest.result as LocalEventData[])[0];
           if(current?.event.eventId===eventId && current.event.dataVersion>readyEvent.event.dataVersion){
             abort("LOCAL_EVENT_VERSION_CHANGED");return;
@@ -371,12 +377,16 @@ export async function saveReceptionTransaction(
       };
       eventRequest.onsuccess=()=>{
         const saved=eventRequest.result as LocalEventData | undefined;
-        if(expectedLocalTicket!==undefined && (!saved?.dataReady || saved.event.eventId!==record.eventId)){
+        if(expectedLocalTicket!==undefined && (!saved?.dataReady || saved.event.eventId!==record.eventId || saved.terminalId!==record.terminalId)){
           reject(new Error("LOCAL_EVENT_CHANGED"));transaction.abort();return;
         }
         if(saved&&isBeforeEventStart(saved.event,record.timestamp)){
           trial=true;
           return;
+        }
+        const setting = record.type === "entry" ? "entryEnabled" : record.type === "exit" ? "exitEnabled" : "reentryEnabled";
+        if (saved && saved.settings[setting] !== true) {
+          reject(new Error("LOCAL_RECEPTION_SETTINGS_CHANGED"));transaction.abort();return;
         }
         if(!currentTicket.result && saved){
           transaction.objectStore(STORES.event).put({...saved,ticketCount:saved.ticketCount+1});
@@ -468,7 +478,10 @@ export async function markSyncStatus(
       const request = store.get(recordId);
       request.onsuccess = () => {
         const previous = request.result as SyncQueueItem | undefined;
-        if (previous) store.put({...previous, status, retryCount, lastAttemptAt: new Date().toISOString()});
+        // Different tabs can finish the same upload in either order. A late
+        // failure cannot resurrect an acknowledgement already persisted here.
+        if (previous && previous.status !== "synced") store.put({...previous, status,
+          retryCount: Math.max(previous.retryCount, retryCount), lastAttemptAt: new Date().toISOString()});
       };
 
       transaction.oncomplete = () => resolve();

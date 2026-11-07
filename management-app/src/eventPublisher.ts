@@ -142,6 +142,10 @@ export async function publishEventBundle(
 ): Promise<PublishedEventBundle> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("この操作にはオンライン接続が必要です。");
   if (event.eventStatus === "finished") throw new Error("EVENT_FINISHED");
+  if (!settings || ![settings.entryEnabled, settings.exitEnabled, settings.reentryEnabled].every(value => typeof value === "boolean")) {
+    throw new Error("INVALID_RECEPTION_SETTINGS");
+  }
+  const receptionSettings = {entryEnabled: settings.entryEnabled, exitEnabled: settings.exitEnabled, reentryEnabled: settings.reentryEnabled};
   const db = getFirebaseDb();
   const authToken = createAuthToken();
   // Firestore is authoritative even when a stale UI still contains deleted tickets.
@@ -167,9 +171,12 @@ export async function publishEventBundle(
     const savedStatus=storedEvent.eventStatus;
     const publishedEvent:Event={eventId:event.eventId,eventName:event.eventName,eventDate:event.eventDate,startTime:event.startTime,endTime:event.endTime,dataVersion:Math.max(1,event.dataVersion,savedVersion)+(storedEvent?.authToken?1:0),eventStatus:savedStatus==="active"||savedStatus==="finalizing"?savedStatus:"ready"};
     const ticketCount=Number.isSafeInteger(storedEvent?.ticketCount)?Number(storedEvent?.ticketCount):publishedTickets.length;
-    const result:PublishedEventBundle={event:publishedEvent,settings,tickets:publishedTickets,ticketCount,authToken,publishedAt:new Date().toISOString()};
+    const result:PublishedEventBundle={event:publishedEvent,settings:receptionSettings,tickets:publishedTickets,ticketCount,authToken,publishedAt:new Date().toISOString()};
     for(const previous of previousTargets)tx.update(previous.ref,{receptionTarget:false,updatedAt:result.publishedAt});
-    tx.set(doc(db,"eventBundles",authToken),{event:publishedEvent,settings,ticketCount,authToken,publishedAt:result.publishedAt});
+    tx.set(doc(db,"eventBundles",authToken),{event:publishedEvent,settings:receptionSettings,ticketCount,authToken,publishedAt:result.publishedAt});
+    // The management reload and reception download must restore the settings
+    // from this same publication, including when the private copy was stale.
+    tx.set(doc(db,"events",event.eventId,"settings","reception"),receptionSettings,{merge:true});
     tx.set(eventRef,{...publishedEvent,authToken,receptionTarget:true,ticketCount,updatedAt:result.publishedAt},{merge:true});
     return result;
   });

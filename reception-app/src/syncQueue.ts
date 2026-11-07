@@ -5,10 +5,17 @@ import {syncReceptionRecord} from "./receptionSync";
 let running: Promise<void> | null = null;
 let requested = false;
 
+function isConnectionFailure(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? (error as {code?: unknown}).code : undefined;
+  return code === "unavailable" || code === "deadline-exceeded" || code === "auth/network-request-failed";
+}
+
 /** All immediate, timer and reconnect uploads use the same ordered worker. */
 export function syncPendingReceptionRecords(): Promise<void> {
   requested = true;
   if (running) return running;
+  let deferUntilNextRequest = false;
   running = (async () => {
     while (requested && navigator.onLine) {
       requested = false;
@@ -36,8 +43,13 @@ export function syncPendingReceptionRecords(): Promise<void> {
           await markSyncStatus(item.recordId, "synced", item.retryCount);
         } catch (error) {
           blockedTickets.add(key);
+          deferUntilNextRequest = isConnectionFailure(error);
           await markSyncStatus(item.recordId, "failed", item.retryCount + 1);
           console.error("受付記録のFirebase同期に失敗しました", error);
+          // One blocked connection affects every ticket. Keep the remaining
+          // queue intact until the next reconnect/timer request, rather than
+          // spending a full network timeout on each queued receipt.
+          if (deferUntilNextRequest) return;
         }
       }
     }
@@ -45,7 +57,7 @@ export function syncPendingReceptionRecords(): Promise<void> {
     running = null;
     // A new scan can request work after the loop's final condition, before
     // this completion callback runs. Do not lose that last upload request.
-    if (requested && navigator.onLine) return syncPendingReceptionRecords();
+    if (!deferUntilNextRequest && requested && navigator.onLine) return syncPendingReceptionRecords();
   });
   return running;
 }

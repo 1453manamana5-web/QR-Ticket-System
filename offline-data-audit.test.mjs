@@ -304,10 +304,19 @@ test("a timed-out committed upload keeps history pending and retries without wri
   const sync = load("./reception-app/src/receptionSync.ts", {
     "./localDb": {}, "./firebaseClient": {ensureFirebaseAuth: async () => {}, getFirebaseDb: () => ({})},
     "firebase/firestore": {
-      doc: (_db, ...parts) => parts.join("/"), getDocFromServer: async ref => snapshot(saved.get(ref)),
-      writeBatch: () => {
+      doc: (_db, ...parts) => parts.join("/"),
+      runTransaction: async (_db, operation) => {
         const writes = [];
-        return {update: () => {}, set: (ref, data) => writes.push([ref, data]), commit: () => {commits++; for (const [ref, data] of writes) saved.set(ref, data); return new Promise(() => {});}};
+        const result = await operation({
+          get: async ref => snapshot(ref === "events/audit-event" ? event() : saved.get(ref)),
+          update: () => {}, set: (ref, data) => writes.push([ref, data]),
+        });
+        if (writes.length) {
+          commits++;
+          for (const [ref, data] of writes) saved.set(ref, data);
+          return new Promise(() => {});
+        }
+        return result;
       },
     },
   }, {...clock.globals, localStorage: {getItem: () => "T-AUDIT-TERMINAL"}});

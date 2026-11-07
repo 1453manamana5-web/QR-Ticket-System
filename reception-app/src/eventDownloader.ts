@@ -11,23 +11,55 @@ type EventBundle = {
   publishedAt: string;
 };
 
-type PublishedEvent = Event & {authToken?: unknown; receptionTarget?: unknown; ticketCount?: unknown};
+type PublishedEvent = Event & {authToken?: unknown; receptionTarget?: unknown; ticketCount?: unknown; inventoryRevision?: unknown};
+
+const validDocId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 160 && !value.includes("/");
 
 function eventMetadata(value: Partial<Event> | undefined): Event | null {
-  if (!value || typeof value.eventId !== "string" || !value.eventId ||
-      typeof value.eventName !== "string" || !value.eventName ||
+  if (!value || !validDocId(value.eventId) ||
+      typeof value.eventName !== "string" || !value.eventName || value.eventName.length > 300 ||
       typeof value.eventDate !== "string" || typeof value.startTime !== "string" ||
       typeof value.endTime !== "string" || !Number.isSafeInteger(value.dataVersion) || Number(value.dataVersion) < 1 ||
       !["preparing", "ready", "active", "finalizing", "finished"].includes(value.eventStatus ?? "")) return null;
   const date = Date.parse(`${value.eventDate}T00:00:00.000Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value.eventDate) || !Number.isFinite(date) ||
       new Date(date).toISOString().slice(0, 10) !== value.eventDate ||
-      ![value.startTime, value.endTime].every(time => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time))) return null;
+      ![value.startTime, value.endTime].every(time => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) || value.startTime >= value.endTime) return null;
   return {
     eventId: value.eventId, eventName: value.eventName, eventDate: value.eventDate,
     startTime: value.startTime, endTime: value.endTime, eventStatus: value.eventStatus!,
     dataVersion: value.dataVersion!,
   };
+}
+
+function receptionSettings(value: unknown): ReceptionSettings {
+  // Older embedded bundles omitted settings. An explicitly malformed setting
+  // must never turn the string "false" into an enabled reception gate.
+  if (value === undefined) return {entryEnabled: true, exitEnabled: true, reentryEnabled: true};
+  const settings = value as Partial<ReceptionSettings> | null;
+  if (!settings || ![settings.entryEnabled, settings.exitEnabled, settings.reentryEnabled].every(item => typeof item === "boolean")) {
+    throw new Error("EVENT_DATA_INVALID");
+  }
+  return {entryEnabled: settings.entryEnabled!, exitEnabled: settings.exitEnabled!, reentryEnabled: settings.reentryEnabled!};
+}
+
+function validTicket(value: unknown, eventId: string): value is Ticket {
+  const ticket = value as Partial<Ticket> | null;
+  return !!ticket && validDocId(ticket.ticketId) && ticket.eventId === eventId &&
+    typeof ticket.valid === "boolean" && ["unused", "inside", "exited"].includes(ticket.currentStatus ?? "") &&
+    !!ticket.basicInfo && typeof ticket.basicInfo === "object" && !Array.isArray(ticket.basicInfo) &&
+    typeof ticket.updatedAt === "string" && Number.isFinite(Date.parse(ticket.updatedAt));
+}
+
+function canonicalSignature(event: PublishedEvent | null): string {
+  return JSON.stringify(event && {event: eventMetadata(event), authToken: event.authToken,
+    receptionTarget: event.receptionTarget, ticketCount: event.ticketCount, inventoryRevision: event.inventoryRevision});
+}
+
+function bundleSignature(bundle: Partial<EventBundle>, legacy: boolean): string {
+  return JSON.stringify({event: eventMetadata(bundle.event), settings: receptionSettings(bundle.settings),
+    authToken: bundle.authToken, ticketCount: bundle.ticketCount, publishedAt: bundle.publishedAt,
+    ...(legacy ? {tickets: bundle.tickets} : {})});
 }
 
 async function withDownloadDeadline<T>(operation: Promise<T>): Promise<T> {
@@ -100,16 +132,16 @@ export async function downloadCurrentFirebaseEventData(
 
 export async function getEventAuthPayloadByToken(token: string): Promise<EventAuthPayload | null> {
   const normalizedToken = token.trim();
-  if (!normalizedToken) return null;
+  if (!validDocId(normalizedToken)) return null;
   const db = getFirebaseDb();
   const snapshot = await withDownloadDeadline(getDocFromServer(doc(db, "eventBundles", normalizedToken)));
   if (!snapshot.exists()) return null;
   const bundle = snapshot.data() as Partial<EventBundle>;
   if (
     bundle.authToken !== normalizedToken ||
-    typeof bundle.event?.eventId !== "string" ||
-    typeof bundle.event?.eventName !== "string" ||
-    typeof bundle.event?.dataVersion !== "number"
+    !validDocId(bundle.event?.eventId) ||
+    typeof bundle.event?.eventName !== "string" || !bundle.event.eventName || bundle.event.eventName.length > 300 ||
+    !Number.isSafeInteger(bundle.event?.dataVersion) || Number(bundle.event?.dataVersion) < 1
   ) {
     return null;
   }
@@ -117,7 +149,7 @@ export async function getEventAuthPayloadByToken(token: string): Promise<EventAu
     type: "qr-ticket-event-auth",
     eventId: bundle.event.eventId,
     eventName: bundle.event.eventName,
-    dataVersion: bundle.event.dataVersion,
+    dataVersion: bundle.event.dataVersion!,
     authToken: normalizedToken,
   };
 }
@@ -126,8 +158,34 @@ export async function downloadEventData(
   payload: EventAuthPayload,
   terminalId: string,
 ): Promise<{ localEvent: LocalEventData; tickets: Ticket[] }> {
+  if (!payload || payload.type !== "qr-ticket-event-auth" || !validDocId(payload.eventId) ||
+      !validDocId(payload.authToken) || typeof payload.eventName !== "string" || !payload.eventName ||
+      payload.eventName.length > 300 || !Number.isSafeInteger(payload.dataVersion) || payload.dataVersion < 1 || !validDocId(terminalId)) {
+    throw new Error("EVENT_DATA_INVALID");
+  }
+  let active = true;
+  const read = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const check = () => {if (!active) throw Object.assign(new Error("イベント取得の通信がタイムアウトしました"), {code: "deadline-exceeded"});};
+    check();
+    const result = await operation();
+    check();
+    return result;
+  };
+  try {
+    // One budget covers the whole download, not a fresh timeout for each stage.
+    return await withDownloadDeadline(downloadEventSnapshot(payload, terminalId, read));
+  } finally {
+    active = false;
+  }
+}
+
+async function downloadEventSnapshot(
+  payload: EventAuthPayload,
+  terminalId: string,
+  read: <T>(operation: () => Promise<T>) => Promise<T>,
+): Promise<{ localEvent: LocalEventData; tickets: Ticket[] }> {
   const db = getFirebaseDb();
-  const snapshot = await withDownloadDeadline(getDocFromServer(doc(db, "eventBundles", payload.authToken)));
+  const snapshot = await read(() => getDocFromServer(doc(db, "eventBundles", payload.authToken)));
 
   if (!snapshot.exists()) {
     throw new Error("EVENT_DATA_NOT_FOUND");
@@ -138,7 +196,7 @@ export async function downloadEventData(
   // The published bundle contains a snapshot of the schedule. Edits to the
   // canonical event must also reach terminals when the inventory version did
   // not change. Keep legacy embedded bundles usable when no event doc exists.
-  const canonicalSnapshot = await withDownloadDeadline(getDocFromServer(doc(db, "events", payload.eventId)));
+  const canonicalSnapshot = await read(() => getDocFromServer(doc(db, "events", payload.eventId)));
   const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() as PublishedEvent : null;
   const event = eventMetadata(canonical ?? bundle.event);
   if (
@@ -147,7 +205,7 @@ export async function downloadEventData(
     bundle.event?.dataVersion !== payload.dataVersion || !event ||
     event.eventId !== payload.eventId || event.dataVersion !== payload.dataVersion ||
     (canonical ? (
-      typeof canonical.authToken === "string" && canonical.authToken !== payload.authToken ||
+      canonical.authToken !== undefined && canonical.authToken !== payload.authToken ||
       canonical.receptionTarget === false || canonical.eventStatus === "finished" ||
       // A printed event-auth code may still carry the old display name.
       payload.eventName !== event.eventName && payload.eventName !== bundle.event.eventName
@@ -158,7 +216,8 @@ export async function downloadEventData(
 
   // チケットの正本はイベント配下のサブコレクション。単一文書に全件を格納すると
   // Firestoreの文書サイズ上限や古い枚数情報により、受付端末へ反映されなくなる。
-  const savedTickets = await withDownloadDeadline(getDocsFromServer(collection(db, "events", payload.eventId, "tickets")));
+  const settings = receptionSettings(bundle.settings);
+  const savedTickets = await read(() => getDocsFromServer(collection(db, "events", payload.eventId, "tickets")));
   let tickets = savedTickets.docs.map(item => item.data() as Ticket);
   const ticketCount = canonical?.ticketCount !== undefined ? canonical.ticketCount : bundle.ticketCount;
   if (ticketCount !== undefined && (typeof ticketCount !== "number" || !Number.isSafeInteger(ticketCount) || ticketCount < 0)) {
@@ -166,7 +225,7 @@ export async function downloadEventData(
   }
 
   // 旧形式の公開バンドルからの移行互換。新形式では必ずサブコレクションが正本。
-  if (tickets.length === 0 && ticketCount !== 0 && Array.isArray(bundle.tickets) && bundle.tickets.length > 0) {
+  if (!canonical && tickets.length === 0 && ticketCount !== 0 && Array.isArray(bundle.tickets) && bundle.tickets.length > 0) {
     tickets = bundle.tickets;
   }
 
@@ -174,13 +233,28 @@ export async function downloadEventData(
     throw new Error("EVENT_TICKET_COUNT_MISMATCH");
   }
 
-  // Reception cannot read the management-only settings subcollection. The
-  // published bundle remains the authorized reception-settings source.
-  const settings = bundle.settings ?? {
-    entryEnabled: true,
-    exitEnabled: true,
-    reentryEnabled: true,
-  };
+  const ids = new Set<string>();
+  for (const ticket of tickets) {
+    if (!validTicket(ticket, payload.eventId) || ids.has(ticket.ticketId)) throw new Error("EVENT_DATA_INVALID");
+    ids.add(ticket.ticketId);
+  }
+  if (savedTickets.docs.some(item => typeof item.id === "string" && item.id !== item.data().ticketId)) {
+    throw new Error("EVENT_DATA_INVALID");
+  }
+
+  // Ticket reads are not atomic with publication. Recheck both metadata sources
+  // before the caller can replace its durable offline inventory. This also
+  // catches same-version timetable changes and inventory edits with equal size.
+  const [latestCanonicalSnapshot, latestBundleSnapshot] = await Promise.all([
+    read(() => getDocFromServer(doc(db, "events", payload.eventId))),
+    read(() => getDocFromServer(doc(db, "eventBundles", payload.authToken))),
+  ]);
+  if (!latestBundleSnapshot.exists()) throw new Error("EVENT_DATA_NOT_FOUND");
+  const latestCanonical = latestCanonicalSnapshot.exists() ? latestCanonicalSnapshot.data() as PublishedEvent : null;
+  if (canonicalSignature(canonical) !== canonicalSignature(latestCanonical) ||
+      bundleSignature(bundle, !canonical) !== bundleSignature(latestBundleSnapshot.data() as Partial<EventBundle>, !canonical)) {
+    throw new Error("EVENT_DATA_INVALID");
+  }
 
   const localEvent: LocalEventData = {
     event,

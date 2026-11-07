@@ -48,8 +48,9 @@ export async function encodeOfflineEvent(value:OfflineEventData):Promise<string[
 }
 export class OfflineEventCollector{
   private parts=new Map<number,string>();private id='';private total=0;
+  private generation=0;private decoding:Promise<OfflineEventData|null>|null=null;
   get progress(){return {received:this.parts.size,total:this.total};}
-  reset(){this.parts.clear();this.id='';this.total=0;}
+  reset(){this.generation++;this.parts.clear();this.id='';this.total=0;this.decoding=null;}
   async add(text:string):Promise<OfflineEventData|null>{
     if(text.length>1400)throw Error('QRデータが大きすぎます。');
     const p=JSON.parse(text) as Part;
@@ -59,11 +60,30 @@ export class OfflineEventCollector{
     this.id=p.id;this.total=p.total;
     const previous=this.parts.get(p.index);if(previous!==undefined&&previous!==p.data)throw Error('同じ番号のQRが一致しません。');
     this.parts.set(p.index,p.data);if(this.parts.size!==this.total)return null;
+    if(this.decoding)return this.decoding;
     const encoded=Array.from({length:this.total},(_,i)=>this.parts.get(i)!).join('');
-    const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
-    if(await hash(bytes)!==this.id){this.reset();throw Error('読み取ったデータが一致しません。最初から読み直してください。');}
-    if(typeof DecompressionStream==='undefined')throw Error('この端末はオフラインQRに未対応です。OSを更新してください。');
-    const raw=await readBounded(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
-    return validateOfflineEvent(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw)));
+    const generation=this.generation;
+    const decoding=this.decode(encoded,this.id,generation);
+    // A synchronous decoding failure can reset the collector before assignment.
+    if(generation===this.generation)this.decoding=decoding;
+    return decoding;
+  }
+  private async decode(encoded:string,id:string,generation:number):Promise<OfflineEventData|null>{
+    try{
+      const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+      const digest=await hash(bytes);
+      if(generation!==this.generation)return null;
+      if(digest!==id)throw Error('読み取ったデータが一致しません。最初から読み直してください。');
+      if(typeof DecompressionStream==='undefined')throw Error('この端末はオフラインQRに未対応です。OSを更新してください。');
+      const raw=await readBounded(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
+      if(generation!==this.generation)return null;
+      return validateOfflineEvent(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw)));
+    }catch(error){
+      // An obsolete verification must never clear a newer transfer or surface
+      // its error after Back. Current malformed transfers can start afresh.
+      if(generation!==this.generation)return null;
+      this.reset();
+      throw error;
+    }
   }
 }

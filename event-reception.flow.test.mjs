@@ -96,6 +96,128 @@ async function createPublished(c, event = makeEvent(), tickets = [makeTicket(eve
   return bundle;
 }
 
+function queueWorker(local, reception) {
+  const compiled = ts.transpileModule(readFileSync(new URL("./reception-app/src/syncQueue.ts", import.meta.url), "utf8"), {
+    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022},
+  }).outputText;
+  const exports = {}, errors = [];
+  new Function("exports", "require", "navigator", "console", compiled)(exports, name => {
+    if (name === "./localDb") return local;
+    if (name === "./receptionSync") return reception;
+    if (name === "../../shared/src/receptionTiming") return loadClientModule("./shared/src/receptionTiming.ts");
+    throw Error("Unexpected queue dependency " + name);
+  }, {onLine: true}, {error: (...args) => errors.push(args)});
+  return {...exports, errors};
+}
+
+async function secondReception(eventId) {
+  const uid = "flow-exit", terminalId = "T-FLOW-EXIT-DEVICE";
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, "terminals", terminalId), {terminalId, requestedByUid: uid,
+      role: "reception", approved: true, receptionApproved: true, managementApproved: false, admin: false, subAdmin: false});
+    await setDoc(doc(db, "terminalOwners", terminalId), {terminalId, ownerUid: uid, enabled: true});
+    await setDoc(doc(db, "terminalInstallations", uid), {terminalId, authUid: uid, approved: true});
+    await setDoc(doc(db, "events", eventId, "receptionApprovals", terminalId), {
+      eventId, terminalId, requestedByUid: uid, status: "approved", requestedAt: new Date().toISOString(), name: "Exit"});
+  });
+  const db = env.authenticatedContext(uid).firestore();
+  const local = loadClientModule("./reception-app/src/localDb.ts", db, uid, terminalId);
+  return {local, terminalId, db,
+    reception: loadClientModule("./reception-app/src/receptionSync.ts", db, uid, terminalId, local)};
+}
+
+test("published reception settings reach fresh reception downloads atomically and identical saves keep the version", async () => {
+  const c = clients(), bundle = await createPublished(c);
+  const changed = {...settings, entryEnabled: false, reentryEnabled: false};
+  const oldPayload = await c.downloader.getCurrentFirebaseEventAuthPayload();
+  await c.management.saveReceptionSettings("flow-event", changed);
+  const canonical = (await getDocFromServer(doc(c.managerDb, "events", "flow-event"))).data();
+  const published = (await getDocFromServer(doc(c.managerDb, "eventBundles", bundle.authToken))).data();
+  assert.equal(canonical.dataVersion, oldPayload.dataVersion + 1);
+  assert.equal(published.event.dataVersion, canonical.dataVersion);
+  assert.deepEqual(published.settings, changed);
+  assert.deepEqual(await c.management.loadReceptionSettings("flow-event"), changed);
+  assert.deepEqual((await c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION")).localEvent.settings, changed);
+  await assert.rejects(c.downloader.downloadEventData(oldPayload, "T-FLOW-RECEPTION"), /EVENT_DATA_INVALID/);
+  await c.management.saveReceptionSettings("flow-event", changed);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event"))).data().dataVersion, canonical.dataVersion);
+});
+
+test("a cross-terminal queued exit stays pending until the delayed entry reaches the server", async () => {
+  const c = clients();await createPublished(c);
+  const exit = await secondReception("flow-event");
+  const downloaded = await c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION");
+  await c.local.prepareLocalEventData(downloaded.localEvent, downloaded.tickets);
+  const entry = {recordId: "delayed-entry", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-RECEPTION",
+    type: "entry", timestamp: "2026-10-25T01:00:00.000Z"};
+  const inside = {...downloaded.tickets[0], currentStatus: "inside", updatedAt: entry.timestamp};
+  await c.local.saveReceptionTransaction(inside, entry);
+  await exit.local.prepareLocalEventData({...downloaded.localEvent, terminalId: exit.terminalId}, [inside]);
+  const leaving = {...entry, recordId: "queued-exit", terminalId: exit.terminalId, type: "exit", timestamp: "2026-10-25T01:01:00.000Z"};
+  await exit.local.saveReceptionTransaction({...inside, currentStatus: "exited", updatedAt: leaving.timestamp}, leaving);
+  const exitWorker = queueWorker(exit.local, exit.reception), entryWorker = queueWorker(c.local, c.reception);
+  await exitWorker.syncPendingReceptionRecords();
+  assert.equal((await exit.local.getPendingSyncItems()).length, 1);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 0);
+  await entryWorker.syncPendingReceptionRecords();
+  await exitWorker.syncPendingReceptionRecords();
+  assert.equal((await c.local.getPendingSyncItems()).length, 0);
+  assert.equal((await exit.local.getPendingSyncItems()).length, 0);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 2);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data().currentStatus, "exited");
+});
+
+test("replaying an acknowledged entry after another terminal's exit never rewinds the canonical ticket", async () => {
+  const c = clients();await createPublished(c);
+  const exit = await secondReception("flow-event");
+  const entry = {recordId: "lost-entry-ack", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-RECEPTION",
+    type: "entry", timestamp: "2026-10-25T01:00:00.000Z"};
+  await c.reception.syncReceptionRecord(entry);
+  const leaving = {...entry, recordId: "later-exit", terminalId: exit.terminalId, type: "exit", timestamp: "2026-10-25T01:01:00.000Z"};
+  await exit.reception.syncReceptionRecord(leaving);
+  await c.reception.syncReceptionRecord(entry);
+  const state = (await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data();
+  assert.equal(state.currentStatus, "exited");assert.equal(state.lastReceptionRecordId, leaving.recordId);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 2);
+});
+
+test("a legacy trial receipt remains local after its event inventory was cleared", async () => {
+  const c = clients();await createPublished(c);
+  const legacy = {recordId: "cleared-trial", eventId: "flow-event", ticketId: "ticket-1", terminalId: "T-FLOW-RECEPTION",
+    type: "entry", timestamp: "2026-10-24T23:59:59.999Z"};
+  // An older downloaded opening time accepted the scan; the canonical event
+  // now starts later. Clearing inventory must not turn that trial into a visit.
+  const downloaded = await c.downloader.downloadCurrentFirebaseEventData("T-FLOW-RECEPTION");
+  await c.local.prepareLocalEventData({...downloaded.localEvent,
+    event: {...downloaded.localEvent.event, startTime: "08:00"}}, downloaded.tickets);
+  await c.local.saveReceptionTransaction({...makeTicket("flow-event"), currentStatus: "inside"}, legacy);
+  await c.local.clearLocalEvent();
+  const worker = queueWorker(c.local, c.reception);
+  await worker.syncPendingReceptionRecords();
+  assert.equal((await c.local.getPendingSyncItems()).length, 0);
+  assert.equal((await c.local.getReceptionRecord(legacy.recordId)).timestamp, legacy.timestamp);
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 0);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data().currentStatus, "unused");
+});
+
+test("a timetable change during sync retries the transaction before admitting an old trial", async () => {
+  const c = clients();await createPublished(c);
+  let attempts = 0;
+  const racing = loadClientModule("./reception-app/src/receptionSync.ts", c.receptionDb, "flow-reception", "T-FLOW-RECEPTION", {}, {
+    runTransaction: (db, operation) => firestore.runTransaction(db, async tx => {
+      const result = await operation(tx);
+      if (++attempts === 1) await updateDoc(doc(c.managerDb, "events", "flow-event"), {startTime: "11:00"});
+      return result;
+    }),
+  });
+  await racing.syncReceptionRecord({recordId: "timetable-race", eventId: "flow-event", ticketId: "ticket-1",
+    terminalId: "T-FLOW-RECEPTION", type: "entry", timestamp: "2026-10-25T01:00:00.000Z"});
+  assert.ok(attempts >= 2, "the canonical schedule change must invalidate the first attempt");
+  assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "receptionRecords"))).size, 0);
+  assert.equal((await getDocFromServer(doc(c.managerDb, "events", "flow-event", "tickets", "ticket-1"))).data().currentStatus, "unused");
+});
+
 test("real client flow: save, publish, download, offline entry/exit/reentry, retry, delete", async () => {
   const c = clients();
   const bundle = await createPublished(c);

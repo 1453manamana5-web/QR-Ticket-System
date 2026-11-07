@@ -41,7 +41,8 @@ async function logReceptionError(
   eventId:string,
   terminalId:string,
   mode:Mode,
-  category:ReceptionErrorCategory
+  category:ReceptionErrorCategory,
+  requestSync:()=>Promise<void>
 ):Promise<void>{
   const log={
     errorId:crypto.randomUUID(),
@@ -56,14 +57,9 @@ async function logReceptionError(
   }catch(reason){
     console.error("受付エラーの端末内保存に失敗しました",reason);
   }
-  if(navigator.onLine){
-    void syncReceptionErrorLog(log).then(
-      ()=>markReceptionErrorLogSynced(log.errorId)
-    ).catch(reason=>{
-      // 未同期ログは端末内に残り、次の定期同期で再送される。
-      console.error("受付エラーのFirebase同期に失敗しました。後で再試行します",reason);
-    });
-  }
+  // All retries share the same worker, including immediate error reporting.
+  // Offline calls still refresh the visible durable pending count.
+  void requestSync();
 }
 
 export default function App(){
@@ -123,8 +119,10 @@ export default function App(){
   const [cameraFailed,setCameraFailed]=useState(false);
   const [online,setOnline]=useState(()=>navigator.onLine);
   const [pendingSyncCount,setPendingSyncCount]=useState(0);
+  const pendingSyncStatus=pendingSyncCount>0?<span role="status" className="connection-status">未同期 {pendingSyncCount}件（端末内保存済み）</span>:null;
   const [networkMbps,setNetworkMbps]=useState<number|null>(null);
   const eventLoadingRef=useRef(false);
+  const eventLoadVersionRef=useRef(0);
   const eventAuthenticationRequiredRef=useRef(false);
   const scanProcessingRef=useRef(false);
   const registrationActiveRef=useRef(false);
@@ -136,25 +134,60 @@ export default function App(){
   receptionAllowedRef.current=canReceive(workflow)&&!guide.open&&!guideSettingsOpen;
   const modeSwipeStartX=useRef<number|null>(null);
   const modeSwipeMoved=useRef(false);
+  const syncWorkRef=useRef<Promise<void>|null>(null);
+  const syncRequestedRef=useRef(false);
 
-  const syncPendingRecords=useCallback(async()=>{
-    try{
-      if(!navigator.onLine)return;
-      await syncPendingReceptionRecords();
-      const pendingErrors=await getPendingReceptionErrorLogs();
-      for(const log of pendingErrors){
+  const revokeCurrentApproval=useCallback(()=>{
+    registrationActiveRef.current=false;
+    ++registrationVersionRef.current;
+    ++eventLoadVersionRef.current;
+    eventLoadingRef.current=false;
+    eventAuthenticationRequiredRef.current=true;
+    pendingRemoteModeRef.current=null;
+    receptionAllowedRef.current=false;
+    try{localStorage.removeItem("qr-ticket-reception-approved");}catch{}
+    setTerminalRegistration(null);setLocalEvent(null);setAuthPayload(null);setResult(null);
+    setBusy(false);setGuideSettingsOpen(false);setScreen("registration");
+    setError("受付の承認を確認できませんでした。管理画面で端末とイベントの受付承認を確認してください。");
+  },[]);
+
+  const syncPendingRecords=useCallback(function sync():Promise<void>{
+    syncRequestedRef.current=true;
+    if(syncWorkRef.current)return syncWorkRef.current;
+    const run=async()=>{
+      do{
+        syncRequestedRef.current=false;
         try{
-          await syncReceptionErrorLog(log);
-          await markReceptionErrorLogSynced(log.errorId);
+          if(navigator.onLine){
+            await syncPendingReceptionRecords();
+            const pendingErrors=await getPendingReceptionErrorLogs();
+            for(const log of pendingErrors){
+              if(!navigator.onLine)break;
+              try{
+                await syncReceptionErrorLog(log);
+                await markReceptionErrorLogSynced(log.errorId);
+              }catch(reason){
+                console.error("受付エラーログの再同期に失敗しました。次回再試行します",reason);
+                const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
+                if(code==="unavailable"||code==="deadline-exceeded"||code==="auth/network-request-failed")break;
+              }
+            }
+          }
         }catch(reason){
-          console.error("受付エラーログの再同期に失敗しました。次回再試行します",reason);
+          console.error("同期キューの読み込みに失敗しました",reason);
+        }finally{
+          await Promise.all([getPendingSyncItems(),getPendingReceptionErrorLogs()]).then(([items,errors])=>setPendingSyncCount(items.length+errors.length)).catch(()=>undefined);
         }
-      }
-    }catch(reason){
-      console.error("同期キューの読み込みに失敗しました",reason);
-    }finally{
-      await Promise.all([getPendingSyncItems(),getPendingReceptionErrorLogs()]).then(([items,errors])=>setPendingSyncCount(items.length+errors.length)).catch(()=>undefined);
-    }
+      }while(syncRequestedRef.current);
+    };
+    const task=run().finally(()=>{
+      if(syncWorkRef.current!==task)return;
+      syncWorkRef.current=null;
+      // A scan can enqueue work between the last loop and this microtask.
+      if(syncRequestedRef.current)return sync();
+    });
+    syncWorkRef.current=task;
+    return task;
   },[]);
 
   useEffect(()=>{
@@ -178,7 +211,12 @@ export default function App(){
       // 明示的な権限拒否・承認取消ではキャッシュに戻さず停止する。
       const value=(useCachedApproval&&!incoming?.approved)?readCachedApproval():incoming;
       const approved=value?.approved===true;
-      if(registrationActiveRef.current!==approved || workflowRef.current.registration?.eventId!==value?.eventId)++registrationVersionRef.current;
+      if(registrationActiveRef.current!==approved || workflowRef.current.registration?.eventId!==value?.eventId){
+        ++registrationVersionRef.current;
+        ++eventLoadVersionRef.current;
+        eventLoadingRef.current=false;
+        setBusy(false);
+      }
       registrationActiveRef.current=approved;
       setTerminalRegistration(value);
       if(value?.name)setTerminalRegistrationName(value.name);
@@ -248,6 +286,9 @@ export default function App(){
     if(registration?.approved && registration.eventId===eventId)return false;
     registrationActiveRef.current=false;
     ++registrationVersionRef.current;
+    ++eventLoadVersionRef.current;
+    eventLoadingRef.current=false;
+    setBusy(false);
     pendingRemoteModeRef.current=null;
     setLocalEvent(null); setAuthPayload(null); setResult(null);
     setTerminalRegistration(registration);
@@ -263,6 +304,7 @@ export default function App(){
       return;
     }
     eventLoadingRef.current=true;
+    const loadVersion=++eventLoadVersionRef.current;
     const registrationVersion=registrationVersionRef.current;
     setBusy(true);
     setError("");
@@ -305,8 +347,8 @@ export default function App(){
         setError("通信でイベントデータを受信できませんでした。通信状態と管理アプリの公開設定を確認してください。");
       }
     }finally{
-      eventLoadingRef.current=false;
-      setBusy(false);
+      if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;
+      if(registrationIsCurrent(registrationVersion))setBusy(false);
     }
   },[busy,requireApprovalForNewEvent]);
 
@@ -316,6 +358,7 @@ export default function App(){
     let cancelled=false;
     const registrationVersion=registrationVersionRef.current;
     let cachedEvent:LocalEventData|null=null;
+    let cacheValidationFailed=false;
 
     const restoreCachedEvent=async()=>{
       const saved=await loadLocalEvent(true);
@@ -341,6 +384,7 @@ export default function App(){
       if(eventLoadingRef.current||eventAuthenticationRequiredRef.current)return;
       if(!["auth","ready","reception","registration"].includes(screenRef.current))return;
       eventLoadingRef.current=true;
+      const loadVersion=++eventLoadVersionRef.current;
       try{
         // まず端末内の保存済みデータを復元する。Firebaseの応答を待たず受付準備画面を開ける。
         if(!cachedEvent && screenRef.current!=="reception"){
@@ -349,6 +393,7 @@ export default function App(){
           }catch(reason){
             console.error("端末内イベントデータの復元に失敗しました",reason);
             if(reason instanceof Error&&reason.message==="LOCAL_EVENT_INCOMPLETE"){
+              cacheValidationFailed=true;
               if(!cancelled)setError("端末に保存されたイベントデータが不完全です。もう一度イベントデータを受信してください。");
             }
           }
@@ -380,7 +425,7 @@ export default function App(){
         if(!["ready","auth","registration","reception"].includes(screenRef.current))return;
 
         if(
-          existing?.dataReady &&
+          !cacheValidationFailed && existing?.dataReady &&
           existing.terminalId===getTerminalId() &&
           existing.event.eventId===payload.eventId &&
           existing.event.dataVersion===payload.dataVersion
@@ -416,6 +461,7 @@ export default function App(){
           dataReady:false,
         };
         await prepareLocalEventData(nextEvent,downloaded.tickets);
+        cacheValidationFailed=false;
         nextEvent.dataReady=true;
         if(cancelled||!registrationIsCurrent(registrationVersion))return;
         cachedEvent=nextEvent;
@@ -435,6 +481,9 @@ export default function App(){
       }catch(reason){
         console.error("Firebaseから開催イベントデータを自動取得できませんでした",reason);
         if(cancelled||!registrationIsCurrent(registrationVersion))return;
+        if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){
+          revokeCurrentApproval();return;
+        }
         const code=reason instanceof Error?reason.message:"";
         if(code==="NO_PUBLISHED_EVENT"){
           // Keep the durable queue even after publication ends.
@@ -456,7 +505,7 @@ export default function App(){
         }
         // 通信失敗時は、正常に保存済みのイベントとチケットを端末内でそのまま使う。
       }finally{
-        eventLoadingRef.current=false;
+        if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;
       }
     };
 
@@ -469,12 +518,7 @@ export default function App(){
       window.clearInterval(interval);
       window.removeEventListener("online",handleOnline);
     };
-  },[terminalRegistration?.approved,terminalRegistration?.eventId,requireApprovalForNewEvent]);
-
-  useEffect(()=>{
-    if(!terminalRegistration?.approved)return;
-    void saveTerminalHeartbeat(getTerminalId(), "stopped").then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("起動時の通信速度測定に失敗しました",reason));
-  },[terminalRegistration?.approved,terminalRegistration?.eventId]);
+  },[terminalRegistration?.approved,terminalRegistration?.eventId,requireApprovalForNewEvent,revokeCurrentApproval]);
 
   useEffect(()=>{
     void syncPendingRecords();
@@ -504,9 +548,11 @@ export default function App(){
 
   useEffect(()=>{
     if(!localEvent?.dataReady)return;
+    let active=true;
     let unsubscribe:(()=>void)|undefined;
     try{
       unsubscribe=subscribeTerminalControl(localEvent.terminalId,(remoteMode,updatedAt)=>{
+        if(!active)return;
         if(!updatedAt)return; // Initial desiredMode is not a management command.
         const command=JSON.stringify([localEvent.terminalId,remoteMode,updatedAt]);
         if(lastRemoteCommandRef.current===command)return;
@@ -525,15 +571,21 @@ export default function App(){
         if(scanProcessingRef.current){pendingRemoteModeRef.current=nextMode;return;}
         setMode(nextMode);
         setResult(null);
-      },reason=>console.error("端末リモート操作の購読に失敗しました",reason));
+      },reason=>{if(active)console.error("端末リモート操作の購読に失敗しました",reason);});
     }catch(reason){
       console.error("端末リモート操作の購読に失敗しました",reason);
     }
-    const heartbeat=()=>void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen!=="reception"?"stopped":mode,undefined,localEvent.event.eventId).then(speed=>setNetworkMbps(speed)).catch(reason=>console.error("端末ハートビートに失敗しました",reason));
+    const heartbeat=()=>{
+      if(!active)return;
+      void saveTerminalHeartbeat(localEvent.terminalId,remoteStopped||screen!=="reception"?"stopped":mode,undefined,localEvent.event.eventId).then(speed=>{if(active)setNetworkMbps(speed);}).catch(reason=>{
+        const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
+        if(active&&code!=="cancelled")console.error("端末ハートビートに失敗しました",reason);
+      });
+    };
     heartbeat();
     const interval=window.setInterval(heartbeat,10000);
-    return()=>{unsubscribe?.();window.clearInterval(interval);};
-  },[localEvent?.dataReady,localEvent?.terminalId,mode,remoteStopped,screen]);
+    return()=>{active=false;unsubscribe?.();window.clearInterval(interval);};
+  },[localEvent?.dataReady,localEvent?.terminalId,localEvent?.event.eventId,mode,remoteStopped,screen]);
 
   const submitReceptionRegistration = async () => {
     if(busy)return;
@@ -561,7 +613,7 @@ export default function App(){
       if(version!==registrationVersionRef.current)return;
       setError("登録申請を送信できませんでした。");
     }finally{
-      setBusy(false);
+      if(version===registrationVersionRef.current)setBusy(false);
     }
   };
 
@@ -592,7 +644,7 @@ export default function App(){
         ? "このブラウザーには承認済みの端末登録があります。再申請は不要です。受付アプリを再読み込みしてください。"
         : "登録申請をリセットできませんでした（" + (reason instanceof Error ? reason.message : String(reason)) + "）。");
     } finally {
-      setBusy(false);
+      if(version===registrationVersionRef.current)setBusy(false);
     }
   };
 
@@ -623,6 +675,7 @@ export default function App(){
     setError("");
     if(eventLoadingRef.current){setBusy(false);return;}
     eventLoadingRef.current=true;
+    const loadVersion=++eventLoadVersionRef.current;
     const registrationVersion=registrationVersionRef.current;
     try{
       const downloaded=offlineData?{localEvent:{event:offlineData.event,settings:offlineData.settings,terminalId:getTerminalId(),authenticatedAt:new Date().toISOString(),dataReady:false,ticketCount:offlineData.tickets.length},tickets:offlineData.tickets}:await downloadEventData(authPayload,getTerminalId());
@@ -648,7 +701,7 @@ export default function App(){
         ?"未同期の受付記録があります。インターネットに接続して同期が完了してから、別のイベントを受信してください。"
         :offlineData&&reason instanceof Error?reason.message:"イベントデータを端末に保存できませんでした。");
       setScreen("confirm");
-    }finally{eventLoadingRef.current=false;setBusy(false);}
+    }finally{if(loadVersion===eventLoadVersionRef.current)eventLoadingRef.current=false;if(registrationIsCurrent(registrationVersion))setBusy(false);}
   };
 
   const handleAuthCodeSubmit=async()=>{
@@ -668,7 +721,7 @@ export default function App(){
     }catch{
       if(!registrationIsCurrent(registrationVersion))return;
       setError("イベント連携コードが正しくないか、イベントデータが見つかりません。");
-    }finally{setBusy(false);}
+    }finally{if(registrationIsCurrent(registrationVersion))setBusy(false);}
   };
 
   const handleTicketScan=useCallback(async(rawText:string)=>{
@@ -698,7 +751,7 @@ export default function App(){
         const payload=decoded as {type?:unknown;eventId?:unknown;ticketId?:unknown};
         if(payload.type==="qr-ticket"){
           if(typeof payload.ticketId!=="string"||!payload.ticketId.trim()){
-            void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
+            void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket",syncPendingRecords);
             setResult({kind:"error",title:"QRコードを確認できません",detail:"チケット情報が不足しています。"});
             return;
           }
@@ -717,7 +770,7 @@ export default function App(){
 
     try{
       if(qrEventId&&qrEventId!==localEvent.event.eventId){
-        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket",syncPendingRecords);
         setResult({kind:"error",title:"別のイベントのチケットです",detail:"現在の受付イベントのチケットを読み取ってください。"});
         return;
       }
@@ -733,22 +786,23 @@ export default function App(){
           if(record?.eventId===localEvent.event.eventId && record.ticketId===ticketId){hasPending=true;break;}
         }
         if(!hasPending){
-          try{ticket=await getLatestReceptionTicket(localEvent.event.eventId,ticketId);}
+          try{ticket=await getLatestReceptionTicket(localEvent.event.eventId,ticketId);setOnline(navigator.onLine);}
           catch(reason){
             const code=typeof reason==="object"&&reason!==null&&"code" in reason?reason.code:"";
             if(code!=="unavailable"&&code!=="deadline-exceeded"&&code!=="auth/network-request-failed")throw reason;
+            setOnline(false);
             // A temporary network outage may still use the downloaded inventory.
           }
         }
       }
       if(!scanIsCurrent())return;
       if(!ticket||ticket.eventId!==localEvent.event.eventId){
-        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket");
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket",syncPendingRecords);
         setResult({kind:"error",title:"チケットを確認できません",detail:"このチケットは確認できません。"});
         return;
       }
       if(!ticket.valid){
-        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_ticket");
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_ticket",syncPendingRecords);
         setResult({kind:"error",title:"このチケットは無効です",detail:"管理アプリで無効になっているチケットです。"});
         return;
       }
@@ -767,7 +821,7 @@ export default function App(){
         const detail=mode==="entry"
           ?ticket.currentStatus==="inside"?"このチケットはすでに入場しています。":"このチケットは受付できません。"
           :ticket.currentStatus==="unused"?"このチケットはまだ入場していません。":"このチケットは受付できません。";
-        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_state");
+        void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"invalid_state",syncPendingRecords);
         setResult({kind:"error",title:"受付できません",detail});
         return;
       }
@@ -799,8 +853,11 @@ export default function App(){
       announceReception(receptionType);
     }catch(reason){
       if(!scanIsCurrent())return;
+      if(typeof reason==="object"&&reason!==null&&"code" in reason&&reason.code==="permission-denied"){
+        revokeCurrentApproval();return;
+      }
       console.error("受付処理に失敗しました",reason);
-      void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed");
+      void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"save_failed",syncPendingRecords);
       setResult({
         kind:"error",
         title:"受付データを保存できませんでした",
@@ -814,7 +871,7 @@ export default function App(){
       if(nextMode&&registrationIsCurrent(registrationVersion)&&!eventAuthenticationRequiredRef.current&&!workflowRef.current.remoteStopped){setMode(nextMode);setResult(null);}
       // カメラは連続稼働するため、受付のたびに再生成しない。
     }
-  },[localEvent,mode,busy,remoteStopped,syncPendingRecords]);
+  },[localEvent,mode,busy,remoteStopped,syncPendingRecords,revokeCurrentApproval]);
 
   const switchMode=()=>{
     if(remoteStopped||scanProcessingRef.current)return;
@@ -909,7 +966,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント未認証</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span>{pendingSyncStatus}<span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント未認証</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main">
@@ -996,7 +1053,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント認証QR読み取り</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span>{pendingSyncStatus}<span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>イベント認証QR読み取り</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main">
@@ -1027,7 +1084,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{authPayload.eventName}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span>{pendingSyncStatus}<span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{authPayload.eventName}</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-ticket-result">
@@ -1045,7 +1102,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent?.event.eventName??authPayload?.eventName??"イベント未設定"}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span>{pendingSyncStatus}<span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent?.event.eventName??authPayload?.eventName??"イベント未設定"}</strong></div></div>
       </div>
     </header>
     <main className="entry-reception-main"><section className="entry-result-panel entry-processing-result">
@@ -1062,7 +1119,7 @@ export default function App(){
     <header className="entry-reception-header">
       <div className="entry-header-main">
         <h1>交通研究部QRコード管理システム</h1>
-        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span><span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
+        <div className="entry-header-meta"><span className="connection-status"><span className={`online-dot ${online?"is-online":"is-offline"}`}/>{online?"オンライン":"オフライン"}</span>{pendingSyncStatus}<span className="entry-network-speed">通信 {networkMbps!==null?`${networkMbps.toFixed(1)} Mbps`:"測定中…"}</span><span className="entry-header-meta-divider"/><div className="entry-current-event"><span className="entry-current-event-label">EVENT</span><strong>{localEvent.event.eventName}</strong></div></div>
         <button
           type="button"
           className={`entry-reception-mode-switch ${mode==="entry"?"is-entry":"is-exit"}`}
@@ -1192,7 +1249,7 @@ export default function App(){
                   onError={message=>{
                     setCameraFailed(true);
                     setResult({kind:"error",title:"カメラを起動できません",detail:message});
-                    if(localEvent?.event.eventId)void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"camera_failed");
+                    if(localEvent?.event.eventId)void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"camera_failed",syncPendingRecords);
                   }}
                 />}
                 {cameraFailed&&!remoteStopped&&<button type="button" className="secondary" onClick={()=>{setCameraFailed(false);setResult(null);setScannerKey(current=>current+1);}}>カメラを再起動</button>}
@@ -1256,7 +1313,7 @@ export default function App(){
   </div>;
   };
   if(guide.open)return <ReceptionGuide controller={guide}/>;
-  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>setGuideSettingsOpen(true)}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><button onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p role="status">{audioNotice}</p>}<p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>beginGuide()}>使い方ガイドを始める</button><h3>項目を選んで練習</h3><div className="reception-guide-topics">{receptionGuideTopics.map(topic=><button key={topic.id} onClick={()=>beginGuide(topic.id)}>{topic.label}</button>)}</div><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
+  return <>{renderScreen()}{terminalRegistration?.approved&&<button type="button" className="entry-guide-settings" onClick={()=>{++scanGenerationRef.current;setGuideSettingsOpen(true);}}>設定</button>}{guideSettingsOpen&&<div className="entry-guide-settings-dialog"><section role="dialog" aria-modal="true" aria-label="受付の設定"><h2>受付の設定</h2><button onClick={()=>void checkReceptionSound()}>音声を有効にして確認</button>{audioNotice&&<p role="status">{audioNotice}</p>}<p>本番データに影響しない練習画面で使い方を確認できます。</p><button onClick={()=>beginGuide()}>使い方ガイドを始める</button><h3>項目を選んで練習</h3><div className="reception-guide-topics">{receptionGuideTopics.map(topic=><button key={topic.id} onClick={()=>beginGuide(topic.id)}>{topic.label}</button>)}</div><button onClick={()=>setGuideSettingsOpen(false)}>閉じる</button></section></div>}</>;
 
 }
 
