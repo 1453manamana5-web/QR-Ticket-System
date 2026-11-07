@@ -22,6 +22,7 @@ function load(file, dependencies={}, globals={}) {
     if(name in dependencies)return dependencies[name];
     if(name==='../../shared/src/receptionTiming')return load('./shared/src/receptionTiming.ts');
     if(name==="./receptionState")return load("./reception-app/src/receptionState.ts");
+    if(name==="../../shared/src/browserSecurity")return load("./shared/src/browserSecurity.ts");
     if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
     if(name==="react"||name==="react/jsx-runtime")return require(name);
     throw Error("Unexpected dependency: "+name);

@@ -1,3 +1,4 @@
+import {printContentSecurityPolicy} from '../../shared/src/browserSecurity';
 import {
   type ChangeEvent,
   type Dispatch, type SetStateAction,
@@ -922,11 +923,14 @@ function TicketDesigner({
       sheet.style.display = "block";
       sheet.style.visibility = "visible";
 
+      printWindow.opener = null;
       printWindow.document.open();
       printWindow.document.write(`<!doctype html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${printContentSecurityPolicy}">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>チケット - 印刷</title>
 <style>${TICKET_PRINT_CSS}</style>

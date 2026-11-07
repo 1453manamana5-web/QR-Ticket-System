@@ -5,6 +5,7 @@ import "./styles.css";
 import "../../shared/src/controlMotion.css";
 import "./controlMotion.css";
 import { ensureFirebaseAuth } from "./firebaseClient";
+import {blockEmbeddedApp} from '../../shared/src/browserSecurity';
 
 function describeFirebaseStartupError(error: unknown): string {
   if (error instanceof Error) {
@@ -17,6 +18,7 @@ function describeFirebaseStartupError(error: unknown): string {
 async function startApp() {
   const root = document.getElementById("root");
   if (!root) throw new Error("Reactの表示領域が見つかりません。");
+  if (blockEmbeddedApp(root, window)) return;
   try {
     await ensureFirebaseAuth();
     if ("serviceWorker" in navigator) {
