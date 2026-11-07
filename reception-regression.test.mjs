@@ -197,14 +197,15 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,prepare,initialOnline=true,cachedApproval,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
   let approvedEventId="event-one";
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
-  const navigator={onLine:true};
+  if(cachedApproval!==undefined)storage.set("qr-ticket-reception-approved",JSON.stringify(cachedApproval));
+  const navigator={onLine:initialOnline};
   const window={
     addEventListener:()=>{},removeEventListener:()=>{},
     setInterval:(fn,ms)=>{intervals.set(++nextId,{fn,ms});return nextId;},clearInterval:id=>intervals.delete(id),
@@ -214,7 +215,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":local,
+    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,prepareLocalEventData:async(...args)=>{await local.prepareLocalEventData(...args);if(prepare)await prepare(...args);}},
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -259,7 +260,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
     get inventoryDownloads(){return inventoryDownloads;},
     scan:async value=>{await act(async()=>{await renderer.root.findByType(Scanner).props.onResult(value);});await flush();},
     control:async(mode,at)=>{await act(async()=>controlCallback(mode,at));},
-    approve:async()=>{try{approvedEventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}await act(async()=>registrationCallback({approved:true,status:"online",name:"Test terminal",eventId:approvedEventId}));await flush();},
+    approve:async(eventId)=>{if(eventId)approvedEventId=eventId;else try{approvedEventId=(await (automatic??(async()=>bundle))()).localEvent.event.eventId;}catch{}await act(async()=>registrationCallback({approved:true,status:"online",name:"Test terminal",eventId:approvedEventId}));await flush();},
     revoke:async()=>{await act(async()=>registrationError({code:"permission-denied"}));await flush();},
     poll:async()=>{await act(async()=>{for(const {fn} of [...intervals.values()])await fn();});await flush();},
     close:async()=>{await act(async()=>renderer.unmount());},
@@ -1006,5 +1007,132 @@ test("obsolete registration rejection cannot display an error after newer approv
     await h.click("イベントQRを読み直す");
     await act(async()=>reject(Error("old request failed")));await h.flush();
     assert.doesNotMatch(h.text(),/登録申請を送信できませんでした/);
+  }finally{await h.close();}
+});
+
+
+test("hanging online metadata cannot block approved same-event offline QR preparation",async()=>{
+  let finishMetadata;
+  const h=await harness({saved:false,initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:()=>new Promise(resolve=>{finishMetadata=resolve;})});
+  try{
+    assert.ok(finishMetadata);
+    h.navigator.onLine=false;
+    await h.click("イベントデータQRを読み取る");
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    assert.match(h.text(),/受付準備完了/);
+    await h.click("受付を開始する");
+    await act(async()=>finishMetadata({localEvent:makeEvent("stale-event"),tickets:[makeTicket("stale-event")],authPayload:{authToken:"stale"}}));await h.flush();
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    assert.match(h.text(),/受付を停止/);
+    assert.doesNotMatch(h.text(),/承認待ち|切り替わりました/);
+  }finally{await h.close();}
+});
+
+test("obsolete metadata approval read cannot replace a newer offline preparation",async()=>{
+  let finishApproval;
+  const h=await harness({initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>({localEvent:makeEvent("event-two"),tickets:[makeTicket("event-two")],authPayload:{authToken:"next"}}),readRegistration:()=>new Promise(resolve=>{finishApproval=resolve;})});
+  try{
+    assert.ok(finishApproval);
+    h.navigator.onLine=false;
+    await h.click("イベントQRを読み直す");
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    await act(async()=>finishApproval(null));await h.flush();
+    assert.match(h.text(),/受付準備完了/);
+    assert.doesNotMatch(h.text(),/承認待ち|受付端末を登録/);
+  }finally{await h.close();}
+});
+
+test("offline preparation waits for an active inventory write before replacing its data",async()=>{
+  let finishPreparation,preparations=0;
+  const bundle=()=>({localEvent:makeEvent("event-one",2),tickets:[makeTicket()],authPayload:{authToken:"updated"}});
+  const h=await harness({initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>bundle(),download:async()=>bundle(),prepare:async event=>{
+    preparations++;
+    if(event.event.dataVersion===2)await new Promise(resolve=>{finishPreparation=resolve;});
+  }});
+  try{
+    assert.ok(finishPreparation);
+    h.navigator.onLine=false;
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent("event-one",3).event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    await h.click("イベントQRを読み直す");
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal(preparations,1);
+    assert.equal((await h.local.loadLocalEvent()).event.dataVersion,2);
+    await act(async()=>finishPreparation());await h.flush();
+    await h.click("イベントQRを読み直す");
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal(preparations,2);
+    assert.equal((await h.local.loadLocalEvent()).event.dataVersion,3);
+    assert.match(h.text(),/受付準備完了/);
+  }finally{await h.close();}
+});
+
+test("unscoped cached approval cannot restore an offline reception event",async()=>{
+  for(const eventId of [undefined,null,0,"","   "]){
+    const h=await harness({initialOnline:false,initialRegistration:null,cachedApproval:{approved:true,name:"Old cached terminal",terminalId:"T-REGRESSION-01",eventId}});
+    try{
+      assert.match(h.text(),/受付端末を登録/);
+      assert.doesNotMatch(h.text(),/受付準備完了/);
+      assert.equal(h.inventoryDownloads,0);
+      assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    }finally{await h.close();}
+  }
+});
+
+test("event-scoped cached approval preserves offline reception and its durable inventory",async()=>{
+  const h=await harness({initialOnline:false,initialRegistration:null,cachedApproval:{approved:true,name:"Cached terminal",terminalId:"T-REGRESSION-01",eventId:"event-one"}});
+  try{
+    assert.match(h.text(),/受付準備完了/);
+    assert.equal(h.inventoryDownloads,0);
+    await h.click("受付を開始する");
+    await h.scan("ticket-one");
+    assert.equal((await h.local.getTicket("ticket-one")).currentStatus,"inside");
+    assert.equal((await h.local.getPendingSyncItems()).length,1);
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+  }finally{await h.close();}
+});
+
+test("direct approval from event A to event B stops A and permits explicit B preparation",async()=>{
+  let eventId="event-one";
+  const data=()=>({localEvent:makeEvent(eventId),tickets:[makeTicket(eventId)],authPayload:{authToken:"token"}});
+  const h=await harness({initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>data(),download:async()=>data(),latestTicket:async()=>makeTicket(eventId)});
+  try{
+    await h.click("受付を開始する");
+    eventId="event-two";
+    await h.approve("event-two");
+    assert.doesNotMatch(h.text(),/受付を停止/);
+    assert.match(h.text(),/イベントが切り替わりました/);
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    await h.click("通信でイベントデータを受信");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-two");
+    assert.match(h.text(),/受付準備完了/);
+    await h.click("受付を開始する");
+    await h.scan(JSON.stringify({type:"qr-ticket",eventId:"event-two",ticketId:"ticket-one"}));
+    assert.equal((await h.local.getTicket("ticket-one")).currentStatus,"inside");
+  }finally{await h.close();}
+});
+
+test("obsolete communication permission failure cannot revoke a newer event approval",async()=>{
+  let rejectDownload,reads=0;
+  const h=await harness({saved:false,initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>{
+    if(++reads===2)return new Promise((_resolve,reject)=>{rejectDownload=reject;});
+    throw Error("NO_PUBLISHED_EVENT");
+  }});
+  try{
+    const button=h.renderer.root.findAllByType("button").find(node=>node.children.join("")==="通信でイベントデータを受信");
+    assert.ok(button);
+    await act(async()=>{button.props.onClick();});await h.flush();
+    assert.ok(rejectDownload);
+    await h.revoke();await h.approve("event-one");
+    await act(async()=>rejectDownload({code:"permission-denied"}));await h.flush();
+    assert.doesNotMatch(h.text(),/受付端末を登録|承認待ち/);
+    assert.equal(h.renderer.root.findAll(node=>node.props["data-reception-phase"]==="preparing").length>0,true);
   }finally{await h.close();}
 });
