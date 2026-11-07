@@ -73,15 +73,16 @@ test('a fully received invalid compressed payload resets and permits a fresh tra
  let result;for(const frame of await encodeOfflineEvent(data))result=await collector.add(frame);assert.deepEqual(result,data);
 });
 
-test('resetting during decompression ignores obsolete data without clearing the next transfer',async()=>{
+test('resetting during decompression ignores obsolete data without clearing the next transfer',{timeout:10000},async()=>{
  const real=protocol(),frames=await real.encodeOfflineEvent(data);
  const next=await real.encodeOfflineEvent({...data,tickets:Array.from({length:120},(_,i)=>({...ticket,ticketId:'NEXT'+i,basicInfo:{tag:webcrypto.randomUUID()}}))});
  assert.ok(next.length>1);
- let resume,started=false;const blocked=new Promise(resolve=>{resume=resolve;});
- const DecompressionStream=class{constructor(){return new TransformStream({async transform(_chunk,controller){started=true;await blocked;controller.enqueue(new TextEncoder().encode(JSON.stringify(data)));}});}};
+ let resume,signalStarted;const blocked=new Promise(resolve=>{resume=resolve;});
+ const started=new Promise(resolve=>{signalStarted=resolve;});
+ const DecompressionStream=class{constructor(){return new TransformStream({async transform(_chunk,controller){signalStarted();await blocked;controller.enqueue(new TextEncoder().encode(JSON.stringify(data)));}});}};
  const {OfflineEventCollector}=protocol({DecompressionStream}),collector=new OfflineEventCollector();
  let pending;for(const frame of frames)pending=collector.add(frame);
- for(let i=0;i<30&&!started;i++)await tick();assert.equal(started,true);
+ await started;
  collector.reset();assert.equal(await collector.add(next[0]),null);const progress=collector.progress;
  resume();assert.equal(await pending,null);assert.deepEqual(collector.progress,progress);
 });
