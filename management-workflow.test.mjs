@@ -8,14 +8,14 @@ import React from 'react';
 import {act,create} from 'react-test-renderer';
 const require=createRequire(import.meta.url),ts=require('typescript');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
-function load(path,deps={},globals={}) {
-  const out={};new Function('exports','require',...Object.keys(globals),ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n in deps?deps[n]:require(n),...Object.values(globals));return out;
+function load(path,deps={},globals={},transform=source=>source) {
+  const out={};new Function('exports','require',...Object.keys(globals),ts.transpileModule(transform(readFileSync(path,'utf8')),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(out,n=>n in deps?deps[n]:require(n),...Object.values(globals));return out;
 }
 const safety=load('management-app/src/operationSafety.ts');
 const event=(id='event-a')=>({eventId:id,eventName:id,eventDate:'2099-10-27',startTime:'09:00',endTime:'17:00',eventStatus:'preparing',dataVersion:1});
 const ticket=(eventId='event-a')=>({eventId,ticketId:'TKT000001',basicInfo:{ticketNumber:1},currentStatus:'unused',valid:true,updatedAt:'2026-10-27T00:00:00.000Z'});
 const manager={terminalId:'T-TEST-MANAGER',name:'Manager',type:'Web / iPad',role:'management',approved:true,managementApproved:true,receptionApproved:false,status:'online',lastSeen:null,networkMbps:null,battery:null,admin:true};
-async function harness(overrides={}, {quota=false,fileText,geometry,motion=false,ledger={confirmed:[],unsynced:0},practice=false}={}) {
+async function harness(overrides={}, {quota=false,fileText,geometry,motion=false,ledger={confirmed:[],unsynced:0},practice=false,enableMembers=false}={}) {
   const storage=new Map([['qr-ticket-terminal-id',manager.terminalId],['qr-ticket-device-id',manager.terminalId]]);
   let eventsCallback;const ticketCallbacks=new Map(),recordCallbacks=new Map(),savedSettings=[],deleted=[];
   const intervals=new Map();let next=0;
@@ -34,7 +34,13 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
   const window={addEventListener(){},removeEventListener(){},matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
-  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./OfflineEventTransfer':{default:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./guidePractice':load('management-app/src/guidePractice.ts'),'./ManagementGuide':{default:()=>null,managementGuideTopics:[],useManagementGuide:()=>({open:false,start(){}})},'./reservePrintLedger':{useReservePrintLedger:()=>ledger},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}});
+  const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./OfflineEventTransfer':{default:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./guidePractice':load('management-app/src/guidePractice.ts'),'./ManagementGuide':{default:()=>null,managementGuideTopics:[],useManagementGuide:()=>({open:false,start(){}})},'./reservePrintLedger':{useReservePrintLedger:()=>ledger},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}},enableMembers?source=>{
+    // The member page is coming-soon in production. Opt in only inside these
+    // focused tests to exercise its real handlers without enabling the feature.
+    const marker='{ label: "部員管理", icon: "members", comingSoon: true }';
+    assert.ok(source.includes(marker),'member navigation fixture marker');
+    return source.replace(marker,'{ label: "部員管理", icon: "members" }');
+  }:undefined);
   let renderer;await act(async()=>{renderer=create(React.createElement(exported.default,{practice}));});
   const flush=async()=>{await act(async()=>{for(let i=0;i<8;i++)await tick();});};await flush();
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
@@ -406,8 +412,11 @@ test('management totals and status cards exclude unprinted reserves and include 
   }finally{await h.close();}
 });
 
-test('failed member registration does not create a phantom row',async()=>{
-  const h=await harness({saveMember:async()=>{throw Error('network disconnected');}});
+// Keep default navigation tests unchanged; only dormant-member tests opt in.
+const memberHarness=(overrides,options={})=>harness(overrides,{...options,enableMembers:true});
+
+test('dormant member UI: failed member registration does not create a phantom row',async()=>{
+  const h=await memberHarness({saveMember:async()=>{throw Error('network disconnected');}});
   try{
     await h.nav('部員管理');await h.click('＋ 部員を登録');
     const input=h.renderer.root.findByProps({placeholder:'例：山田 太郎'});
@@ -418,9 +427,9 @@ test('failed member registration does not create a phantom row',async()=>{
   }finally{await h.close();}
 });
 
-test('failed member deletion preserves the existing member and its QR action',async()=>{
+test('dormant member UI: failed member deletion preserves the existing member and its QR action',async()=>{
   const member={memberId:'MBR-0001',memberNumber:1,name:'Existing member'};
-  const h=await harness({loadMembers:async()=>[member],deleteMember:async()=>{throw Error('network disconnected');}});
+  const h=await memberHarness({loadMembers:async()=>[member],deleteMember:async()=>{throw Error('network disconnected');}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({className:'member-delete-button'}).props.onClick());await h.flush();
@@ -430,9 +439,9 @@ test('failed member deletion preserves the existing member and its QR action',as
   }finally{await h.close();}
 });
 
-test('same-render registration clicks issue only one member write and wait for server success',async()=>{
+test('dormant member UI: same-render registration clicks issue only one member write and wait for server success',async()=>{
   let finish,calls=0;
-  const h=await harness({saveMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
+  const h=await memberHarness({saveMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
   try{
     await h.nav('部員管理');await h.click('＋ 部員を登録');
     await act(async()=>h.renderer.root.findByProps({placeholder:'例：山田 太郎'}).props.onChange({target:{value:'Once'}}));await h.flush();
@@ -445,9 +454,9 @@ test('same-render registration clicks issue only one member write and wait for s
   }finally{await h.close();}
 });
 
-test('member write completion cannot insert an old event member after switching events',async()=>{
+test('dormant member UI: member write completion cannot insert an old event member after switching events',async()=>{
   let finish;const written=[];
-  const h=await harness({saveMember:(id,member)=>{written.push({id,member});return new Promise(resolve=>{finish=resolve;});}});
+  const h=await memberHarness({saveMember:(id,member)=>{written.push({id,member});return new Promise(resolve=>{finish=resolve;});}});
   try{
     await h.nav('部員管理');await h.click('＋ 部員を登録');
     await act(async()=>h.renderer.root.findByProps({placeholder:'例：山田 太郎'}).props.onChange({target:{value:'Event A member'}}));await h.flush();
@@ -460,9 +469,9 @@ test('member write completion cannot insert an old event member after switching 
   }finally{await h.close();}
 });
 
-test('duplicate member deletion is single-flight and late completion cannot remove another event row',async()=>{
+test('dormant member UI: duplicate member deletion is single-flight and late completion cannot remove another event row',async()=>{
   let finish,calls=0;
-  const h=await harness({loadMembers:async id=>[{memberId:'MBR-0001',memberNumber:1,name:id+' member'}],deleteMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
+  const h=await memberHarness({loadMembers:async id=>[{memberId:'MBR-0001',memberNumber:1,name:id+' member'}],deleteMember:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}});
   try{
     await h.nav('部員管理');
     const remove=h.renderer.root.findByProps({className:'member-delete-button'});
@@ -474,9 +483,9 @@ test('duplicate member deletion is single-flight and late completion cannot remo
   }finally{await h.close();}
 });
 
-test('failed member rename restores the confirmed name and reports the failure',async()=>{
+test('dormant member UI: failed member rename restores the confirmed name and reports the failure',async()=>{
   const member={memberId:'MBR-0001',memberNumber:1,name:'Confirmed'};
-  const h=await harness({loadMembers:async()=>[member],saveMember:async()=>{throw Error('rename failed');}});
+  const h=await memberHarness({loadMembers:async()=>[member],saveMember:async()=>{throw Error('rename failed');}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Unsaved rename'}}));await h.flush();
@@ -485,9 +494,9 @@ test('failed member rename restores the confirmed name and reports the failure',
   }finally{await h.close();}
 });
 
-test('member renames preserve typing while writes are serialized',async()=>{
+test('dormant member UI: member renames preserve typing while writes are serialized',async()=>{
   const pending=[],calls=[];
-  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:(_id,member)=>{calls.push(member.name);return new Promise(resolve=>pending.push(resolve));}});
+  const h=await memberHarness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:(_id,member)=>{calls.push(member.name);return new Promise(resolve=>pending.push(resolve));}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'First'}}));await h.flush();
@@ -499,8 +508,8 @@ test('member renames preserve typing while writes are serialized',async()=>{
   }finally{await h.close();}
 });
 
-test('failed bulk member rename retains the dialog and confirmed names for retry',async()=>{
-  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Confirmed'}],saveMember:async()=>{throw Error('bulk failed');}});
+test('dormant member UI: failed bulk member rename retains the dialog and confirmed names for retry',async()=>{
+  const h=await memberHarness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Confirmed'}],saveMember:async()=>{throw Error('bulk failed');}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'1番を選択'}).props.onChange());await h.flush();
@@ -513,9 +522,9 @@ test('failed bulk member rename retains the dialog and confirmed names for retry
   }finally{await h.close();}
 });
 
-test('deleting a member waits for an in-flight rename so the rename cannot resurrect it',async()=>{
+test('dormant member UI: deleting a member waits for an in-flight rename so the rename cannot resurrect it',async()=>{
   let finish;const order=[];
-  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>new Promise(resolve=>{finish=()=>{order.push('rename');resolve();};}),deleteMember:async()=>{order.push('delete');}});
+  const h=await memberHarness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>new Promise(resolve=>{finish=()=>{order.push('rename');resolve();};}),deleteMember:async()=>{order.push('delete');}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Renaming'}}));await h.flush();
@@ -526,9 +535,9 @@ test('deleting a member waits for an in-flight rename so the rename cannot resur
   }finally{await h.close();}
 });
 
-test('a failed latest rename restores the last confirmed preceding write',async()=>{
+test('dormant member UI: a failed latest rename restores the last confirmed preceding write',async()=>{
   let finish,calls=0;
-  const h=await harness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>{calls++;if(calls===1)return new Promise(resolve=>{finish=resolve;});return Promise.reject(Error('latest rename failed'));}});
+  const h=await memberHarness({loadMembers:async()=>[{memberId:'MBR-0001',memberNumber:1,name:'Original'}],saveMember:()=>{calls++;if(calls===1)return new Promise(resolve=>{finish=resolve;});return Promise.reject(Error('latest rename failed'));}});
   try{
     await h.nav('部員管理');
     await act(async()=>h.renderer.root.findByProps({'aria-label':'MBR-0001の氏名'}).props.onChange({target:{value:'Confirmed first'}}));await h.flush();

@@ -129,14 +129,15 @@ syncReceptionRecord:async item=>{
   assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
-async function harness({saved=true,automatic,latestTicket,download,readRegistration,register,reset,save,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
+async function harness({initialOnline=true,cachedApproval,saved=true,automatic,latestTicket,download,readRegistration,register,reset,save,reapprove=false,initialRegistration={approved:true,status:"online",name:"Test terminal"}}={}) {
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
   let approvedEventId="event-one";
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
-  const navigator={onLine:true};
+  if(cachedApproval)storage.set("qr-ticket-reception-approved",JSON.stringify(cachedApproval));
+  const navigator={onLine:initialOnline};
   const window={
     addEventListener:()=>{},removeEventListener:()=>{},
     setInterval:(fn,ms)=>{intervals.set(++nextId,{fn,ms});return nextId;},clearInterval:id=>intervals.delete(id),
@@ -975,3 +976,49 @@ for(const interruption of ["stop","revoke"]){
     }finally{await h.close();}
   });
 }
+
+test("hanging online metadata cannot block approved same-event offline QR preparation",async()=>{
+  let finishMetadata;
+  const h=await harness({saved:false,initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:()=>new Promise(resolve=>{finishMetadata=resolve;})});
+  try{
+    assert.ok(finishMetadata);
+    h.navigator.onLine=false;
+    await h.click("イベントデータQRを読み取る");
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    assert.match(h.text(),/受付準備完了/);
+    await h.click("受付を開始する");
+    await act(async()=>finishMetadata({localEvent:makeEvent("stale-event"),tickets:[makeTicket("stale-event")],authPayload:{authToken:"stale"}}));await h.flush();
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    assert.match(h.text(),/受付を停止/);
+    assert.doesNotMatch(h.text(),/承認待ち|切り替わりました/);
+  }finally{await h.close();}
+});
+
+test("obsolete metadata approval read cannot replace a newer offline preparation",async()=>{
+  let finishApproval;
+  const h=await harness({initialRegistration:{approved:true,status:"online",name:"Test terminal",eventId:"event-one"},automatic:async()=>({localEvent:makeEvent("event-two"),tickets:[makeTicket("event-two")],authPayload:{authToken:"next"}}),readRegistration:()=>new Promise(resolve=>{finishApproval=resolve;})});
+  try{
+    assert.ok(finishApproval);
+    h.navigator.onLine=false;
+    await h.click("イベントQRを読み直す");
+    const frames=await offlineProtocol().encodeOfflineEvent({event:makeEvent().event,settings:makeEvent().settings,tickets:[makeTicket()]});
+    for(const frame of frames)await h.scan(frame);
+    await h.click("このイベントで認証");
+    assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");
+    await act(async()=>finishApproval(null));await h.flush();
+    assert.match(h.text(),/受付準備完了/);
+    assert.doesNotMatch(h.text(),/承認待ち|受付端末を登録/);
+  }finally{await h.close();}
+});
+
+test("offline startup rejects historical approval without an event binding but retains inventory",async()=>{
+  const h=await harness({initialOnline:false,initialRegistration:null,cachedApproval:{approved:true,terminalId:"T-REGRESSION-01",name:"Old cache"}});
+  try{assert.match(h.text(),/受付端末を登録/);assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");}finally{await h.close();}
+});
+test("offline startup preserves valid event-bound approval and prepared inventory",async()=>{
+  const h=await harness({initialOnline:false,initialRegistration:null,cachedApproval:{approved:true,eventId:"event-one",terminalId:"T-REGRESSION-01",name:"Valid cache"}});
+  try{assert.match(h.text(),/受付準備完了/);assert.equal((await h.local.loadLocalEvent()).event.eventId,"event-one");}finally{await h.close();}
+});
