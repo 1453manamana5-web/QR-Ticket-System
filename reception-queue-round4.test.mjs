@@ -52,3 +52,71 @@ test('a late canonical trial acknowledgement cannot reset a newer accepted exit'
  await local.markSyncStatus(rec.recordId,'synced',0,'trial');
  assert.equal((await local.getTicket('one')).currentStatus,'exited');
 });
+
+test('a downloaded inventory cannot roll back an entry acknowledged while its snapshot was in flight',async()=>{
+ const local=localDb();await local.prepareLocalEventData(localEvent(),[ticket()]);
+ const token=await local.getLocalPreparationToken();
+ const accepted=record('acknowledged-during-download');
+ await local.saveReceptionTransaction(ticket(),accepted,await local.getTicket('one'));
+ await local.markSyncStatus(accepted.recordId,'synced',0,'saved');
+ await assert.rejects(local.prepareLocalEventData(localEvent(),[ticket()],token),/LOCAL_EVENT_CHANGED/);
+ assert.equal((await local.getTicket('one')).currentStatus,'inside');
+ assert.equal((await local.getPendingSyncItems()).length,0);
+ assert.deepEqual(await local.getReceptionRecord(accepted.recordId),accepted);
+});
+
+test('a stale inventory cannot remove a newly discovered ticket after its receipt has already synced',async()=>{
+ const local=localDb();await local.prepareLocalEventData(localEvent(),[ticket()]);
+ const token=await local.getLocalPreparationToken(),added=ticket('newly-issued'),accepted=record('new-ticket-ack','newly-issued');
+ await local.saveReceptionTransaction(added,accepted,null);
+ await local.markSyncStatus(accepted.recordId,'synced',0,'saved');
+ await assert.rejects(local.prepareLocalEventData(localEvent(),[ticket()],token),/LOCAL_EVENT_CHANGED/);
+ assert.equal((await local.loadLocalEvent(true)).ticketCount,2);
+ assert.equal((await local.getTicket('newly-issued')).currentStatus,'inside');
+ assert.deepEqual(await local.getReceptionRecord(accepted.recordId),accepted);
+});
+
+test('an unchanged preparation token permits newer canonical state without replaying acknowledged local history',async()=>{
+ const local=localDb();await local.prepareLocalEventData(localEvent(),[ticket()]);
+ const accepted=record('old-local-entry');await local.saveReceptionTransaction(ticket(),accepted);
+ await local.markSyncStatus(accepted.recordId,'synced',0,'saved');
+ const token=await local.getLocalPreparationToken();
+ // The later server transition may have an earlier device timestamp.
+ const canonical={...ticket(),currentStatus:'exited',updatedAt:'2026-11-07T00:30:00.000Z'};
+ await local.prepareLocalEventData(localEvent(),[canonical],token);
+ assert.equal((await local.getTicket('one')).currentStatus,'exited');
+ assert.deepEqual(await local.getReceptionRecord(accepted.recordId),accepted);
+});
+
+test('background retry bookkeeping cannot invalidate an otherwise unchanged preparation token',async()=>{
+ const local=localDb();await local.prepareLocalEventData(localEvent(),[ticket()]);
+ const accepted=record('failed-upload');await local.saveReceptionTransaction(ticket(),accepted);
+ const token=await local.getLocalPreparationToken();
+ await local.markSyncStatus(accepted.recordId,'failed',3);
+ assert.equal(await local.getLocalPreparationToken(),token);
+ await local.prepareLocalEventData(localEvent(),[{...ticket(),valid:false}],token);
+ assert.equal((await local.getTicket('one')).valid,false);
+ assert.equal((await local.getTicket('one')).currentStatus,'inside');
+ assert.equal((await local.getPendingSyncItems())[0].retryCount,3);
+});
+
+test('a canonical trial acknowledgement during download cannot be undone by that downloaded inventory',async()=>{
+ const local=localDb();await local.prepareLocalEventData(localEvent(),[ticket()]);
+ const accepted=record('canonical-trial');await local.saveReceptionTransaction(ticket(),accepted);
+ const token=await local.getLocalPreparationToken();
+ await local.markSyncStatus(accepted.recordId,'synced',0,'trial');
+ const stale={...ticket(),currentStatus:'inside',updatedAt:accepted.timestamp};
+ await assert.rejects(local.prepareLocalEventData(localEvent(),[stale],token),/LOCAL_EVENT_CHANGED/);
+ assert.equal((await local.getTicket('one')).currentStatus,'unused');
+ assert.equal((await local.getPendingSyncItems()).length,0);
+});
+
+test('a preparation token cannot replace an event installed by another tab during download',async()=>{
+ const factory=new IDBFactory(),first=localDb(factory),other=localDb(factory);
+ await first.prepareLocalEventData(localEvent(),[ticket()]);
+ const token=await first.getLocalPreparationToken();
+ const next=localEvent({event:{...localEvent().event,eventId:'another-event'}});
+ await other.prepareLocalEventData(next,[{...ticket(),eventId:'another-event'}]);
+ await assert.rejects(first.prepareLocalEventData(localEvent(),[ticket()],token),/LOCAL_EVENT_CHANGED/);
+ assert.equal((await first.loadLocalEvent(true)).event.eventId,'another-event');
+});

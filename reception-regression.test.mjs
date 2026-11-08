@@ -511,7 +511,7 @@ test("fast scanner serializes processing, accepts the next QR after 60ms and sup
   const Scanner=load("./reception-app/src/QrScanner.tsx",{"html5-qrcode":{Html5Qrcode:Camera,Html5QrcodeSupportedFormats:{QR_CODE:0}}},{
     document:{getElementById:()=>({innerHTML:"",querySelectorAll:()=>[]})},
     window:{setTimeout:(fn,delay)=>{assert.equal(delay,60);timers.push(fn);}},
-    Date:{now:()=>now},console:{info:()=>{},warn:()=>{},error:()=>{}},
+    performance:{now:()=>now},console:{info:()=>{},warn:()=>{},error:()=>{}},
   }).default;
   let renderer;
   await act(async()=>{renderer=create(React.createElement(Scanner,{readerId:"test",onResult:async value=>{accepted.push(value);if(value==="A")await new Promise(resolve=>{resolveFirst=resolve;});}}));await nextTurn();});
@@ -521,6 +521,27 @@ test("fast scanner serializes processing, accepts the next QR after 60ms and sup
   assert.deepEqual(accepted,["A","B"]);
   now=3300;decode("B");await nextTurn();assert.deepEqual(accepted,["A","B","B"]);
   await act(async()=>renderer.unmount());
+});
+
+for(const rollback of [true,false])test('scanner duplicate suppression uses elapsed time across a '+(rollback?'backward':'forward')+' wall-clock change',async()=>{
+  let decode,wall=100000,elapsed=1000;const accepted=[],timers=[];
+  class Camera{
+    static async getCameras(){return [{id:'front',label:'Front'}];}
+    async start(_camera,_options,onResult){decode=onResult;this.isScanning=true;}
+    async stop(){this.isScanning=false;}clear(){}async applyVideoConstraints(){}
+  }
+  const Scanner=load('./reception-app/src/QrScanner.tsx',{'html5-qrcode':{Html5Qrcode:Camera,Html5QrcodeSupportedFormats:{QR_CODE:0}}},{
+    document:{getElementById:()=>({innerHTML:'',querySelectorAll:()=>[]})},window:{setTimeout:fn=>timers.push(fn)},
+    Date:{now:()=>wall},performance:{now:()=>elapsed},console:{info(){},warn(){},error(){}},
+  }).default;
+  let renderer;
+  try{
+    await act(async()=>{renderer=create(React.createElement(Scanner,{readerId:'clock-test',onResult:value=>accepted.push(value)}));await nextTurn();});
+    decode('same-ticket');await nextTurn();timers.shift()();
+    wall+=rollback?-60000:60000;elapsed+=rollback?1300:30;
+    decode('same-ticket');await nextTurn();
+    assert.equal(accepted.length,rollback?2:1,rollback?'a removed and presented ticket must not stay blocked after clock rollback':'a continuously held QR must not be accepted again after a clock jump');
+  }finally{if(renderer)await act(async()=>renderer.unmount());}
 });
 
 test("legacy WAV assets are byte-identical; audio unlock does not wait for network preloading",async()=>{

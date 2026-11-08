@@ -115,3 +115,49 @@ test("ticket metadata edits and reserve print confirmation preserve the actual r
   assert.equal(ticket.updatedAt, changedAt);
   assert.equal(ticket.currentStatus, "unused");
 });
+
+function managerApplicationHarness(online = true) {
+  const uid = "manager-history-user", applications = [], writes = [];
+  for (let n = 0; n < 5; n++) applications.push({id: "T-0000000" + n, requestedByUid: uid, status: "approved", name: "Historical"});
+  applications.push({id: "T-ZZZZZZZZ", terminalId: "T-ZZZZZZZZ", requestedByUid: uid, status: "pending", name: "Current application", requestedRole: "both"});
+  const list = async ({constraints}) => {
+    let rows = applications;
+    for (const item of constraints.filter(item => item.type === "where")) rows = rows.filter(row => row[item.field] === item.value);
+    for (const item of constraints.filter(item => item.type === "limit")) rows = rows.slice(0, item.value);
+    return {docs: rows.map(row => ({id: row.id, data: () => row}))};
+  };
+  const firestore = {
+    doc: (_db, ...parts) => parts.join("/"), collection: (_db, ...parts) => parts.join("/"),
+    where: (field, operator, value) => ({type: "where", field, operator, value}), limit: value => ({type: "limit", value}),
+    query: (path, ...constraints) => ({path, constraints}),
+    getDocFromServer: async () => ({exists: () => false}), getDocFromCache: async () => ({exists: () => false}),
+    getDocs: list, getDocsFromServer: list, getDocsFromCache: list,
+    writeBatch: () => ({set: (ref, data) => writes.push({ref, data}), commit: async () => {}}),
+  };
+  const dependencies = {"firebase/firestore": firestore, "./firebaseClient": {ensureFirebaseAuth: async () => {}, getFirebaseUid: async () => uid, getFirebaseDb: () => ({})}};
+  const compiled = ts.transpileModule(readFileSync(new URL("./management-app/src/firebaseData.ts", import.meta.url), "utf8"), {
+    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022},
+  }).outputText;
+  const api = {};
+  new Function("exports", "require", "navigator", compiled)(api, name => dependencies[name], {onLine: online});
+  return {api, writes};
+}
+
+test("management pending registration remains visible after five historical applications, online and cached", async () => {
+  for (const online of [true, false]) {
+    const h = managerApplicationHarness(online), status = await h.api.getOwnTerminalStatus();
+    assert.equal(status.approved, false);
+    assert.equal(status.status, "pending");
+    assert.equal(status.name, "Current application");
+    assert.equal(status.role, "both");
+    assert.equal(status.managementApproved, false);
+    assert.equal(status.receptionApproved, false);
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("management cannot submit a duplicate request hidden behind five historical applications", async () => {
+  const h = managerApplicationHarness();
+  await assert.rejects(h.api.requestTerminalRegistration({terminalId: "T-MANAGERNEW", name: "Duplicate", type: "Web / iPad", role: "both"}), /TERMINAL_APPLICATION_ALREADY_PENDING/);
+  assert.equal(h.writes.length, 0);
+});

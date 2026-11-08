@@ -42,3 +42,45 @@ test('latest-ticket lookup keeps a validated canonical ticket usable',async()=>{
 test('latest-ticket lookup returns null for a genuinely absent ticket',async()=>{
  const h=harness();assert.equal(await h.api.getLatestReceptionTicket('repeat-event','missing'),null);
 });
+
+function applicationHarness({owned=false}={}){
+ const pendingId='T-ZZZZZZZZ',documents=new Map(),writes=[];
+ for(let i=0;i<5;i++)documents.set('terminalApplications/T-0000000'+i,{terminalId:'T-0000000'+i,requestedByUid:uid,status:'approved',name:'Historical'});
+ documents.set('terminalApplications/'+pendingId,{terminalId:pendingId,requestedByUid:uid,status:'pending',name:'Current application'});
+ documents.set('terminals/'+pendingId,{terminalId:pendingId,requestedByUid:uid,approved:false,receptionApproved:false,managementApproved:false,role:'reception',status:'pending',name:'Current application'});
+ if(owned)documents.set('terminalInstallations/'+uid,{authUid:uid,approved:true,terminalId:pendingId});
+ const auth={currentUser:{uid}},storage=new Map([['qr-ticket-terminal-id',owned?pendingId:id]]);
+ const snapshot=(ref,value)=>({id:ref.split('/').at(-1),exists:()=>value!==undefined,data:()=>value});
+ const get=async ref=>snapshot(ref,documents.get(ref));
+ const list=async ({path,constraints})=>{
+  let rows=[...documents].filter(([ref])=>ref.startsWith(path+'/')&&!ref.slice(path.length+1).includes('/')).sort(([a],[b])=>a.localeCompare(b));
+  for(const constraint of constraints.filter(item=>item.type==='where'))rows=rows.filter(([,data])=>data[constraint.field]===constraint.value);
+  for(const constraint of constraints.filter(item=>item.type==='limit'))rows=rows.slice(0,constraint.value);
+  return {docs:rows.map(([ref,value])=>snapshot(ref,value))};
+ };
+ const firestore={doc:(_db,...parts)=>parts.join('/'),collection:(_db,...parts)=>parts.join('/'),where:(field,operator,value)=>({type:'where',field,operator,value}),limit:value=>({type:'limit',value}),query:(path,...constraints)=>({path,constraints}),getDoc:get,getDocFromServer:get,getDocs:list,getDocsFromServer:list,
+  runTransaction:async(_db,op)=>op({get,delete:ref=>{writes.push({ref,deleted:true});documents.delete(ref);},update:(ref,data)=>{writes.push({ref,data});Object.assign(documents.get(ref),data);}}),
+  writeBatch:()=>({set:(ref,data)=>writes.push({ref,data}),commit:async()=>{}}),
+ };
+ const api={},dependencies={'firebase/firestore':firestore,'./localDb':{},'./firebaseClient':{ensureFirebaseAuth:async()=>auth,getFirebaseUid:async()=>uid,getKnownFirebaseUid:()=>uid,getFirebaseDb:()=>({})}};
+ new Function('exports','require','localStorage',ts.transpileModule(readFileSync('reception-app/src/receptionSync.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(api,n=>dependencies[n],{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)});
+ return {api,documents,writes,pendingId};
+}
+
+for(const owned of [false,true])test('five completed applications cannot hide the current '+(owned?'owned reapplication':'pending registration'),async()=>{
+ const h=applicationHarness({owned});
+ assert.deepEqual(await h.api.getTerminalRegistration(),{approved:false,status:'pending',name:'Current application',...(owned?{eventId:undefined}:{})});
+});
+
+test('pending application reset still finds the active request after five completed applications',async()=>{
+ const h=applicationHarness();await h.api.resetReceptionTerminalRegistration();
+ assert.equal(h.documents.has('terminalApplications/'+h.pendingId),false);
+ assert.equal(h.documents.has('terminals/'+h.pendingId),false);
+ assert.equal(h.documents.size,5,'completed applications remain intact');
+});
+
+test('a hidden pending request still prevents duplicate terminal registration',async()=>{
+ const h=applicationHarness();
+ await assert.rejects(h.api.registerReceptionTerminal('Duplicate'),/TERMINAL_APPLICATION_ALREADY_PENDING/);
+ assert.equal(h.writes.length,0);
+});

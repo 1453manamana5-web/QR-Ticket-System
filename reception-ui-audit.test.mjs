@@ -44,6 +44,7 @@ async function harness({latestTicket=async()=>makeTicket(),saveReception=async()
     setTimeout:(fn)=>{timeouts.set(++id,fn);return id;},clearTimeout:key=>timeouts.delete(key),
   };
   const local={
+    getLocalPreparationToken:async()=>"test-preparation",
     loadLocalEvent:async()=>structuredClone(stored),
     saveLocalEvent:async data=>{stored=structuredClone(data);},
     prepareLocalEventData:async data=>{stored={...structuredClone(data),dataReady:true};},

@@ -90,7 +90,7 @@ async function readOwnTerminalState(checkCurrent: () => void = () => {}): Promis
             terminalId: installation.terminalId,
             terminal: terminalSnapshot.data(),
             pendingApplication: terminalSnapshot.data().approved === false
-              ? (await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5))))
+              ? (await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), where("status", "==", "pending"), where("terminalId", "==", installation.terminalId), limit(5))))
                 .docs.find(item => item.id === installation.terminalId && item.data().status === "pending")?.data() ?? null
               : null,
           };
@@ -108,6 +108,7 @@ async function readOwnTerminalState(checkCurrent: () => void = () => {}): Promis
   const applicationSnapshot = await getDocs(query(
     collection(db, "terminalApplications"),
     where("requestedByUid", "==", uid),
+    where("status", "==", "pending"),
     limit(5),
   ));
   const pending = applicationSnapshot.docs.find(item => item.data().status === "pending");
@@ -242,7 +243,7 @@ export async function resetReceptionTerminalRegistration(): Promise<string | nul
   const uid = await getFirebaseUid();
   bindUid(uid);
   const db = getFirebaseDb();
-  const applications = await getDocsFromServer(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
+  const applications = await getDocsFromServer(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), where("status", "==", "pending"), limit(5)));
   checkCurrent();
   const pending = applications.docs.find(item => item.data().status === "pending");
   if (!pending) {
@@ -323,6 +324,7 @@ export async function registerReceptionTerminal(name: string): Promise<void> {
   const existing = await getDocs(query(
     collection(db, "terminalApplications"),
     where("requestedByUid", "==", uid),
+    where("status", "==", "pending"),
     limit(5),
   ));
   checkCurrent();
