@@ -47,7 +47,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
   const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('');
   const click=async text=>{const node=renderer.root.findAllByType('button').find(n=>label(n)===text);assert.ok(node,'Missing '+text);await act(async()=>{await node.props.onClick({currentTarget:null});});await flush();};
   const nav=async name=>{const node=renderer.root.findAll(n=>n.props['data-nav-label']===name)[0];assert.ok(node,'Nav '+name);await act(async()=>node.props.onClick({currentTarget:null}));await flush();};
-  return {renderer,storage,api,publisher,deleted,savedSettings,click,nav,flush,ticketCallbacks,recordCallbacks,intervals,
+  return {renderer,storage,api,publisher,deleted,savedSettings,click,nav,flush,ticketCallbacks,recordCallbacks,intervals,window,
     text:()=>JSON.stringify(renderer.toJSON()),
     events:async list=>{await act(async()=>eventsCallback(list));await flush();},
     close:async()=>{await act(async()=>renderer.unmount());}};
@@ -593,4 +593,114 @@ test('backup missing-member restore uses create-only mode and reports a concurre
     assert.match(h.text(),/バックアップを復元できませんでした/);
     assert.doesNotMatch(h.text(),/不足するデータをFirebaseへ復元しました/);
   }finally{await h.close();}
+});
+
+const ticketDeferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
+async function openTicketIssue(h){
+  await h.nav('チケット管理');
+  await act(async()=>h.renderer.root.findByProps({className:'ticket-tool-button ticket-tool-create'}).props.onClick());await h.flush();
+}
+async function openTicketList(h){
+  await h.nav('チケット管理');
+  await act(async()=>h.renderer.root.findByProps({className:'ticket-home-card ticket-list-launch'}).props.onClick());await h.flush();
+}
+
+test('same-render ticket issuance callbacks start only one server number lookup and append',async()=>{
+  const wait=ticketDeferred();let lookups=0,appends=0;
+  const h=await harness({loadNextTicketNumber:()=>{lookups++;return wait.promise;},appendTickets:async()=>{appends++;}});
+  try{
+    await openTicketIssue(h);
+    const submit=h.renderer.root.findByProps({className:'ticket-modal-primary'}).props.onClick;
+    await act(async()=>{submit();submit();});await h.flush();
+    assert.equal(lookups,1);
+    await act(async()=>wait.resolve(2));await h.flush();assert.equal(appends,1);
+  }finally{wait.resolve(2);await h.flush();await h.close();}
+});
+
+test('a number lookup abandoned by an event switch cannot issue tickets or block a new event issuance',async()=>{
+  const first=ticketDeferred(),second=ticketDeferred(),appended=[];let lookups=0;
+  const h=await harness({loadNextTicketNumber:()=>++lookups===1?first.promise:second.promise,appendTickets:async(id,items)=>appended.push({id,items})});
+  try{
+    await openTicketIssue(h);await h.click('QR・チケットを発行');
+    await h.events([event('event-b')]);await openTicketIssue(h);
+    assert.equal(h.renderer.root.findByProps({className:'ticket-modal-primary'}).props.disabled,false,'the old event cannot own the new event form');
+    await h.click('QR・チケットを発行');assert.equal(lookups,2);
+    await act(async()=>first.resolve(2));await h.flush();
+    assert.deepEqual(appended,[],'the old lookup must not append after its event was left');
+    assert.equal(h.renderer.root.findByProps({className:'ticket-modal-primary'}).props.disabled,true,'the old completion cannot release the new operation');
+    await act(async()=>second.resolve(2));await h.flush();assert.deepEqual(appended.map(item=>item.id),['event-b']);
+  }finally{first.resolve(2);second.resolve(2);await h.flush();await h.close();}
+});
+
+test('an old ticket issuance failure cannot show an error on a newly selected event',async()=>{
+  const wait=ticketDeferred(),h=await harness({loadNextTicketNumber:()=>wait.promise});
+  try{
+    await openTicketIssue(h);await h.click('QR・チケットを発行');
+    await h.events([event('event-b')]);await openTicketIssue(h);
+    await act(async()=>wait.reject(Error('old event unavailable')));await h.flush();
+    assert.doesNotMatch(h.text(),/チケットをFirebaseへ保存できませんでした/);
+  }finally{wait.resolve(2);await h.flush();await h.close();}
+});
+
+test('returning to the original event cannot revive an abandoned ticket issuance or unlock its replacement',async()=>{
+  const first=ticketDeferred(),second=ticketDeferred(),appended=[];let lookups=0;
+  const h=await harness({loadNextTicketNumber:()=>++lookups===1?first.promise:second.promise,appendTickets:async id=>appended.push(id)});
+  try{
+    await openTicketIssue(h);await h.click('QR・チケットを発行');
+    await h.events([event('event-b')]);await h.events([event('event-a')]);await openTicketIssue(h);
+    assert.equal(h.renderer.root.findByProps({className:'ticket-modal-primary'}).props.disabled,false);
+    await h.click('QR・チケットを発行');assert.equal(lookups,2);
+    await act(async()=>first.resolve(2));await h.flush();
+    assert.deepEqual(appended,[]);assert.equal(h.renderer.root.findByProps({className:'ticket-modal-primary'}).props.disabled,true);
+    await act(async()=>second.resolve(2));await h.flush();assert.deepEqual(appended,['event-a']);
+  }finally{first.resolve(2);second.resolve(2);await h.flush();await h.close();}
+});
+
+test('a ticket mutation is single-flight across status, validity and deletion controls',async()=>{
+  const wait=ticketDeferred(),writes=[];
+  const h=await harness({saveTicket:(_id,_ticket,fields)=>{writes.push(fields);return wait.promise;},deleteTicket:async()=>writes.push(['delete'])});
+  try{
+    await openTicketList(h);
+    const row=h.renderer.root.findByProps({className:'ticket-screen-row'}),change=row.findByType('select').props.onChange;
+    const validity=row.findByProps({className:'ticket-row-disable'}).props.onClick,remove=row.findByProps({className:'ticket-row-delete'}).props.onClick;
+    await act(async()=>{change({target:{value:'inside'}});validity();void remove();});await h.flush();
+    assert.deepEqual(writes,[['currentStatus']]);
+    const pending=h.renderer.root.findByProps({className:'ticket-screen-row'});
+    assert.equal(pending.findByType('select').props.disabled,true);
+    assert.equal(pending.findByProps({className:'ticket-row-disable'}).props.disabled,true);
+    assert.equal(pending.findByProps({className:'ticket-row-delete'}).props.disabled,true);
+    await act(async()=>wait.resolve());await h.flush();
+    assert.equal(h.renderer.root.findByProps({className:'ticket-screen-row'}).findByType('select').props.disabled,false);
+  }finally{wait.resolve();await h.flush();await h.close();}
+});
+
+test('same-render ticket deletion invokes the server only once',async()=>{
+  const wait=ticketDeferred();let writes=0;
+  const h=await harness({deleteTicket:()=>{writes++;return wait.promise;}});
+  try{
+    await openTicketList(h);const remove=h.renderer.root.findByProps({className:'ticket-row-delete'}).props.onClick;
+    await act(async()=>{void remove();void remove();});await h.flush();assert.equal(writes,1);
+  }finally{wait.resolve();await h.flush();await h.close();}
+});
+
+for(const kind of ['status','validity','deletion'])test('a late '+kind+' failure cannot leak onto the next event ticket screen',async()=>{
+  const wait=ticketDeferred();
+  const h=await harness({saveTicket:()=>wait.promise,deleteTicket:()=>wait.promise});
+  try{
+    await openTicketList(h);const row=h.renderer.root.findByProps({className:'ticket-screen-row'});
+    await act(async()=>{if(kind==='status')row.findByType('select').props.onChange({target:{value:'inside'}});else void row.findByProps({className:kind==='validity'?'ticket-row-disable':'ticket-row-delete'}).props.onClick();});await h.flush();
+    await h.events([event('event-b')]);await openTicketIssue(h);
+    await act(async()=>wait.reject(Error('old write failed')));await h.flush();
+    assert.doesNotMatch(h.text(),/チケット状態をFirebaseへ保存できませんでした|チケットの有効状態をFirebaseへ保存できませんでした|チケットをFirebaseから削除できませんでした/);
+  }finally{wait.resolve();await h.flush();await h.close();}
+});
+
+test('writes to different tickets stay independent while each ticket is protected',async()=>{
+  const waits=[ticketDeferred(),ticketDeferred()],writes=[];
+  const h=await harness({subscribeTickets:(id,cb)=>{cb([ticket(id),{...ticket(id),ticketId:'TKT000002',basicInfo:{ticketNumber:2}}]);return()=>{};},saveTicket:(_id,value)=>{writes.push(value.ticketId);return waits[writes.length-1].promise;}});
+  try{
+    await openTicketList(h);const rows=h.renderer.root.findAllByProps({className:'ticket-screen-row'});
+    await act(async()=>{for(const row of rows)row.findByType('select').props.onChange({target:{value:'inside'}});});await h.flush();
+    assert.deepEqual(writes,['TKT000001','TKT000002']);
+  }finally{for(const wait of waits)wait.resolve();await h.flush();await h.close();}
 });

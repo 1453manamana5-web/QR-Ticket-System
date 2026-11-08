@@ -144,12 +144,15 @@ async function readInventoryMetadata(tx: Transaction, eventId: string) {
   const bundle = bundleRef ? await tx.get(bundleRef) : null;
   return {eventRef,data,bundleRef,bundle};
 }
-function writeInventoryMetadata(tx: Transaction, metadata: Awaited<ReturnType<typeof readInventoryMetadata>>, delta: number) {
+function writeInventoryMetadata(tx: Transaction, metadata: Awaited<ReturnType<typeof readInventoryMetadata>>, delta: number, issuedMaximum?: number) {
   const {eventRef,data,bundleRef,bundle} = metadata;
   const version = Math.max(1,Number(data.dataVersion)||1) + (bundle?.exists() ? 1 : 0);
   const count = Math.max(0,(Number(data.ticketCount)||0)+delta);
   const now = new Date().toISOString();
-  tx.update(eventRef,{ticketCount:count,inventoryRevision:(Number(data.inventoryRevision)||0)+1,updatedAt:now,...(bundle?.exists()?{dataVersion:version}:{})});
+  const lastIssuedNumber = Number.isSafeInteger(issuedMaximum) && issuedMaximum! > 0
+    ? Math.max(Number(data.lastIssuedNumber) || 0, issuedMaximum!) : undefined;
+  tx.update(eventRef,{ticketCount:count,inventoryRevision:(Number(data.inventoryRevision)||0)+1,updatedAt:now,...(bundle?.exists()?{dataVersion:version}:{}),
+    ...(lastIssuedNumber !== undefined ? {lastIssuedNumber} : {})});
   if(bundleRef && bundle?.exists())tx.set(bundleRef,{
     event:{...bundle.data().event,eventId:eventRef.id,dataVersion:version},ticketCount:count,publishedAt:now,
   },{merge:true});
@@ -179,14 +182,28 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const ids = new Set<string>();
+  const issuedNumbers = new Set<number>();
   for (const ticket of tickets) {
     if (!ticket.ticketId || ticket.ticketId.includes("/") || ticket.eventId !== eventId || ids.has(ticket.ticketId)) throw new Error("INVALID_OR_DUPLICATE_TICKET_ID");
     ids.add(ticket.ticketId);
+    const number = Number(ticket.basicInfo.ticketNumber);
+    // Validate the complete request before committing any of its chunks.
+    if (enforceNewNumbers && (!Number.isSafeInteger(number) || number < 1) ||
+        Number.isSafeInteger(number) && number > 0 && issuedNumbers.has(number)) throw new Error("INVALID_OR_DUPLICATE_TICKET_NUMBER");
+    if (Number.isSafeInteger(number) && number > 0) issuedNumbers.add(number);
+  }
+  let expectedRevision: number | undefined;
+  if (!enforceNewNumbers && issuedNumbers.size) {
+    const before = await getDocFromServer(doc(db, "events", eventId));
+    expectedRevision = Number(before.data()?.inventoryRevision) || 0;
+    const inventory = await loadEventTickets(eventId);
+    if (inventory.some(ticket => issuedNumbers.has(Number(ticket.basicInfo.ticketNumber)))) throw new Error("DUPLICATE_TICKET_NUMBER");
   }
   for (let start = 0; start < tickets.length; start += 400) {
     const chunk = tickets.slice(start, start + 400);
-    await runTransaction(db, async tx => {
+    const nextRevision = await runTransaction(db, async tx => {
       const metadata = await readInventoryMetadata(tx,eventId);
+      if (expectedRevision !== undefined && expectedRevision !== (Number(metadata.data.inventoryRevision) || 0)) throw new Error("TICKET_CHANGED_RETRY");
       if(enforceNewNumbers && metadata.data.eventStatus==="finished")throw new Error("EVENT_FINISHED");
       const numbers = chunk.map(ticket=>Number(ticket.basicInfo.ticketNumber));
       if (enforceNewNumbers && (numbers.some(number=>!Number.isSafeInteger(number)||number<1) || Math.min(...numbers) <= (Number(metadata.data.lastIssuedNumber)||0))) throw new Error("TICKET_NUMBER_CONFLICT_RETRY");
@@ -194,9 +211,10 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
       const snapshots = await Promise.all(refs.map(ref => tx.get(ref)));
       if (snapshots.some(snapshot => snapshot.exists())) throw new Error("TICKET_ALREADY_EXISTS");
       chunk.forEach((ticket,index)=>tx.set(refs[index],ticket));
-      writeInventoryMetadata(tx,metadata,chunk.length);
-      if(enforceNewNumbers)tx.update(metadata.eventRef,{lastIssuedNumber:Math.max(...numbers)});
+      writeInventoryMetadata(tx,metadata,chunk.length,Math.max(...numbers.filter(number => Number.isSafeInteger(number) && number > 0)));
+      return (Number(metadata.data.inventoryRevision) || 0) + 1;
     });
+    if (expectedRevision !== undefined) expectedRevision = nextRevision;
   }
 }
 
@@ -224,9 +242,15 @@ export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array
       // not disguise an older trial scan or rewind a newer reception timestamp.
       const changes:Record<string,unknown> = fields.includes("currentStatus") ? {updatedAt:ticket.updatedAt} : {};
       for(const field of fields)changes[field]=ticket[field];
+      // A number edit can start before a reserve-print acknowledgement arrives.
+      // Keep that durable confirmation rather than restoring the older UI copy.
+      if (fields.includes("basicInfo") && existing.data().basicInfo?.reservePrinted === true) {
+        changes.basicInfo = {...ticket.basicInfo, reservePrinted: true};
+      }
       tx.update(ref,changes);
     }else tx.set(ref,ticket,{merge:true});
-    writeInventoryMetadata(tx,metadata,existing.exists()?0:1);
+    const number = Number(fields && !fields.includes("basicInfo") ? existing.data()?.basicInfo?.ticketNumber : ticket.basicInfo.ticketNumber);
+    writeInventoryMetadata(tx,metadata,existing.exists()?0:1,number);
   });
 }
 

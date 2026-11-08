@@ -161,3 +161,96 @@ test("management cannot submit a duplicate request hidden behind five historical
   await assert.rejects(h.api.requestTerminalRegistration({terminalId: "T-MANAGERNEW", name: "Duplicate", type: "Web / iPad", role: "both"}), /TERMINAL_APPLICATION_ALREADY_PENDING/);
   assert.equal(h.writes.length, 0);
 });
+
+function ticketInventoryHarness({lastIssuedNumber = 1, rejectCommit = false, beforeTransaction} = {}) {
+  const inventory = new Map([
+    ['events/e', {eventId: 'e', dataVersion: 1, inventoryRevision: 0, ticketCount: 1, lastIssuedNumber}],
+    ['events/e/tickets/TKT000001', {ticketId: 'TKT000001', eventId: 'e', basicInfo: {ticketNumber: 1, reserve: true, reservePrinted: true}, currentStatus: 'inside', valid: true, updatedAt: '2026-11-08T01:00:00.000Z'}],
+  ]);
+  const ref = (...parts) => ({path: parts.join('/'), id: parts.at(-1)});
+  const snapshot = (target, values = inventory) => ({id: target.id, ref: target, exists: () => values.has(target.path), data: () => structuredClone(values.get(target.path))});
+  const list = async target => ({docs: [...inventory.keys()].filter(path => path.startsWith(target.path + '/') && path.split('/').length === target.path.split('/').length + 1).map(path => snapshot(ref(...path.split('/'))))});
+  let transactions = 0;
+  const firestore = {
+    doc: (_db, ...parts) => ref(...parts), collection: (_db, ...parts) => ref(...parts),
+    getDocFromServer: async target => snapshot(target), getDocsFromServer: list,
+    runTransaction: async (_db, operation) => {
+      transactions++;
+      beforeTransaction?.(inventory, transactions);
+      const staged = structuredClone(inventory);
+      const result = await operation({
+        get: async target => snapshot(target, staged),
+        update: (target, patch) => {const value = staged.get(target.path);assert.ok(value);Object.assign(value, structuredClone(patch));},
+        set: (target, value) => staged.set(target.path, structuredClone(value)),
+        delete: target => staged.delete(target.path),
+      });
+      if (rejectCommit) throw Error('simulated-commit-failure');
+      inventory.clear();for (const [key, value] of staged) inventory.set(key, value);
+      return result;
+    },
+  };
+  const api = {}, compiled = ts.transpileModule(readFileSync(new URL('./management-app/src/firebaseData.ts', import.meta.url), 'utf8'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+  new Function('exports', 'require', 'navigator', compiled)(api, name => name === 'firebase/firestore' ? firestore : {getFirebaseDb: () => ({})}, {onLine: true});
+  return {api, inventory, get transactions() {return transactions;}, ticket: () => structuredClone(inventory.get('events/e/tickets/TKT000001'))};
+}
+
+test('a stale number edit retains reserve print confirmation received after its UI snapshot', async () => {
+  const h = ticketInventoryHarness(), stale = h.ticket();
+  stale.basicInfo = {ticketNumber: 2, reserve: true};
+  stale.currentStatus = 'unused';
+  await h.api.saveTicket('e', stale, ['basicInfo']);
+  assert.equal(h.ticket().basicInfo.ticketNumber, 2);
+  assert.equal(h.ticket().basicInfo.reservePrinted, true);
+  assert.equal(h.ticket().currentStatus, 'inside');
+});
+
+test('deleting a renumbered ticket cannot reuse the edited number', async () => {
+  const h = ticketInventoryHarness(), edited = h.ticket();edited.basicInfo.ticketNumber = 100;
+  await h.api.saveTicket('e', edited, ['basicInfo']);
+  await h.api.deleteTicket('e', edited.ticketId);
+  assert.equal(await h.api.loadNextTicketNumber('e', 'TKT'), 101);
+  assert.equal(h.inventory.get('events/e').lastIssuedNumber, 100);
+});
+
+test('deleting restored tickets cannot reuse their previously issued numbers', async () => {
+  const h = ticketInventoryHarness(), restored = {...h.ticket(), ticketId: 'restored', basicInfo: {ticketNumber: 200}};
+  await h.api.appendTickets('e', [restored]);await h.api.deleteTicket('e', restored.ticketId);
+  assert.equal(await h.api.loadNextTicketNumber('e', 'TKT'), 201);
+  assert.equal(h.inventory.get('events/e').lastIssuedNumber, 200);
+});
+
+test('a ticket edit cannot lower the issued-number watermark', async () => {
+  const h = ticketInventoryHarness({lastIssuedNumber: 300}), edited = h.ticket();edited.basicInfo.ticketNumber = 20;
+  await h.api.saveTicket('e', edited, ['basicInfo']);
+  assert.equal(h.inventory.get('events/e').lastIssuedNumber, 300);
+  assert.equal(await h.api.loadNextTicketNumber('e', 'TKT'), 301);
+});
+
+test('a failed ticket edit commits neither its new number nor its issuance watermark', async () => {
+  const h = ticketInventoryHarness({rejectCommit: true}), edited = h.ticket();edited.basicInfo.ticketNumber = 100;
+  await assert.rejects(h.api.saveTicket('e', edited, ['basicInfo']), /simulated-commit-failure/);
+  assert.equal(h.ticket().basicInfo.ticketNumber, 1);
+  assert.equal(h.inventory.get('events/e').lastIssuedNumber, 1);
+});
+
+for (const count of [2, 401]) test('duplicate numbers in a ' + count + '-ticket issuance request fail before the first chunk is written', async () => {
+  const h = ticketInventoryHarness(), tickets = Array.from({length: count}, (_, n) => ({...h.ticket(), ticketId: 'new-' + n, basicInfo: {ticketNumber: n === count - 1 ? 2 : n + 2}}));
+  await assert.rejects(h.api.appendTickets('e', tickets, true));
+  assert.equal(h.transactions, 0);
+  assert.equal(h.inventory.size, 2);
+});
+
+test('a restored ticket cannot duplicate a live ticket number under another ID', async () => {
+  const h = ticketInventoryHarness(), restored = {...h.ticket(), ticketId: 'different-backup-id'};
+  await assert.rejects(h.api.appendTickets('e', [restored]), /DUPLICATE_TICKET_NUMBER/);
+  assert.equal(h.transactions, 0);
+  assert.equal(h.inventory.size, 2);
+});
+
+test('restore inventory preflight is invalidated by a concurrent ticket edit', async () => {
+  const h = ticketInventoryHarness({beforeTransaction: inventory => {inventory.get('events/e').inventoryRevision++;}});
+  const restored = {...h.ticket(), ticketId: 'new-backup-id', basicInfo: {ticketNumber: 50}};
+  await assert.rejects(h.api.appendTickets('e', [restored]), /TICKET_CHANGED_RETRY/);
+  assert.equal(h.inventory.has('events/e/tickets/new-backup-id'), false);
+  assert.equal(h.inventory.get('events/e').ticketCount, 1);
+});

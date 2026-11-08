@@ -1102,6 +1102,41 @@ export default function App({practice=false}:AppProps={}) {
   };
 
   const [ticketGenerating, setTicketGenerating] = useState(false);
+  const ticketContextVersion=useRef(0);
+  const ticketIssuanceOperation=useRef<object|null>(null);
+  const ticketWrites=useRef(new Map<string,object>());
+  const [pendingTicketIds,setPendingTicketIds]=useState<Set<string>>(new Set());
+  useEffect(()=>{
+    ++ticketContextVersion.current;
+    ticketIssuanceOperation.current=null;
+    ticketWrites.current.clear();
+    setTicketGenerating(false);
+    setPendingTicketIds(new Set());
+    return()=>{
+      ++ticketContextVersion.current;
+      ticketIssuanceOperation.current=null;
+      ticketWrites.current.clear();
+    };
+  },[event.eventId,ownManagementTerminalApproved]);
+
+  const runTicketWrite=async(ticketId:string,write:()=>Promise<unknown>,onError:(reason:unknown)=>void)=>{
+    const eventId=event.eventId,version=ticketContextVersion.current;
+    const key=JSON.stringify([eventId,ticketId]);
+    if(!eventId||currentEventId.current!==eventId||ticketWrites.current.has(key))return;
+    const operation={};
+    ticketWrites.current.set(key,operation);
+    setPendingTicketIds(current=>new Set([...current,ticketId]));
+    try{await write();}
+    catch(reason){
+      console.error("Ticket update failed",reason);
+      if(ticketContextVersion.current===version&&currentEventId.current===eventId)onError(reason);
+    }finally{
+      if(ticketWrites.current.get(key)===operation){
+        ticketWrites.current.delete(key);
+        setPendingTicketIds(current=>{const next=new Set(current);next.delete(ticketId);return next;});
+      }
+    }
+  };
 
   const generateTickets = async () => {
     if (!event.eventId) {
@@ -1113,7 +1148,11 @@ export default function App({practice=false}:AppProps={}) {
       setError("通常分と予備分は0以上の整数で、合計1〜5000枚にしてください。");
       return;
     }
-    if (ticketGenerating) return;
+    if (ticketGenerating||ticketIssuanceOperation.current) return;
+    const operation={};
+    ticketIssuanceOperation.current=operation;
+    const version=ticketContextVersion.current;
+    const current=()=>ticketIssuanceOperation.current===operation&&ticketContextVersion.current===version&&currentEventId.current===event.eventId;
 
     const prefix = ticketPrefix.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "TKT";
     setTicketPrefix(prefix);
@@ -1122,26 +1161,29 @@ export default function App({practice=false}:AppProps={}) {
     try {
       // React stateは購読更新の途中で古い場合があるため、発行前にサーバーの正本を読む。
       const startNumber = await loadNextTicketNumber(event.eventId,prefix);
+      if(!current())return;
       if(!Number.isSafeInteger(startNumber+count-1))throw new Error("TICKET_NUMBER_OVERFLOW");
 
       const generated = createTickets(event.eventId, count, startNumber, prefix).map((ticket,index)=>index<regularCount?ticket:{...ticket,basicInfo:{...ticket.basicInfo,reserve:true}});
 
       // 保存と件数同期が成功してから画面を更新し、失敗時に成功したように見せない。
       await appendTickets(event.eventId, generated, true);
-      if (currentEventId.current !== event.eventId) return;
+      if (!current()) return;
       // Subscription owns the current inventory, including concurrent reception changes.
       setTicketStatusFilter("all");
       setTicketCreateModalOpen(false);
       if(reserveCount>0){setTicketDesignReserveOpen(true);setTicketDesignModalOpen(true);}
     } catch (reason) {
       console.error("Ticket generation/save failed", reason);
+      if(!current())return;
       setError("チケットをFirebaseへ保存できませんでした。接続・権限・他端末の発行状況を確認してください。一部だけ発行済みの場合があるため、一覧の枚数を確認してから再試行してください。");
     } finally {
-      setTicketGenerating(false);
+      if(ticketIssuanceOperation.current===operation){ticketIssuanceOperation.current=null;setTicketGenerating(false);}
     }
   };
 
   const updateTicketNumber = (ticketId: string) => {
+    if(pendingTicketIds.has(ticketId)||ticketWrites.current.has(JSON.stringify([event.eventId,ticketId])))return;
     if (event.eventStatus === "finished") {
       setError("終了済みイベントのチケット番号は変更できません。");
       return;
@@ -1173,8 +1215,7 @@ export default function App({practice=false}:AppProps={}) {
       updatedAt: new Date().toISOString(),
     };
     setError("");
-    void saveTicket(event.eventId, nextTicket, ["basicInfo"]).catch(reason => {
-      console.error(reason);
+    void runTicketWrite(ticketId,()=>saveTicket(event.eventId, nextTicket, ["basicInfo"]),() => {
       setError("チケット番号をFirebaseへ保存できませんでした。通信状態とFirestoreの権限を確認してください。");
     });
   };
@@ -1183,8 +1224,7 @@ export default function App({practice=false}:AppProps={}) {
     const target = tickets.find(ticket => ticket.ticketId === ticketId);
     if (!target) return;
     const nextTicket = { ...target, currentStatus: status, updatedAt: new Date().toISOString() };
-    void saveTicket(event.eventId, nextTicket, ["currentStatus"]).catch(reason => {
-      console.error(reason);
+    void runTicketWrite(ticketId,()=>saveTicket(event.eventId, nextTicket, ["currentStatus"]),() => {
       setError("チケット状態をFirebaseへ保存できませんでした。");
     });
   };
@@ -1193,27 +1233,26 @@ export default function App({practice=false}:AppProps={}) {
     const target = tickets.find(ticket => ticket.ticketId === ticketId);
     if (!target) return;
     const nextTicket = { ...target, valid: !target.valid, updatedAt: new Date().toISOString() };
-    void saveTicket(event.eventId, nextTicket, ["valid"]).catch(reason => {
-      console.error(reason);
+    void runTicketWrite(ticketId,()=>saveTicket(event.eventId, nextTicket, ["valid"]),() => {
       setError("チケットの有効状態をFirebaseへ保存できませんでした。");
     });
   };
 
   const deleteTicket = async (ticketId: string) => {
+    if(pendingTicketIds.has(ticketId)||ticketWrites.current.has(JSON.stringify([event.eventId,ticketId])))return;
     if (!window.confirm("このチケットを削除しますか？")) return;
     setError("");
-    try {
+    await runTicketWrite(ticketId,async()=>{
       // Firebaseで削除と件数同期が完了するまで、画面から先に消さない。
       await deleteFirebaseTicket(event.eventId, ticketId);
-    } catch (reason) {
-      console.error("Ticket deletion failed", reason);
+    },reason=>{
       const code = typeof reason === "object" && reason !== null && "code" in reason
         ? String((reason as { code: unknown }).code)
         : "";
       setError(code === "permission-denied"
         ? "チケットを削除できません。Firestoreの削除権限を確認してください。"
         : "チケットをFirebaseから削除できませんでした。接続状態を確認して再試行してください。");
-    }
+    });
   };
 
   const eventDataQrValue = bundle ? JSON.stringify({
@@ -2129,7 +2168,7 @@ export default function App({practice=false}:AppProps={}) {
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
                 <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
-                <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
+                <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} disabled={pendingTicketIds.has(ticket.ticketId)} aria-busy={pendingTicketIds.has(ticket.ticketId)} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
                 <div className="ticket-row-actions">
@@ -2138,9 +2177,9 @@ export default function App({practice=false}:AppProps={}) {
                     setTicketZoomOrigin(source?{left:source.left,top:source.top,width:source.width,height:source.height}:null);
                     setTicketQrModalTicket(ticket);
                   }}>QR表示</button>
-                  <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={event.eventStatus === "finished"}>番号変更</button>
-                  <button className="ticket-row-disable" onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
-                  <button className="ticket-row-delete" onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
+                  <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={event.eventStatus === "finished"||pendingTicketIds.has(ticket.ticketId)}>番号変更</button>
+                  <button className="ticket-row-disable" disabled={pendingTicketIds.has(ticket.ticketId)} onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
+                  <button className="ticket-row-delete" disabled={pendingTicketIds.has(ticket.ticketId)} onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
                 </div>
               </div>
             ))}

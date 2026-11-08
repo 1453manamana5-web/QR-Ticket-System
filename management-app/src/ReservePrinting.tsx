@@ -31,13 +31,19 @@ export function openReservePrint(packet:ReservePackage,popup:Window){
 export function ReservePrintControls({packet,onChange,practice=false,store=realStore,beforePrint}:{packet:ReservePackage;onChange:(value:ReservePackage)=>void;practice?:boolean;store?:PrintStore;beforePrint?:()=>Promise<void>}){
   const {loadReservePackage,claimReserveBatch,finishReserveBatch}=store;
   const [count,setCount]=useState(20),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const busyRef=useRef(false),active=useRef(true);
+  const busyRef=useRef(false),active=useRef(true),stateVersion=useRef(0);
   useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
   const done=new Set(packet.confirmed),remaining=packet.tickets.filter(t=>!done.has(t.id));
   useEffect(()=>{setCount(current=>Math.max(1,Math.min(current,remaining.length||1)));},[remaining.length]);
-  const update=async()=>{const current=await loadReservePackage(packet.eventId);if(active.current&&current)onChange(current);};
+  const update=async()=>{
+    const version=++stateVersion.current;
+    try{
+      const current=await loadReservePackage(packet.eventId);
+      if(active.current&&version===stateVersion.current&&current)onChange(current);
+    }catch(error){if(active.current&&version===stateVersion.current)throw error;}
+  };
   const print=async(repeat=false)=>{
-    if(busyRef.current)return;busyRef.current=true;setError('');
+    if(busyRef.current)return;++stateVersion.current;busyRef.current=true;setError('');
     const popup=practice?null:window.open('','_blank');if(!practice&&!popup){busyRef.current=false;setError('印刷画面を開けません。ポップアップを許可してください。');return;}
     setBusy(true);
     try{
@@ -52,7 +58,7 @@ export function ReservePrintControls({packet,onChange,practice=false,store=realS
   const finish=async(printed:boolean)=>{
     if(!packet.pending||busyRef.current)return;
     if(!practice&&!window.confirm(printed?'紙が正しく出たことを確認しましたか？この分を印刷済みにして次の番号へ進みます。':'手元にこの分の印刷物がないことを確認してください。番号を未印刷に戻します。'))return;
-    busyRef.current=true;setBusy(true);setError('');try{const latest=await finishReserveBatch(packet.eventId,packet.pending.id,printed);if(active.current)onChange(latest);}catch(e){if(active.current){setError(e instanceof Error?e.message:'印刷記録を保存できませんでした。');await update().catch(()=>{});}}finally{busyRef.current=false;if(active.current)setBusy(false);}
+    ++stateVersion.current;busyRef.current=true;setBusy(true);setError('');try{const latest=await finishReserveBatch(packet.eventId,packet.pending.id,printed);if(active.current)onChange(latest);}catch(e){if(active.current){setError(e instanceof Error?e.message:'印刷記録を保存できませんでした。');await update().catch(()=>{});}}finally{busyRef.current=false;if(active.current)setBusy(false);}
   };
   return <div className="reserve-print-controls">
     <p>予備 {packet.tickets.length}枚／印刷済み {packet.tickets.filter(t=>done.has(t.id)).length}枚／残り {remaining.length}枚</p>

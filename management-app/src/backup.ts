@@ -7,14 +7,14 @@ export type ManagementBackup = {
   receptionSettings?:ReceptionSettings; appSettings?:Record<string,unknown>; analysisHistory:Analysis[];
 };
 const object=(value:unknown):value is Record<string,unknown>=>Boolean(value)&&typeof value==="object"&&!Array.isArray(value);
-const id=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=160&&!value.includes("/");
+const id=(value:unknown):value is string=>typeof value==="string"&&value.trim().length>0&&value.length<=160&&!value.includes("/");
 const date=(value:unknown)=>typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&
   Number.isFinite(Date.parse(value+"T00:00:00.000Z"))&&new Date(value+"T00:00:00.000Z").toISOString().slice(0,10)===value;
 const time=(value:unknown)=>typeof value==="string"&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 export function parseManagementBackup(value:unknown):ManagementBackup {
   if(!object(value)||value.version!==1||!Array.isArray(value.eventHistory)||!Array.isArray(value.tickets)||!Array.isArray(value.members))throw Error("バックアップの形式・バージョンが正しくありません");
   const events:Event[]=value.eventHistory.map(event=>{
-    if(!object(event)||!id(event.eventId)||typeof event.eventName!=="string"||!date(event.eventDate)||!time(event.startTime)||!time(event.endTime)||String(event.startTime)>=String(event.endTime)||!["preparing","ready","active","finalizing","finished"].includes(String(event.eventStatus))||!Number.isSafeInteger(event.dataVersion)||Number(event.dataVersion)<1)throw Error("イベント情報が不正です");
+    if(!object(event)||!id(event.eventId)||typeof event.eventName!=="string"||event.eventName.length>300||!date(event.eventDate)||!time(event.startTime)||!time(event.endTime)||String(event.startTime)>=String(event.endTime)||typeof event.eventStatus!=="string"||!["preparing","ready","active","finalizing","finished"].includes(event.eventStatus)||!Number.isSafeInteger(event.dataVersion)||Number(event.dataVersion)<1)throw Error("イベント情報が不正です");
     // Do not import auth tokens, publication targets or terminal grants from files.
     return {eventId:event.eventId,eventName:event.eventName,eventDate:String(event.eventDate),startTime:String(event.startTime),endTime:String(event.endTime),eventStatus:event.eventStatus as Event["eventStatus"],dataVersion:Number(event.dataVersion)};
   });
@@ -22,7 +22,7 @@ export function parseManagementBackup(value:unknown):ManagementBackup {
   if(eventIds.size!==events.length)throw Error("イベントIDが重複しています");
   const ticketIds=new Set<string>();
   const tickets:Ticket[]=value.tickets.map(ticket=>{
-    if(!object(ticket)||!id(ticket.ticketId)||!id(ticket.eventId)||!eventIds.has(ticket.eventId)||!object(ticket.basicInfo)||typeof ticket.valid!=="boolean"||!["unused","inside","exited"].includes(String(ticket.currentStatus))||typeof ticket.updatedAt!=="string"||!Number.isFinite(Date.parse(ticket.updatedAt)))throw Error("チケット情報が不正です");
+    if(!object(ticket)||!id(ticket.ticketId)||!id(ticket.eventId)||!eventIds.has(ticket.eventId)||!object(ticket.basicInfo)||typeof ticket.valid!=="boolean"||typeof ticket.currentStatus!=="string"||!["unused","inside","exited"].includes(ticket.currentStatus)||typeof ticket.updatedAt!=="string"||!Number.isFinite(Date.parse(ticket.updatedAt)))throw Error("チケット情報が不正です");
     const key=JSON.stringify([ticket.eventId,ticket.ticketId]);if(ticketIds.has(key))throw Error("チケットIDが重複しています");ticketIds.add(key);
     return {eventId:ticket.eventId,ticketId:ticket.ticketId,basicInfo:ticket.basicInfo,valid:ticket.valid,currentStatus:ticket.currentStatus as Ticket["currentStatus"],updatedAt:ticket.updatedAt};
   });

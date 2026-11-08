@@ -207,3 +207,32 @@ test('redesigning reserves keeps confirmed and synced IDs even if they temporari
   saved=await store.claimReserveBatch('event-a',1);assert.deepEqual(saved.pending.ids,['T502']);
   await assert.rejects(store.saveReservePackage(packet()),/確認待ち/);
 });
+
+for(const fail of [false,true])test('a delayed print-state refresh cannot replace a newly claimed batch'+(fail?' with a stale failure':''),async()=>{
+  const old=deferred(),claimed={...packet(),pending:{id:'current-batch',ids:['T501']}};
+  const store={loadReservePackage:()=>old.promise,claimReserveBatch:async()=>claimed};
+  const mod=reserveModule({store});let renderer;
+  function Harness(){const [value,setValue]=React.useState(packet());return React.createElement(mod.ReservePrintControls,{packet:value,onChange:setValue,practice:true,store});}
+  await act(async()=>{renderer=create(React.createElement(Harness));});
+  try{
+    await act(async()=>button(renderer,'印刷状態を更新').props.onClick());
+    await act(async()=>button(renderer,'予備チケットを印刷').props.onClick());
+    assert.ok(button(renderer,'印刷完了して次へ'));
+    await act(async()=>fail?old.reject(Error('old read failed')):old.resolve(packet()));
+    assert.ok(button(renderer,'印刷完了して次へ'),'the current pending batch must stay confirmable');
+    assert.equal(renderer.root.findAllByProps({role:'alert'}).length,0,'an obsolete refresh must not show an unrelated error');
+  }finally{await act(async()=>renderer.unmount());}
+});
+
+for(const fail of [false,true])test('a current print-state refresh still '+(fail?'reports its read failure':'shows another tab pending batch'),async()=>{
+  const fresh={...packet(),pending:{id:'another-tab',ids:['T502']}};
+  const store={loadReservePackage:async()=>{if(fail)throw Error('current failure');return fresh;}};
+  const mod=reserveModule({store});let renderer;
+  function Harness(){const [value,setValue]=React.useState(packet());return React.createElement(mod.ReservePrintControls,{packet:value,onChange:setValue,practice:true,store});}
+  await act(async()=>{renderer=create(React.createElement(Harness));});
+  try{
+    await act(async()=>button(renderer,'印刷状態を更新').props.onClick());
+    if(fail)assert.match(label(renderer.root),/状態を取得できませんでした/);
+    else assert.ok(button(renderer,'印刷完了して次へ'));
+  }finally{await act(async()=>renderer.unmount());}
+});
