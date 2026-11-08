@@ -128,7 +128,7 @@ export default function App(){
   const scanProcessingRef=useRef(false);
   const registrationActiveRef=useRef(false);
   const registrationVersionRef=useRef(0);
-  const pendingRemoteModeRef=useRef<Mode|null>(null);
+  const pendingRemoteModeRef=useRef<{mode:Mode;registrationVersion:number}|null>(null);
   const registrationIsCurrent=(version:number)=>registrationActiveRef.current&&version===registrationVersionRef.current;
   const lastRemoteCommandRef=useRef("");
   const receptionAllowedRef=useRef(false);
@@ -583,18 +583,21 @@ export default function App(){
         const command=JSON.stringify([localEvent.terminalId,remoteMode,updatedAt]);
         if(lastRemoteCommandRef.current===command)return;
         lastRemoteCommandRef.current=command;
-        const manualChangedAt=localStorage.getItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`);
-        if(updatedAt&&manualChangedAt&&new Date(updatedAt).getTime()<=new Date(manualChangedAt).getTime())return;
         const nextMode=remoteMode==="入口受付"?"entry":remoteMode==="出口受付"?"exit":mode;
         if(remoteMode==="停止"){
+          // A manual mode change must never override a management stop, even
+          // if this terminal's clock is ahead. Stopping also ends that override.
+          try{localStorage.removeItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`);}catch{}
           pendingRemoteModeRef.current=null;
           receptionAllowedRef.current=false;
           setRemoteStopped(true);
           setResult({kind:"error",title:"受付が停止されています",detail:"管理画面から受付停止の指示を受けています。"});
           return;
         }
+        const manualChangedAt=localStorage.getItem(`qr-ticket-terminal-mode-changed:${localEvent.terminalId}`);
+        if(manualChangedAt&&new Date(updatedAt).getTime()<=new Date(manualChangedAt).getTime())return;
         setRemoteStopped(false);
-        if(scanProcessingRef.current){pendingRemoteModeRef.current=nextMode;return;}
+        if(scanProcessingRef.current){pendingRemoteModeRef.current={mode:nextMode,registrationVersion:registrationVersionRef.current};return;}
         setMode(nextMode);
         setResult(null);
       },reason=>{if(active)console.error("端末リモート操作の購読に失敗しました",reason);});
@@ -696,10 +699,9 @@ export default function App(){
   },[]);
 
   const authenticateEvent=async()=>{
-    if(!authPayload||busy)return;
+    if(!authPayload||busy||eventLoadingRef.current!==null)return;
     setBusy(true);
     setError("");
-    if(eventLoadingRef.current!==null){setBusy(false);return;}
     const loadVersion=++eventLoadVersionRef.current;
     metadataLoadingRef.current=null;
     eventLoadingRef.current=loadVersion;
@@ -780,9 +782,10 @@ export default function App(){
       if(decoded&&typeof decoded==="object"&&!Array.isArray(decoded)){
         const payload=decoded as {type?:unknown;eventId?:unknown;ticketId?:unknown};
         if(payload.type==="qr-ticket"){
-          if(typeof payload.ticketId!=="string"||!payload.ticketId.trim()){
+          if(typeof payload.ticketId!=="string"||!payload.ticketId.trim()||
+              (payload.eventId!==undefined&&(typeof payload.eventId!=="string"||!payload.eventId.trim()||payload.eventId.length>160||payload.eventId.includes('/')))){
             void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket",syncPendingRecords);
-            setResult({kind:"error",title:"QRコードを確認できません",detail:"チケット情報が不足しています。"});
+            setResult({kind:"error",title:"QRコードを確認できません",detail:"チケット情報の形式が正しくありません。"});
             return;
           }
           ticketId=payload.ticketId.trim();
@@ -791,6 +794,14 @@ export default function App(){
       }
     }catch{
       // 旧形式のチケットIDはJSONではないため、そのまま照合する。
+    }
+
+    // Treat scanned text as one document ID, never as a Firestore path. A deep
+    // path can be denied by rules without indicating any loss of approval.
+    if(ticketId.length>160||ticketId.includes('/')){
+      void logReceptionError(localEvent.event.eventId,localEvent.terminalId,mode,"unknown_ticket",syncPendingRecords);
+      setResult({kind:"error",title:"QRコードを確認できません",detail:"チケットIDの形式が正しくありません。"});
+      return;
     }
 
     scanProcessingRef.current=true;
@@ -896,10 +907,10 @@ export default function App(){
       });
     }finally{
       scanProcessingRef.current=false;
-      setBusy(false);
+      if(registrationIsCurrent(registrationVersion))setBusy(false);
       const nextMode=pendingRemoteModeRef.current;
       pendingRemoteModeRef.current=null;
-      if(nextMode&&registrationIsCurrent(registrationVersion)&&!eventAuthenticationRequiredRef.current&&!workflowRef.current.remoteStopped){setMode(nextMode);setResult(null);}
+      if(nextMode&&registrationIsCurrent(nextMode.registrationVersion)&&!eventAuthenticationRequiredRef.current&&!workflowRef.current.remoteStopped){setMode(nextMode.mode);setResult(null);}
       // カメラは連続稼働するため、受付のたびに再生成しない。
     }
   },[localEvent,mode,busy,remoteStopped,syncPendingRecords,revokeCurrentApproval]);
