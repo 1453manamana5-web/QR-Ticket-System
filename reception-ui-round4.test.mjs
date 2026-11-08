@@ -197,3 +197,17 @@ test('a management stop wins over a future manual clock and permits a later remo
   assert.equal(h.writes[0][1].type,'exit');
  }finally{await h.close();}
 });
+
+test('rapid duplicate authentication clicks keep the owning preparation busy and perform one download',async()=>{
+ const pending=deferred();let downloads=0;
+ const h=await harness({download:()=>{downloads++;return pending.promise;}});
+ try{
+  await h.click('イベントQRを読み直す');const auth=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Reception UI audit',dataVersion:1,authToken:'token'}));await act(async()=>auth.operation);
+  const start=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='このイベントで認証').props.onClick;
+  await act(async()=>{start();start();});await h.flush();
+  assert.equal(downloads,1);
+  const busy=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='イベントデータを準備中…');
+  assert.ok(busy);assert.equal(busy.props.disabled,true);
+  await act(async()=>pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();assert.match(h.text(),/受付準備完了/);
+ }finally{pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()]});await h.flush();await h.close();}
+});

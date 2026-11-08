@@ -699,10 +699,9 @@ export default function App(){
   },[]);
 
   const authenticateEvent=async()=>{
-    if(!authPayload||busy)return;
+    if(!authPayload||busy||eventLoadingRef.current!==null)return;
     setBusy(true);
     setError("");
-    if(eventLoadingRef.current!==null){setBusy(false);return;}
     const loadVersion=++eventLoadVersionRef.current;
     metadataLoadingRef.current=null;
     eventLoadingRef.current=loadVersion;
