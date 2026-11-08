@@ -962,3 +962,66 @@ test('latest reception lookup rejects a canonical document with a mismatched sto
   await assert.rejects(c.reception.getLatestReceptionTicket('flow-event','ticket-1'),/INVALID_RECEPTION_TICKET_DATA/);
   assert.equal((await c.reception.getTerminalRegistration()).approved,true);
 });
+
+test('a stale ticket number edit preserves confirmed paper printing and the latest reception',async()=>{
+  const c=clients(),stale={...makeTicket('flow-event'),basicInfo:{ticketNumber:1,reserve:true}};
+  await createPublished(c,makeEvent(),[stale]);
+  await c.management.markReserveTicketsPrinted('flow-event',[stale.ticketId]);
+  await c.reception.syncReceptionRecord({recordId:'printed-entry',eventId:'flow-event',ticketId:stale.ticketId,terminalId:'T-FLOW-RECEPTION',type:'entry',timestamp:'2026-10-25T01:00:00.000Z'});
+  await c.management.saveTicket('flow-event',{...stale,basicInfo:{...stale.basicInfo,ticketNumber:100}},['basicInfo']);
+  const saved=(await getDocFromServer(doc(c.managerDb,'events','flow-event','tickets',stale.ticketId))).data();
+  assert.equal(saved.basicInfo.reservePrinted,true);assert.equal(saved.basicInfo.ticketNumber,100);
+  assert.equal(saved.currentStatus,'inside');assert.equal(saved.updatedAt,'2026-10-25T01:00:00.000Z');
+  await c.management.deleteTicket('flow-event',stale.ticketId);
+  assert.equal(await c.management.loadNextTicketNumber('flow-event','TKT'),101);
+});
+
+test('deleting a restored high-number ticket keeps its number issued',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[{...makeTicket('flow-event'),basicInfo:{ticketNumber:1}}]);
+  const restored={...makeTicket('flow-event','restored-high'),basicInfo:{ticketNumber:500}};
+  await c.management.appendTickets('flow-event',[restored]);
+  await c.management.deleteTicket('flow-event',restored.ticketId);
+  assert.equal(await c.management.loadNextTicketNumber('flow-event','TKT'),501);
+  assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event'))).data().ticketCount,1);
+});
+
+test('restore rejects a display number already used by another live ticket',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[{...makeTicket('flow-event'),basicInfo:{ticketNumber:42}}]);
+  await assert.rejects(c.management.appendTickets('flow-event',[{...makeTicket('flow-event','backup-other-id'),basicInfo:{ticketNumber:42}}]),/DUPLICATE_TICKET_NUMBER/);
+  assert.equal((await getDocsFromServer(collection(c.managerDb,'events','flow-event','tickets'))).size,1);
+  assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event'))).data().ticketCount,1);
+});
+
+test('restore cannot install a duplicate number when a live edit races its inventory query',async()=>{
+  const c=clients(),original={...makeTicket('flow-event'),basicInfo:{ticketNumber:1}};
+  await createPublished(c,makeEvent(),[original]);let changed=false;
+  const racing=loadClientModule('./management-app/src/firebaseData.ts',c.managerDb,'flow-manager','T-FLOW-MANAGER',{}, {
+    getDocsFromServer:async ref=>{
+      const saved=await firestore.getDocsFromServer(ref);
+      if(!changed&&ref.path==='events/flow-event/tickets'){
+        changed=true;await c.management.saveTicket('flow-event',{...original,basicInfo:{ticketNumber:50}},['basicInfo']);
+      }
+      return saved;
+    },
+  });
+  await assert.rejects(racing.appendTickets('flow-event',[{...makeTicket('flow-event','racing-import'),basicInfo:{ticketNumber:50}}]),/TICKET_CHANGED_RETRY/);
+  assert.equal(changed,true);
+  assert.equal((await getDocsFromServer(collection(c.managerDb,'events','flow-event','tickets'))).size,1);
+});
+
+test('duplicate numbers in a multi-chunk issuance are rejected before any ticket is saved',async()=>{
+  const c=clients();await createPublished(c);
+  const tickets=Array.from({length:401},(_,n)=>({...makeTicket('flow-event','duplicate-'+n),basicInfo:{ticketNumber:n===400?2:n+2}}));
+  await assert.rejects(c.management.appendTickets('flow-event',tickets,true),/INVALID_OR_DUPLICATE_TICKET_NUMBER/);
+  assert.equal((await getDocsFromServer(collection(c.managerDb,'events','flow-event','tickets'))).size,1);
+});
+
+test('a multi-chunk restore advances its own revision and remains downloadable by reception',async()=>{
+  const c=clients();await createPublished(c,makeEvent(),[{...makeTicket('flow-event'),basicInfo:{ticketNumber:1}}]);
+  const tickets=Array.from({length:401},(_,n)=>({...makeTicket('flow-event','restored-'+n),basicInfo:{ticketNumber:n+2}}));
+  await c.management.appendTickets('flow-event',tickets);
+  assert.equal(await c.management.loadNextTicketNumber('flow-event','TKT'),403);
+  const payload=await c.downloader.getCurrentFirebaseEventAuthPayload(),downloaded=await c.downloader.downloadEventData(payload,'T-FLOW-RECEPTION');
+  assert.equal(downloaded.tickets.length,402);assert.equal(downloaded.localEvent.ticketCount,402);
+  assert.equal(downloaded.tickets.find(ticket=>ticket.ticketId==='restored-400').basicInfo.ticketNumber,402);
+});

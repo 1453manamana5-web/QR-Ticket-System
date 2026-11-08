@@ -38,6 +38,28 @@ const record = (id, type = "entry", timestamp = "2026-11-06T01:00:00.000Z", tick
 const snapshot = value => ({exists: () => value !== undefined && value !== null, data: () => value});
 const localDb = (indexedDB = new IDBFactory()) => load("./reception-app/src/localDb.ts", {}, {indexedDB});
 
+const ticketBackup = () => ({version:1,eventId:"audit-event",eventHistory:[event()],tickets:[ticket()],members:[]});
+for(const status of ["unused","inside","exited"])test("backup rejects a ticket status disguised as an array: "+status,()=>{
+  const value=ticketBackup();value.tickets[0].currentStatus=[status];
+  assert.throws(()=>load("./management-app/src/backup.ts").parseManagementBackup(value),/チケット情報/);
+});
+for(const status of ["ready","active"])test("backup rejects an event status disguised as an array: "+status,()=>{
+  const value=ticketBackup();value.eventHistory[0].eventStatus=[status];
+  assert.throws(()=>load("./management-app/src/backup.ts").parseManagementBackup(value),/イベント情報/);
+});
+test("backup refuses blank ticket IDs which reception cannot query",()=>{
+  const value=ticketBackup();value.tickets[0].ticketId="   ";
+  assert.throws(()=>load("./management-app/src/backup.ts").parseManagementBackup(value),/チケット情報/);
+});
+test("backup refuses an event name too long for reception download",()=>{
+  const value=ticketBackup();value.eventHistory[0].eventName="X".repeat(301);
+  assert.throws(()=>load("./management-app/src/backup.ts").parseManagementBackup(value),/イベント情報/);
+});
+test("backup preserves supported legacy tickets without display numbers and literal status strings",()=>{
+  const value=ticketBackup(),parsed=load("./management-app/src/backup.ts").parseManagementBackup(value);
+  assert.deepEqual(parsed.tickets,value.tickets);assert.deepEqual(parsed.eventHistory,value.eventHistory);
+});
+
 function downloaderHarness({canonical = {...event(), authToken: "token", receptionTarget: true, ticketCount: 1}, bundle = {}, tickets = [ticket()]} = {}) {
   const data = {event: event(), settings, ticketCount: 1, authToken: "token", ...bundle};
   const api = load("./reception-app/src/eventDownloader.ts", {
