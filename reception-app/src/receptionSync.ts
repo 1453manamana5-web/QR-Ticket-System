@@ -494,6 +494,10 @@ export async function syncReceptionRecord(record: ReceptionRecord, ticket?: Tick
 }
 
 export async function getLatestReceptionTicket(eventId: string, ticketId: string): Promise<Ticket | null> {
+  if(typeof eventId!=="string"||!eventId.trim()||eventId.length>160||eventId.includes('/')||
+      typeof ticketId!=="string"||!ticketId.trim()||ticketId.length>160||ticketId.includes('/')){
+    throw new Error("INVALID_RECEPTION_TICKET_ID");
+  }
   let active = true;
   const terminalId = typeof localStorage === "undefined" ? undefined : localStorage.getItem("qr-ticket-terminal-id");
   try {
@@ -508,7 +512,15 @@ export async function getLatestReceptionTicket(eventId: string, ticketId: string
       checkCurrent();
       const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "tickets", ticketId));
       checkCurrent();
-      return snapshot.exists() ? snapshot.data() as Ticket : null;
+      if(!snapshot.exists())return null;
+      const ticket=snapshot.data() as Partial<Ticket>;
+      if(ticket.ticketId!==ticketId||ticket.eventId!==eventId||typeof ticket.valid!=="boolean"||
+          !["unused","inside","exited"].includes(ticket.currentStatus??"")||
+          !ticket.basicInfo||typeof ticket.basicInfo!=="object"||Array.isArray(ticket.basicInfo)||
+          typeof ticket.updatedAt!=="string"||!Number.isFinite(Date.parse(ticket.updatedAt))){
+        throw new Error("INVALID_RECEPTION_TICKET_DATA");
+      }
+      return ticket as Ticket;
     })(), 1500);
   } finally {
     active = false;
