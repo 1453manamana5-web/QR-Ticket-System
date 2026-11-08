@@ -142,3 +142,58 @@ test('permission denial during confirmation revokes cached approval',async()=>{
  try{await h.click('イベントQRを読み直す');const scan=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Reception UI audit',dataVersion:1,authToken:'token'}));await act(async()=>scan.operation);await h.click('このイベントで認証');
  assert.equal(h.storage.has('qr-ticket-reception-approved'),false);assert.match(h.text(),/受付端末を登録/);}finally{await h.close();}
 });
+
+for(const qr of ['ticket-one/other/document','X'.repeat(161),JSON.stringify({type:'qr-ticket',ticketId:'ticket-one/other/document',eventId:'event-one'}),JSON.stringify({type:'qr-ticket',ticketId:'ticket-one',eventId:null})])test('malformed ticket QR is rejected without a server read or losing approval: '+qr.slice(0,65),async()=>{
+ let reads=0;
+ const h=await harness({latestTicket:async(_event,id)=>{reads++;if(id.includes('/'))throw Object.assign(Error('denied deep path'),{code:'permission-denied'});return makeTicket();}});
+ try{
+  await h.click('受付を開始する');const scan=await h.beginScan(qr);await act(async()=>scan.operation);await h.flush();
+  assert.equal(reads,0);assert.equal(h.writes.length,0);assert.equal(h.storage.has('qr-ticket-reception-approved'),true);
+  assert.doesNotMatch(h.text(),/受付端末を登録/);assert.match(h.text(),/QRコードを確認できません/);
+  const valid=await h.beginScan('ticket-one');await act(async()=>valid.operation);await h.flush();
+  assert.equal(h.writes.length,1,'the next valid legacy ticket remains usable');
+ }finally{await h.close();}
+});
+
+test('an obsolete scan finalizer cannot unlock a newer event preparation',async()=>{
+ const old=deferred(),download=deferred();
+ const h=await harness({latestTicket:()=>old.promise,download:()=>download.promise});
+ try{
+  await h.click('受付を開始する');const scan=await h.beginScan('ticket-one');
+  await h.registration(null);await h.registration(approved);
+  await h.click('イベントQRを読み直す');const auth=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Reception UI audit',dataVersion:1,authToken:'token'}));await act(async()=>auth.operation);
+  await h.click('このイベントで認証');
+  assert.equal(h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='イベントデータを準備中…').props.disabled,true);
+  await act(async()=>{old.resolve(makeTicket());await scan.operation;});await h.flush();
+  const pending=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='イベントデータを準備中…');
+  assert.ok(pending,'new preparation must still be shown as busy');assert.equal(pending.props.disabled,true);
+  await act(async()=>download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();assert.match(h.text(),/受付準備完了/);
+ }finally{old.resolve(makeTicket());download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]});await h.flush();await h.close();}
+});
+
+test('a remote mode queued after reapproval survives completion of the obsolete scan',async()=>{
+ const old=deferred();let reads=0;
+ const h=await harness({latestTicket:()=>++reads===1?old.promise:Promise.resolve({...makeTicket(),currentStatus:'inside'})});
+ try{
+  await h.click('受付を開始する');const scan=await h.beginScan('ticket-one');
+  await h.registration(null);await h.registration(approved);await h.control('出口受付');
+  await act(async()=>{old.resolve(makeTicket());await scan.operation;});await h.flush();
+  await h.click('受付を開始する');
+  assert.ok(h.renderer.root.findByProps({'aria-label':'出口受付。左右にスワイプして入口受付へ切り替え'}));
+  const next=await h.beginScan('ticket-one');await act(async()=>next.operation);await h.flush();
+  assert.equal(h.writes.length,1);assert.equal(h.writes[0][1].type,'exit');
+ }finally{old.resolve(makeTicket());await h.flush();await h.close();}
+});
+
+test('a management stop wins over a future manual clock and permits a later remote restart',async()=>{
+ const h=await harness({latestTicket:async()=>({...makeTicket(),currentStatus:'inside'})});
+ try{
+  h.storage.set('qr-ticket-terminal-mode-changed:T-UI-AUDIT','2999-01-01T00:00:00.000Z');
+  await h.click('受付を開始する');await h.control('停止');
+  assert.equal(h.renderer.root.findAllByType(h.Scanner).length,0);assert.match(h.text(),/受付停止中/);
+  await h.control('出口受付');assert.equal(h.renderer.root.findAllByType(h.Scanner).length,1);
+  assert.ok(h.renderer.root.findByProps({'aria-label':'出口受付。左右にスワイプして入口受付へ切り替え'}));
+  const scan=await h.beginScan('ticket-one');await act(async()=>scan.operation);await h.flush();
+  assert.equal(h.writes[0][1].type,'exit');
+ }finally{await h.close();}
+});

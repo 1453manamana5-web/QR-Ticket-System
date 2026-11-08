@@ -898,3 +898,19 @@ test("member writes reject deleted event parents instead of leaving orphaned mem
   await assert.rejects(c.management.saveMember("flow-event", {memberId: "MBR-0001", memberNumber: 1, name: "Late add"}, "create"), /EVENT_NOT_FOUND/);
   assert.equal((await getDocsFromServer(collection(c.managerDb, "events", "flow-event", "members"))).size, 0);
 });
+
+test('malformed receipt ticket paths are rejected before a Firestore permission failure',async()=>{
+  const c=clients();await createPublished(c);
+  await assert.rejects(c.reception.getLatestReceptionTicket('flow-event','ticket-1/unrelated/document'),/INVALID_RECEPTION_TICKET_ID/);
+  assert.equal((await c.reception.getTerminalRegistration()).approved,true);
+  assert.equal((await c.reception.getLatestReceptionTicket('flow-event','ticket-1')).ticketId,'ticket-1');
+});
+
+test('latest reception lookup rejects a canonical document with a mismatched stored ticket ID',async()=>{
+  const c=clients();await createPublished(c);
+  await env.withSecurityRulesDisabled(async context=>{
+    await updateDoc(doc(context.firestore(),'events','flow-event','tickets','ticket-1'),{ticketId:'wrong-id'});
+  });
+  await assert.rejects(c.reception.getLatestReceptionTicket('flow-event','ticket-1'),/INVALID_RECEPTION_TICKET_DATA/);
+  assert.equal((await c.reception.getTerminalRegistration()).approved,true);
+});
