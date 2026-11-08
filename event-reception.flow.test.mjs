@@ -110,6 +110,54 @@ function queueWorker(local, reception) {
   return {...exports, errors};
 }
 
+for (const owned of [false, true]) test('pending registration remains discoverable after five completed applications, owned=' + owned, async () => {
+  const uid = 'flow-registration-history', terminalId = 'T-ZZZZZZZZ';
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    for (let n = 0; n < 5; n++) {
+      await setDoc(doc(db, 'terminalApplications', 'T-0000000' + n), {
+        terminalId: 'T-0000000' + n, requestedByUid: uid, status: 'approved', name: 'Historical',
+      });
+    }
+    await setDoc(doc(db, 'terminalApplications', terminalId), {
+      terminalId, requestedByUid: uid, requestedRole: 'reception', status: 'pending', name: 'Current application',
+      type: 'Web / iPad', requestedAt: '2026-11-08T00:00:00.000Z', updatedAt: '2026-11-08T00:00:00.000Z',
+    });
+    await setDoc(doc(db, 'terminals', terminalId), {
+      terminalId, requestedByUid: uid, requestedRole: 'reception', approved: false, receptionApproved: false,
+      managementApproved: false, admin: false, subAdmin: false, role: 'reception', status: 'pending', name: 'Current application',
+    });
+    if (owned) {
+      await setDoc(doc(db, 'terminalInstallations', uid), {authUid: uid, terminalId, approved: true});
+      await setDoc(doc(db, 'terminalOwners', terminalId), {ownerUid: uid, terminalId, enabled: true});
+    }
+  });
+  const db = env.authenticatedContext(uid).firestore();
+  const reception = loadClientModule('./reception-app/src/receptionSync.ts', db, uid, terminalId);
+  const registration = await reception.getTerminalRegistration();
+  assert.equal(registration?.approved, false);
+  assert.equal(registration?.status, 'pending');
+  assert.equal(registration?.name, 'Current application');
+  if (!owned) {
+    await assert.rejects(reception.registerReceptionTerminal('Duplicate'), /TERMINAL_APPLICATION_ALREADY_PENDING/);
+    const management = loadClientModule('./management-app/src/firebaseData.ts', db, uid, terminalId);
+    const status = await management.getOwnTerminalStatus();
+    assert.equal(status.approved, false);
+    assert.equal(status.status, 'pending');
+    assert.equal(status.name, 'Current application');
+    await assert.rejects(management.requestTerminalRegistration({terminalId: 'T-MANAGERNEW', name: 'Duplicate', type: 'Web / iPad', role: 'both'}), /TERMINAL_APPLICATION_ALREADY_PENDING/);
+  }
+  await reception.resetReceptionTerminalRegistration();
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    assert.equal((await getDocFromServer(doc(db, 'terminalApplications', terminalId))).exists(), false);
+    assert.equal((await getDocFromServer(doc(db, 'terminalApplications', 'T-00000000'))).data().status, 'approved');
+    const terminal = await getDocFromServer(doc(db, 'terminals', terminalId));
+    assert.equal(terminal.exists(), owned);
+    if (owned) assert.equal(terminal.data().status, 'offline');
+  });
+});
+
 async function secondReception(eventId) {
   const uid = "flow-exit", terminalId = "T-FLOW-EXIT-DEVICE";
   await env.withSecurityRulesDisabled(async context => {

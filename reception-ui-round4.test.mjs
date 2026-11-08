@@ -65,7 +65,7 @@ const makeTicket=()=>({ticketId:'ticket-one',eventId:'event-one',basicInfo:{},va
 const approved={approved:true,status:'online',name:'Audit terminal',eventId:'event-one'};
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 
-async function harness({localTicket=makeTicket(),latestTicket=async()=>makeTicket(),saveReception=async()=>'saved',initialRegistration=approved,initialFailure,cacheApproval=false,event=makeEvent(),offlineAdd,loadValidation,metadataRead,download,syncError,syncRecords,heartbeat,knownUid,cacheAuthUid,saved=true,automaticDownload,tokenRead}={}){
+async function harness({localTicket=makeTicket(),latestTicket=async()=>makeTicket(),saveReception=async()=>'saved',initialRegistration=approved,initialFailure,cacheApproval=false,event=makeEvent(),offlineAdd,loadValidation,metadataRead,download,syncError,syncRecords,heartbeat,knownUid,cacheAuthUid,saved=true,automaticDownload,tokenRead,preparationToken,prepare}={}){
   let stored=saved?structuredClone(event):null,metadata=structuredClone(event.event),currentRegistration=initialRegistration,registrationCallback,registrationError,controlCallback,renderer;
   const audio=[],writes=[],errors=[],syncedErrors=new Set(),heartbeats=[],listeners=new Map(),intervals=new Map(),timeouts=new Map(),storage=new Map([['qr-ticket-terminal-id','T-UI-AUDIT']]);
   if(cacheApproval)storage.set('qr-ticket-reception-approved',JSON.stringify({...approved,terminalId:'T-UI-AUDIT',...(cacheAuthUid===undefined?{}:{authUid:cacheAuthUid})}));
@@ -79,7 +79,8 @@ async function harness({localTicket=makeTicket(),latestTicket=async()=>makeTicke
   const local={
     loadLocalEvent:async validate=>{if(validate&&loadValidation)await loadValidation();return structuredClone(stored);},
     saveLocalEvent:async data=>{stored=structuredClone(data);},
-    prepareLocalEventData:async data=>{stored={...structuredClone(data),dataReady:true};},
+    getLocalPreparationToken:async()=>preparationToken?preparationToken():'test-preparation',
+    prepareLocalEventData:async(...args)=>{if(prepare)await prepare(...args);stored={...structuredClone(args[0]),dataReady:true};},
     clearLocalEvent:async()=>{stored=null;},
     getTicket:async()=>localTicket,getReceptionRecord:async()=>null,getPendingSyncItems:async()=>[],getPendingReceptionErrorLogs:async()=>errors.filter(error=>!syncedErrors.has(error.errorId)),
     saveReceptionTransaction:async(...args)=>{writes.push(args);return saveReception(...args);},
@@ -210,4 +211,107 @@ test('rapid duplicate authentication clicks keep the owning preparation busy and
   assert.ok(busy);assert.equal(busy.props.disabled,true);
   await act(async()=>pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();assert.match(h.text(),/受付準備完了/);
  }finally{pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()]});await h.flush();await h.close();}
+});
+
+test('a code lookup cannot replace the QR scanner after leaving the code form',async()=>{
+ const pending=deferred(),h=await harness({tokenRead:()=>pending.promise});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('コードで連携する');
+  await act(async()=>h.renderer.root.findByProps({placeholder:'管理アプリに表示されたコード'}).props.onChange({target:{value:'old-token'}}));
+  await h.click('コードで連携');await h.click('イベントデータQRを読み取る');
+  await act(async()=>pending.resolve({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Old code result',dataVersion:1,authToken:'old-token'}));await h.flush();
+  assert.equal(h.renderer.root.findAllByType(h.Scanner).length,1,'the chosen scanner must stay open');
+  assert.doesNotMatch(h.text(),/Old code result/);
+ }finally{pending.resolve(null);await h.flush();await h.close();}
+});
+
+test('an abandoned code lookup cannot unlock a newer QR event preparation',async()=>{
+ const pending=deferred(),download=deferred(),h=await harness({tokenRead:()=>pending.promise,download:()=>download.promise});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('コードで連携する');
+  await act(async()=>h.renderer.root.findByProps({placeholder:'管理アプリに表示されたコード'}).props.onChange({target:{value:'old-token'}}));
+  await h.click('コードで連携');await h.click('イベントデータQRを読み取る');
+  const auth=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Chosen QR event',dataVersion:1,authToken:'new-token'}));await act(async()=>auth.operation);
+  await h.click('このイベントで認証');
+  assert.match(h.text(),/イベントデータを準備中/,'leaving the code form must release its own busy state');
+  await act(async()=>pending.resolve({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Old code result',dataVersion:1,authToken:'old-token'}));await h.flush();
+  assert.match(h.text(),/Chosen QR event/);assert.doesNotMatch(h.text(),/Old code result/);
+  const busy=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='イベントデータを準備中…');assert.ok(busy);assert.equal(busy.props.disabled,true);
+  await act(async()=>download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();assert.match(h.text(),/受付準備完了/);
+ }finally{pending.resolve(null);download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]});await h.flush();await h.close();}
+});
+
+test('duplicate code submission starts only one lookup and preserves the pending state',async()=>{
+ const pending=deferred();let reads=0;const h=await harness({tokenRead:()=>{reads++;return pending.promise;}});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('コードで連携する');
+  await act(async()=>h.renderer.root.findByProps({placeholder:'管理アプリに表示されたコード'}).props.onChange({target:{value:'token'}}));
+  const submit=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='コードで連携').props.onClick;
+  await act(async()=>{submit();submit();});await h.flush();assert.equal(reads,1);
+  assert.equal(h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='確認中…').props.disabled,true);
+  await act(async()=>pending.resolve({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Code event',dataVersion:1,authToken:'token'}));await h.flush();assert.match(h.text(),/Code event/);
+ }finally{pending.resolve(null);await h.flush();await h.close();}
+});
+
+test('a cancelled code lookup permission error cannot revoke the current QR session',async()=>{
+ const pending=deferred(),h=await harness({tokenRead:()=>pending.promise});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('コードで連携する');
+  await act(async()=>h.renderer.root.findByProps({placeholder:'管理アプリに表示されたコード'}).props.onChange({target:{value:'old-token'}}));
+  await h.click('コードで連携');await h.click('イベントデータQRを読み取る');
+  await act(async()=>pending.reject(Object.assign(Error('old denied'),{code:'permission-denied'})));await h.flush();
+  assert.equal(h.renderer.root.findAllByType(h.Scanner).length,1);assert.equal(h.storage.has('qr-ticket-reception-approved'),true);assert.doesNotMatch(h.text(),/受付端末を登録/);
+ }finally{pending.resolve(null);await h.flush();await h.close();}
+});
+
+for(const route of ['confirmation','communication','automatic'])test('the '+route+' inventory download captures local history before downloading and rejects a changed preparation',async()=>{
+ const pending=deferred(),prepared=[];let token='before-download';
+ const updated=makeEvent();updated.event.dataVersion=2;
+ const downloaded={localEvent:updated,tickets:[makeTicket()],authPayload:{authToken:'new-token'}};
+ const h=await harness({preparationToken:()=>token,prepare:async(_event,_tickets,expected)=>{prepared.push(expected);if(expected!==token)throw Error('LOCAL_EVENT_CHANGED');},download:()=>pending.promise,automaticDownload:()=>pending.promise});
+ try{
+  if(route==='automatic'){h.setMetadata({...makeEvent().event,dataVersion:2});await h.poll();}
+  else{
+   await h.click('イベントQRを読み直す');
+   if(route==='communication'){await h.click('戻る');await h.click('通信でイベントデータを受信');}
+   else{const auth=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Updated event',dataVersion:2,authToken:'new-token'}));await act(async()=>auth.operation);await h.click('このイベントで認証');}
+  }
+  token='receipt-accepted-during-download';
+  await act(async()=>pending.resolve(downloaded));await h.flush();
+  assert.deepEqual(prepared,['before-download'],'the original token must accompany the eventual database preparation');
+  assert.equal(h.stored().event.dataVersion,1,'changed local history must keep the older inventory intact');
+  if(route!=='automatic')assert.match(h.text(),/受付.*更新|更新.*受付/);
+ }finally{pending.resolve(downloaded);await h.flush();await h.close();}
+});
+
+test('a cancelled manual download never starts after a delayed preparation token',async()=>{
+ const token=deferred();let downloads=0;
+ const h=await harness({preparationToken:()=>token.promise,automaticDownload:async()=>{downloads++;return {localEvent:makeEvent(),tickets:[makeTicket()],authPayload:{authToken:'token'}};}});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('通信でイベントデータを受信');await h.click('イベントデータQRを読み取る');
+  await act(async()=>token.resolve('before-download'));await h.flush();
+  assert.equal(downloads,0);assert.equal(h.renderer.root.findAllByType(h.Scanner).length,1);
+ }finally{token.resolve('before-download');await h.flush();await h.close();}
+});
+
+for(const failure of [false,true])test('an abandoned manual download '+(failure?'permission error':'response')+' cannot replace the chosen scanner or revoke approval',async()=>{
+ const pending=deferred(),prepared=[];
+ const h=await harness({automaticDownload:()=>pending.promise,prepare:async(...args)=>prepared.push(args)});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('通信でイベントデータを受信');await h.click('イベントデータQRを読み取る');
+  await act(async()=>failure?pending.reject(Object.assign(Error('old denied'),{code:'permission-denied'})):pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()],authPayload:{authToken:'token'}}));await h.flush();
+  assert.equal(prepared.length,0);assert.equal(h.renderer.root.findAllByType(h.Scanner).length,1);assert.equal(h.storage.has('qr-ticket-reception-approved'),true);
+ }finally{pending.resolve(null);await h.flush();await h.close();}
+});
+
+test('an abandoned manual download cannot unlock a newer QR preparation',async()=>{
+ const pending=deferred(),download=deferred();
+ const h=await harness({automaticDownload:()=>pending.promise,download:()=>download.promise});
+ try{
+  await h.click('イベントQRを読み直す');await h.click('戻る');await h.click('通信でイベントデータを受信');await h.click('イベントデータQRを読み取る');
+  const auth=await h.beginScan(JSON.stringify({type:'qr-ticket-event-auth',eventId:'event-one',eventName:'Chosen QR event',dataVersion:1,authToken:'new-token'}));await act(async()=>auth.operation);await h.click('このイベントで認証');
+  await act(async()=>pending.resolve({localEvent:makeEvent(),tickets:[makeTicket()],authPayload:{authToken:'old-token'}}));await h.flush();
+  assert.match(h.text(),/Chosen QR event/);const busy=h.renderer.root.findAllByType('button').find(n=>n.children.join('')==='イベントデータを準備中…');assert.ok(busy);assert.equal(busy.props.disabled,true);
+  await act(async()=>download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]}));await h.flush();assert.match(h.text(),/受付準備完了/);
+ }finally{pending.resolve(null);download.resolve({localEvent:makeEvent(),tickets:[makeTicket()]});await h.flush();await h.close();}
 });

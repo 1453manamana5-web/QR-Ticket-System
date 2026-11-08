@@ -140,7 +140,34 @@ export async function loadLocalEvent(validateInventory=false): Promise<LocalEven
   }finally{database.close();}
 }
 
-export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[]): Promise<void> {
+function preparationToken(events: LocalEventData[], queue: SyncQueueItem[]): string {
+  // Compare identities and receipt acknowledgement, not wall-clock timestamps.
+  // A retry changes no accepted data and must not invalidate an in-flight read.
+  return JSON.stringify({
+    events: events.map(item => ({event: item.event, settings: item.settings,
+      terminalId: item.terminalId, authenticatedAt: item.authenticatedAt,
+      ticketCount: item.ticketCount, dataReady: item.dataReady})),
+    receipts: queue.map(item => [item.recordId, item.sequence ?? null, item.status === "synced"]),
+  });
+}
+
+export async function getLocalPreparationToken(): Promise<string> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const transaction = database.transaction([STORES.event, STORES.syncQueue], "readonly");
+      const events = transaction.objectStore(STORES.event).getAll();
+      const queue = transaction.objectStore(STORES.syncQueue).getAll();
+      transaction.oncomplete = () => resolve(preparationToken(events.result as LocalEventData[], queue.result as SyncQueueItem[]));
+      transaction.onerror = () => reject(transaction.error ?? new Error("端末内の受付状態を確認できませんでした"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("端末内の受付状態の確認が中断されました"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function prepareLocalEventData(event: LocalEventData, tickets: Ticket[], expectedToken?: string): Promise<void> {
   const eventId = event.event.eventId;
   const ticketIds = new Set<string>();
 
@@ -188,6 +215,11 @@ export async function prepareLocalEventData(event: LocalEventData, tickets: Tick
       // Refresh inventory without rolling back locally accepted, unsent scans.
       const queueRequest = transaction.objectStore(STORES.syncQueue).getAll();
       queueRequest.onsuccess = () => {
+        if (expectedToken !== undefined && expectedToken !== preparationToken(
+          currentEventRequest.result as LocalEventData[], queueRequest.result as SyncQueueItem[]
+        )) {
+          abort("LOCAL_EVENT_CHANGED");return;
+        }
         const pendingQueue = (queueRequest.result as SyncQueueItem[]).filter(item => item.status !== "synced");
         const pendingIds = new Set(pendingQueue.map(item => item.recordId));
         const sequences = new Map(pendingQueue.map(item => [item.recordId, item.sequence]));

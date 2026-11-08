@@ -376,6 +376,7 @@ async function readOwnTerminalState(): Promise<OwnTerminalState> {
   const applications = await readTerminalQuery(query(
     collection(db, "terminalApplications"),
     where("requestedByUid", "==", uid),
+    where("status", "==", "pending"),
     limit(5),
   ));
   const pending = applications.docs.find(item => item.data().status === "pending");
@@ -431,7 +432,7 @@ export async function requestTerminalRegistration(input: { terminalId: string; n
   if (!/^T-[A-Za-z0-9-]{8,40}$/.test(terminalId) || !name || name.length > 80) {
     throw new Error("INVALID_TERMINAL_APPLICATION");
   }
-  const existing = await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), limit(5)));
+  const existing = await getDocs(query(collection(db, "terminalApplications"), where("requestedByUid", "==", uid), where("status", "==", "pending"), limit(5)));
   if (existing.docs.some(item => item.data().status === "pending")) throw new Error("TERMINAL_APPLICATION_ALREADY_PENDING");
   const now = new Date().toISOString();
   const batch = writeBatch(db);

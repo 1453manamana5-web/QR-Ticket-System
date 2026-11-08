@@ -137,7 +137,9 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
             const normalizedValue=decodedText.trim();
             if(!normalizedValue)return;
 
-            const now=Date.now();
+            // Duplicate suppression measures elapsed time. Wall-clock changes
+            // must neither lock a ticket out nor accept a continuously held QR.
+            const now=performance.now();
             const previousSeenAt=lastHandledSeenAt;
             if(normalizedValue===lastDecodedText)lastHandledSeenAt=now;
             if(scanLocked)return;
