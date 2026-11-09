@@ -43,3 +43,6 @@ jobs:
         run: npm run build
       - name: Browser injection and framing attack tests
         run: npm run test:security:browser
+
+      - name: Ticket design sync and printed number appearance
+        run: npm run test:ticket:browser

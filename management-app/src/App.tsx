@@ -2210,6 +2210,7 @@ export default function App({practice=false}:AppProps={}) {
       <SurfacePresence>{ticketDesignModalOpen && <TicketDesigner
         key={event.eventId}
         eventId={event.eventId}
+        subscribeSharedDesign={!practice&&typeof liveData.subscribeTicketDesign==="function"?(onDesign,onError)=>liveData.subscribeTicketDesign(event.eventId,onDesign,onError):undefined}
         loadSharedDesign={!practice&&typeof liveData.loadTicketDesign==="function"?()=>liveData.loadTicketDesign(event.eventId):undefined}
         saveSharedDesign={!practice&&typeof liveData.saveTicketDesign==="function"?value=>liveData.saveTicketDesign(event.eventId,value):undefined}
         initialReserveOpen={ticketDesignReserveOpen}
@@ -2238,7 +2239,8 @@ export default function App({practice=false}:AppProps={}) {
             <div><small>TICKET QR CODE</small><h2>チケットQRコード</h2></div>
           </div>
           <TicketQrPreview
-            loadSharedDesign={!practice&&typeof liveData.loadTicketDesign==="function"?()=>liveData.loadTicketDesign(event.eventId):undefined}
+            subscribeSharedDesign={!practice&&typeof liveData.subscribeTicketDesign==="function"?(onDesign,onError)=>liveData.subscribeTicketDesign(event.eventId,onDesign,onError):undefined}
+        loadSharedDesign={!practice&&typeof liveData.loadTicketDesign==="function"?()=>liveData.loadTicketDesign(event.eventId):undefined}
             practice={practice}
             eventId={event.eventId}
             eventName={event.eventName}

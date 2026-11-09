@@ -651,7 +651,7 @@
 
 @media print {
   @page {
-    size: auto;
+    size: A4 portrait;
     margin: 8mm;
   }
 
@@ -2795,10 +2795,10 @@
     display: flex !important;
     flex-flow: row nowrap !important;
     align-items: flex-start !important;
-    gap: var(--ticket-print-gap, 4mm) !important;
+    gap: var(--ticket-print-gap, 0mm) !important;
     width: max-content !important;
     max-width: 100% !important;
-    margin: 0 0 var(--ticket-print-gap, 4mm) !important;
+    margin: 0 0 var(--ticket-print-gap, 0mm) !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     -webkit-column-break-inside: avoid !important;

@@ -72,3 +72,37 @@ test('reserve printing refreshes its template from the current design and preser
  current={...current,pending:{id:'already-printing',ids:['T501']}};
  await act(async()=>refresh());assert.equal(builds,1,'an already pending batch keeps its original print template');await act(async()=>r.unmount());
 });
+
+
+test('saving updates an already open second editor and QR preview without reopening',async()=>{
+ let value=JSON.stringify({title:'Before',numberSize:20,textReferenceWidth:400});const listeners=new Set();
+ const subscribe=(next)=>{listeners.add(next);next(value);return()=>listeners.delete(next);};
+ const save=async next=>{value=next;for(const listener of listeners)listener(next);};
+ const first=new Map(),second=new Map(),mod1=designerModule(first),mod2=designerModule(second);let a,b,qr;
+ const props={eventId:'live',eventName:'E',tickets:ticketList.map(t=>({...t,reserve:false})),qrValue:t=>t.id,onClose(){},subscribeSharedDesign:subscribe,saveSharedDesign:save};
+ await act(async()=>{a=create(React.createElement(mod1.default,props));b=create(React.createElement(mod2.default,props));qr=create(React.createElement(mod2.TicketQrPreview,{eventId:'live',eventName:'E',ticketNumber:'501',qrValue:'T501',subscribeSharedDesign:subscribe}));});
+ await act(async()=>button(a,'T文字').props.onClick());await act(async()=>a.root.findByProps({'aria-label':'イベント名の文字'}).props.onChange({target:{value:'After save'}}));
+ await act(async()=>button(a,'＃番号').props.onClick());await act(async()=>a.root.findByProps({'aria-label':'選択パーツのサイズ'}).props.onChange({target:{value:'48'}}));
+ await act(async()=>button(a,'保存').props.onClick());
+ assert.ok(JSON.stringify(b.toJSON()).includes('After save'));assert.ok(JSON.stringify(qr.toJSON()).includes('After save'));
+ assert.equal(JSON.parse(second.get('qr-management-ticket-design-id-live')).numberSize,48);
+ assert.equal(b.root.findAllByProps({className:'ticket-print-card'})[0].findByProps({className:'ticket-design-number'}).props.style.fontSize,'10.8mm');
+ await act(async()=>{a.unmount();b.unmount();qr.unmount();});assert.equal(listeners.size,0);
+});
+test('a subscribed remote save preserves an unsaved draft and offers the shared revision',async()=>{
+ let notify;const mod=designerModule(new Map());let r;
+ await act(async()=>{r=create(React.createElement(mod.default,{eventId:'conflict',eventName:'E',tickets:ticketList,qrValue:t=>t.id,onClose(){},subscribeSharedDesign:next=>{notify=next;next(JSON.stringify({title:'Before'}));return()=>{};}}));});
+ await act(async()=>button(r,'T文字').props.onClick());await act(async()=>r.root.findByProps({'aria-label':'イベント名の文字'}).props.onChange({target:{value:'Unsaved draft'}}));
+ await act(async()=>notify(JSON.stringify({title:'Remote revision',numberSize:48,textReferenceWidth:400})));
+ assert.ok(JSON.stringify(r.toJSON()).includes('Unsaved draft'));await act(async()=>button(r,'他端末の保存内容を読み込む').props.onClick());
+ assert.ok(JSON.stringify(r.toJSON()).includes('Remote revision'));assert.ok(!JSON.stringify(r.toJSON()).includes('Unsaved draft'));
+ await act(async()=>r.unmount());
+});
+
+test('a delayed echo of this device own save does not flag its next draft as a remote conflict',async()=>{
+ let notify,saved;const mod=designerModule(new Map());let r;
+ await act(async()=>{r=create(React.createElement(mod.default,{eventId:'echo',eventName:'E',tickets:ticketList,qrValue:t=>t.id,onClose(){},subscribeSharedDesign:next=>{notify=next;next(JSON.stringify({title:'Before'}));return()=>{};},saveSharedDesign:async value=>{saved=value;}}));});
+ await act(async()=>button(r,'T文字').props.onClick());await act(async()=>r.root.findByProps({'aria-label':'イベント名の文字'}).props.onChange({target:{value:'Saved title'}}));await act(async()=>button(r,'保存').props.onClick());
+ await act(async()=>r.root.findByProps({'aria-label':'イベント名の文字'}).props.onChange({target:{value:'Next draft'}}));await act(async()=>notify(saved));
+ assert.ok(JSON.stringify(r.toJSON()).includes('Next draft'));assert.equal(r.root.findAllByType('button').filter(node=>label(node)==='他端末の保存内容を読み込む').length,0);await act(async()=>r.unmount());
+});

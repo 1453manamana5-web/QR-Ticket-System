@@ -9,15 +9,19 @@ export function openReservePrint(packet:ReservePackage,popup:Window){
   if(!packet.pending)throw Error('印刷対象がありません。');
   const ids=new Set(packet.pending.ids),tickets=packet.tickets.filter(t=>ids.has(t.id));
   if(tickets.length!==ids.size)throw Error('印刷対象のデータが不足しています。');
+  const width=Number.parseFloat(/--ticket-print-width\s*:\s*([\d.]+)/.exec(packet.sheetStyle)?.[1]??"90");
+  const height=Number.parseFloat(/--ticket-print-height\s*:\s*([\d.]+)/.exec(packet.sheetStyle)?.[1]??"50.625");
+  if(!Number.isFinite(width)||width<=0||width>194||!Number.isFinite(height)||height<=0||height>281)throw Error('A4の印刷範囲に収まりません。管理画面で予備デザインを保存し直してください。');
+  const columns=Math.max(1,Math.min(packet.columns,Math.floor(194/width)));
   popup.opener=null;
-  const doc=popup.document;doc.open();doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${printContentSecurityPolicy}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><title>予備チケット印刷</title><style>${packet.css}\n.reserve-print-actions{padding:16px;font:16px sans-serif}.reserve-print-actions button{padding:12px;font-size:18px}@media print{.reserve-print-actions{display:none!important}}</style></head><body></body></html>`);
+  const doc=popup.document;doc.open();doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${printContentSecurityPolicy}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><title>予備チケット印刷</title><style>${packet.css}\n@page{size:A4 portrait;margin:8mm}.ticket-print-sheet{--ticket-print-gap:0mm!important}.ticket-print-row{gap:0!important;margin:0!important}.ticket-print-card{margin:0!important}\n.reserve-print-actions{padding:16px;font:16px sans-serif}.reserve-print-actions button{padding:12px;font-size:18px}@media print{.reserve-print-actions{display:none!important}}</style></head><body></body></html>`);
   doc.title=packet.eventName+' - 予備チケット';
   const actions=doc.createElement('nav');actions.className='reserve-print-actions';
   const retry=doc.createElement('button');retry.textContent='印刷する';retry.onclick=()=>popup.print();
   const help=doc.createElement('p');help.textContent='紙が正しく出たら、元の予備印刷画面で「印刷完了して次へ」を押してください。';actions.append(retry,help);doc.body.appendChild(actions);
   const sheet=doc.createElement('div');sheet.className='ticket-print-sheet';sheet.setAttribute('style',packet.sheetStyle);
   tickets.forEach((ticket,i)=>{
-    if(i%packet.columns===0){const row=doc.createElement('div');row.className='ticket-print-row';sheet.appendChild(row);}
+    if(i%columns===0){const row=doc.createElement('div');row.className='ticket-print-row';sheet.appendChild(row);}
     const host=doc.createElement('div');host.innerHTML=packet.template;
     const card=host.querySelector<HTMLElement>('.ticket-print-card'),qr=card?.querySelector('.ticket-design-qr'),number=card?.querySelector('.ticket-design-number');
     if(!card||!qr||!number)throw Error('印刷デザインが不完全です。');

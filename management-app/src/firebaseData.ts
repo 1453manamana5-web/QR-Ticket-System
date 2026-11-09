@@ -955,3 +955,15 @@ export async function loadTicketDesign(eventId: string): Promise<string|null> {
   }
   throw new Error("他の端末でデザインが更新されています。開き直してください。");
 }
+
+/** Follow committed design revisions while another management device keeps its editor open. */
+export function subscribeTicketDesign(eventId:string,onDesign:(value:string|null)=>void,onError:(error:unknown)=>void):()=>void {
+  let active=true,generation=0;
+  const stop=onSnapshot(doc(getFirebaseDb(),"events",eventId,"settings","ticketDesign"),{includeMetadataChanges:true},snapshot=>{
+    if(snapshot.metadata.fromCache||snapshot.metadata.hasPendingWrites)return;
+    const current=++generation;
+    if(!snapshot.exists()){onDesign(null);return;}
+    void loadTicketDesign(eventId).then(value=>{if(active&&current===generation)onDesign(value);},error=>{if(active&&current===generation)onError(error);});
+  },error=>{if(active)onError(error);});
+  return()=>{active=false;++generation;stop();};
+}

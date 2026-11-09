@@ -45,6 +45,7 @@ type TicketDesignerProps = {
   qrValue: (ticket: TicketDesignerTicket) => string;
   onClose: () => void;
   loadSharedDesign?: () => Promise<string|null>;
+  subscribeSharedDesign?: (onDesign:(value:string|null)=>void,onError:(error:unknown)=>void)=>()=>void;
   saveSharedDesign?: (serialized:string) => Promise<void>;
 };
 
@@ -109,7 +110,7 @@ type PrintSheetStyle = CSSProperties & {
 };
 
 const TICKET_PRINT_CSS = `
-  @page { size: auto; margin: 8mm; }
+  @page { size: A4 portrait; margin: 8mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #000; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif; }
@@ -128,10 +129,10 @@ const TICKET_PRINT_CSS = `
     display: flex;
     flex-flow: row nowrap;
     align-items: flex-start;
-    gap: var(--ticket-print-gap, 4mm);
+    gap: var(--ticket-print-gap, 0mm);
     width: max-content;
     max-width: 100%;
-    margin: 0 0 var(--ticket-print-gap, 4mm);
+    margin: 0 0 var(--ticket-print-gap, 0mm);
     break-inside: avoid;
     page-break-inside: avoid;
     -webkit-column-break-inside: avoid;
@@ -206,7 +207,7 @@ const defaultSettings: TicketDesignSettings = {
   printWidthMm: 90,
   printHeightMm: 50.625,
   cardsPerRow: 2,
-  printGapMm: 4,
+  printGapMm: 0,
 
   qrX: 76,
   qrY: 50,
@@ -222,6 +223,7 @@ function layerStyle(settings:TicketDesignSettings,id:string):CSSProperties {
   const angle=settings.rotations?.[id]??0;
   return {"--ticket-element-angle":`${Number.isFinite(angle)?angle:0}deg`,zIndex:Math.max(0,order.indexOf(id))+2,transform:`translate(-50%,-50%) rotate(${Number.isFinite(angle)?angle:0}deg)`,transformOrigin:"center center"} as CSSProperties;
 }
+function numberStyle(settings:TicketDesignSettings):CSSProperties{return {...layerStyle(settings,"number"),fontFamily:"Arial, sans-serif",fontWeight:700,fontVariantNumeric:"tabular-nums",letterSpacing:"normal",lineHeight:1.1};}
 function textStyle(settings:TicketDesignSettings):CSSProperties{return {...layerStyle(settings,"title"),color:settings.titleColor??"#162e4a",fontFamily:settings.titleFont??"sans-serif",fontWeight:settings.titleBold===false?400:700};}
 function AddedImages({settings,onSelect,onResize,selected}:{settings:TicketDesignSettings;onSelect?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;onResize?:(id:string,e:React.PointerEvent<HTMLElement>)=>void;selected?:string|null}){
  return <>{(settings.images??[]).map(image=><div key={image.id} className={`studio-image ${onSelect?"ticket-draggable-part":""} ${selected===image.id?"is-selected":""}`} style={{position:"absolute",left:`${image.x}%`,top:`${image.y}%`,width:`${image.width}%`,transform:"translate(-50%,-50%)",...layerStyle(settings,image.id)}} onPointerDown={onSelect?e=>onSelect(image.id,e):undefined}><img src={image.src} alt={image.name} draggable={false} style={{display:"block",width:"100%",height:"auto"}}/>{onResize&&selected===image.id&&!settings.locked?.[image.id]&&<button type="button" className="studio-resize" aria-label="画像をリサイズ" onPointerDown={e=>onResize(image.id,e)}/>}</div>)}</>;
@@ -263,7 +265,7 @@ function PrintableTicket({ticket,settings,value,canvasWidth,immediate=false}:{ti
                     <div
                       className="ticket-design-number"
                       style={{
-                        ...layerStyle(settings,"number"), left: `${settings.numberX}%`,
+                        ...numberStyle(settings), left: `${settings.numberX}%`,
                         top: `${settings.numberY}%`,
                         fontSize: `${settings.numberSize*textMmPerPixel}mm`,
                       }}
@@ -318,6 +320,7 @@ function loadDesignSettings(
         (result as Record<string,unknown>)[key] = defaultSettings[key];
       }
     }
+    result.printGapMm = 0; // Legacy designs also use shared cutting edges.
     result.cardsPerRow = Math.round(Math.max(1,Math.min(4,result.cardsPerRow)));
     if (typeof result.textReferenceWidth !== "number" || !Number.isFinite(result.textReferenceWidth) || result.textReferenceWidth <= 0) delete result.textReferenceWidth;
     if (typeof result.backgroundImage !== "string") result.backgroundImage = "";
@@ -381,7 +384,7 @@ function TicketDesigner({
   initialReserveOpen=false,
   practice=false,
   qrValue,
-  onClose, loadSharedDesign, saveSharedDesign,
+  onClose, loadSharedDesign, saveSharedDesign, subscribeSharedDesign,
 }: TicketDesignerProps) {
   const memoryStorage=useRef(new Map<string,string>());
   const designStorage=practice?{getItem:(key:string)=>memoryStorage.current.get(key)??null,setItem:(key:string,value:string)=>memoryStorage.current.set(key,value),removeItem:(key:string)=>memoryStorage.current.delete(key)}:localStorage;
@@ -441,21 +444,35 @@ function TicketDesigner({
       () => loadDesignSettings(eventName, eventId,designStorage)
     );
   const setSettings:Dispatch<SetStateAction<TicketDesignSettings>>=value=>{dirtyDesign.current=true;setSaved(false);setSettingsState(value);};
-  const sharedCallbacks=useRef({loadSharedDesign,saveSharedDesign});sharedCallbacks.current={loadSharedDesign,saveSharedDesign};
+  const sharedCallbacks=useRef({loadSharedDesign,saveSharedDesign,subscribeSharedDesign});sharedCallbacks.current={loadSharedDesign,saveSharedDesign,subscribeSharedDesign};
+  const [pendingSharedDesign,setPendingSharedDesign]=useState<string|null>(null);
+  const savingDesign=useRef<string|null>(null);
+  const knownSharedDesign=useRef<string|null>(null);
   const printSheetRef=useRef<HTMLDivElement|null>(null);
   useEffect(()=>{
     let active=true;
-    if(practice||!sharedCallbacks.current.loadSharedDesign)return;
+    const callbacks=sharedCallbacks.current;
+    if(practice||(!callbacks.loadSharedDesign&&!callbacks.subscribeSharedDesign))return;
     setSharing(true);
-    void designDeadline(sharedCallbacks.current.loadSharedDesign()).then(value=>{
-      if(!active||dirtyDesign.current||value===null)return;
+    const failed=()=>{if(active){if(!savingDesign.current)setSharing(false);setShareNotice("共有デザインを取得できませんでした。この端末の保存データを表示しています。");}};
+    const timer=setTimeout(failed,5000);
+    const receive=(value:string|null)=>{
+      if(!active)return;
+      clearTimeout(timer);
+      if(value===savingDesign.current&&value!==null)return;
+      if(!savingDesign.current)setSharing(false);
+      if(value===null||value===knownSharedDesign.current)return;
+      if(dirtyDesign.current){setPendingSharedDesign(value);setShareNotice("別の端末でデザインが保存されました。編集中の内容を残しています。");return;}
+      knownSharedDesign.current=value;
       const loaded=loadDesignSettings(eventName,eventId,{getItem:()=>value});
-      setSettingsState(loaded);setShowEditor(Boolean(loaded.backgroundImage||loaded.title||loaded.images?.length));setSaved(true);
+      setSettingsState(loaded);setShowEditor(Boolean(loaded.backgroundImage||loaded.title||loaded.images?.length));setSaved(true);setPendingSharedDesign(null);
       try{designStorage.setItem(createDesignStorageKey(eventName,eventId),value);}catch{}
-      setShareNotice("共有デザインを読み込みました。");
-    }).catch(()=>{if(active)setShareNotice("共有デザインを取得できませんでした。この端末の保存データを表示しています。");})
-      .finally(()=>{if(active)setSharing(false);});
-    return()=>{active=false;};
+      setShareNotice("他の管理端末と同じデザインを表示しています。");
+    };
+    const failedRead=()=>{clearTimeout(timer);failed();};
+    const stop=callbacks.subscribeSharedDesign?.(receive,failedRead);
+    if(!stop&&callbacks.loadSharedDesign)void callbacks.loadSharedDesign().then(receive,failedRead);
+    return()=>{active=false;clearTimeout(timer);stop?.();};
   },[eventId,practice]);
   const settingsRef=useRef(settings);
   settingsRef.current=settings;
@@ -607,6 +624,10 @@ function TicketDesigner({
       ? Math.max(10, settings.printHeightMm || safePrintWidth * (ratio.height / ratio.width))
       : safePrintWidth * (ratio.height / ratio.width);
 
+  // A4 portrait minus the 8 mm printer-safe margin on each side.
+  const printColumns=Math.max(1,Math.min(Math.round(settings.cardsPerRow),4,Math.floor(194/safePrintWidth)));
+  const printFitError=safePrintWidth>194||printHeightMm>281?"A4の印刷範囲に収まりません。幅194mm・高さ281mm以内にしてください。":"";
+
   const selectedTickets =
     useMemo(() => {
       if (
@@ -669,10 +690,7 @@ function TicketDesigner({
       `${printHeightMm}mm`,
 
     "--ticket-print-gap":
-      `${Math.max(
-        0,
-        settings.printGapMm
-      )}mm`,
+      "0mm",
 
     "--ticket-columns":
       Math.max(
@@ -693,10 +711,7 @@ function TicketDesigner({
       `${printHeightMm}mm`,
 
     "--ticket-print-gap":
-      `${Math.max(
-        0,
-        settings.printGapMm
-      )}mm`,
+      "0mm",
   };
 
   const handleBackgroundImage = (
@@ -827,18 +842,19 @@ function TicketDesigner({
   };
 
   const saveDesign = async () => {
-    if(sharing)return;
+    if(sharing||savingDesign.current)return;
     const snapshot=settingsRef.current;
     const serialized=JSON.stringify({...snapshot,textReferenceWidth:snapshot.textReferenceWidth??textReferenceWidth});
-    setSharing(true);setShareNotice("");
+    savingDesign.current=serialized;setSharing(true);setShareNotice("");
     try {
       try{designStorage.setItem(createDesignStorageKey(eventName,eventId),serialized);}catch(error){if(practice||!sharedCallbacks.current.saveSharedDesign)throw error;}
       if(!practice&&sharedCallbacks.current.saveSharedDesign)await designDeadline(sharedCallbacks.current.saveSharedDesign(serialized),15000);
+      knownSharedDesign.current=serialized;setPendingSharedDesign(null);
       if(settingsRef.current===snapshot){dirtyDesign.current=false;setSaved(true);}
       setShareNotice(practice||!sharedCallbacks.current.saveSharedDesign?"この端末に保存しました。":"他の管理端末と共有するデザインを保存しました。");
     } catch(error) {
       setSaved(false);setShareNotice("共有保存できませんでした。通信を確認して再度保存してください。"+(error instanceof Error?error.message:""));
-    } finally {setSharing(false);}
+    } finally {savingDesign.current=null;setSharing(false);}
   };
 
   const resetDesign = () => {
@@ -870,6 +886,7 @@ function TicketDesigner({
 
   const prepareReserve=async(ids:string[]):Promise<ReservePackage>=>{
     if(!eventId)throw Error("先にイベントを選択してください。");
+    if(printFitError)throw Error(printFitError);
     if([settings.backgroundImage,...(settings.images??[]).map(i=>i.src)].some(src=>src&&!src.startsWith('data:image/')))throw Error("背景や追加画像をファイルから読み込み直してください。端末へ保存できる画像が必要です。");
     const selected=ids.map(id=>tickets.find(t=>t.id===id));
     if(selected.some(t=>!t||!t.valid||t.status!=="unused"))throw Error("予備に指定できないチケットがあります。");
@@ -886,11 +903,12 @@ function TicketDesigner({
       if(i%20===19)await new Promise(resolve=>setTimeout(resolve,0));
     }
     return {eventId,eventName,preparedAt:new Date().toISOString(),template:card.outerHTML,css:TICKET_PRINT_CSS,
-      sheetStyle:Object.entries(printSheetStyle).map(([key,value])=>`${key}:${value}`).join(';'),columns:Math.max(1,Math.min(4,settings.cardsPerRow)),tickets:entries,confirmed:[],pending:null};
+      sheetStyle:Object.entries(printSheetStyle).map(([key,value])=>`${key}:${value}`).join(';'),columns:printColumns,tickets:entries,confirmed:[],pending:null};
   };
 
   const printTickets = () => {
     if(sharing)return;
+    if(printFitError){alert(printFitError);return;}
     if(practice){alert("練習：印刷する操作を確認しました。本番では印刷プレビューで枚数と用紙を確認してください。");return;}
     if(!reserveReady){alert(reserveNotice||"予備の印刷設定を確認しています。少し待ってから印刷してください。");return;}
     if (selectedTickets.length === 0) {
@@ -1067,12 +1085,12 @@ function TicketDesigner({
     <div className="ticket-designer-background ticket-designer-glass ticket-studio">
       <section className="ticket-designer-window" role="dialog" aria-modal="true" aria-label="チケットデザイン">
         <header className="studio-header"><div><strong>チケットデザイン</strong><span>{eventName}</span></div>
-          <nav>{shareNotice&&<span role="status">{shareNotice}</span>}<span className="studio-save-state">{saved?"✓ 保存済み":"編集中"}</span>
+          <nav>{shareNotice&&<span role="status">{shareNotice}</span>}{pendingSharedDesign&&<button type="button" onClick={()=>{checkpoint();dirtyDesign.current=false;knownSharedDesign.current=pendingSharedDesign;const loaded=loadDesignSettings(eventName,eventId,{getItem:()=>pendingSharedDesign});setSettingsState(loaded);setSaved(true);try{designStorage.setItem(createDesignStorageKey(eventName,eventId),pendingSharedDesign);}catch{}setPendingSharedDesign(null);setShareNotice("他の管理端末の保存内容を読み込みました。");}}>他端末の保存内容を読み込む</button>}<span className="studio-save-state">{saved?"✓ 保存済み":"編集中"}</span>
           <button type="button" disabled={!undo.current.length} onClick={()=>restore(undo,redo)} aria-label="元に戻す">↶</button>
           <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
           <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
           <button type="button" className="studio-primary" onClick={saveDesign} disabled={sharing}>{sharing?"共有データ確認中…":"保存"}</button>
-          <button type="button" onClick={printTickets} disabled={sharing}>印刷</button><button type="button" disabled={!eventId||sharing} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
+          <button type="button" onClick={printTickets} disabled={sharing||Boolean(printFitError)}>印刷</button><button type="button" disabled={!eventId||sharing} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
           <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
         <main className="studio-workspace">
@@ -1104,7 +1122,7 @@ function TicketDesigner({
                 {!settings.backgroundImage&&<div className="studio-paper-placeholder"><span>TICKET</span><small>{eventName}</small></div>}
                 {settings.title&&<div className={`ticket-design-title ticket-draggable-part ${titleSelected?"is-selected":""}`} style={{...textStyle(settings),left:`${settings.titleX??32}%`,top:`${settings.titleY??30}%`,fontSize:`${(settings.titleSize??28)*editorTextScale}px`}} onPointerDown={e=>movePart("title",e)}>{settings.title}{titleSelected&&<button className="studio-resize" aria-label="文字をリサイズ" onPointerDown={e=>resizePart("title",e)}/>}</div>}
                 <div className={`ticket-design-qr ticket-draggable-part ${selectedPart==="qr"?"is-selected":""}`} style={{...layerStyle(settings,"qr"),left:`${settings.qrX}%`,top:`${settings.qrY}%`,width:`${settings.qrSize}%`}} onPointerDown={e=>movePart("qr",e)}><LazyQrCode value={previewTicket?qrValue(previewTicket):""} size={500} level="M" marginSize={1}/>{selectedPart==="qr"&&<button className="studio-resize" aria-label="QRをリサイズ" onPointerDown={e=>resizePart("qr",e)}/>}</div>
-                <div className={`ticket-design-number ticket-draggable-part ${selectedPart==="number"?"is-selected":""}`} style={{...layerStyle(settings,"number"),left:`${settings.numberX}%`,top:`${settings.numberY}%`,fontSize:`${settings.numberSize*editorTextScale}px`}} onPointerDown={e=>movePart("number",e)}>{previewTicket?.qrNumber}{selectedPart==="number"&&<button className="studio-resize" aria-label="番号をリサイズ" onPointerDown={e=>resizePart("number",e)}/>}</div>
+                <div className={`ticket-design-number ticket-draggable-part ${selectedPart==="number"?"is-selected":""}`} style={{...numberStyle(settings),left:`${settings.numberX}%`,top:`${settings.numberY}%`,fontSize:`${settings.numberSize*editorTextScale}px`}} onPointerDown={e=>movePart("number",e)}>{previewTicket?.qrNumber}{selectedPart==="number"&&<button className="studio-resize" aria-label="番号をリサイズ" onPointerDown={e=>resizePart("number",e)}/>}</div>
               </div>
             </div>
             <div className="studio-zoom"><button type="button" aria-label="縮小" onClick={()=>setPreviewZoom(z=>Math.max(.5,z-.1))}>−</button><span>{Math.round(previewZoom*100)}%</span><button type="button" aria-label="拡大" onClick={()=>setPreviewZoom(z=>Math.min(3,z+.1))}>＋</button><button type="button" onClick={()=>{setPreviewZoom(1);setPreviewPan({x:0,y:0});}}>画面に合わせる</button></div>
@@ -1255,11 +1273,11 @@ function TicketDesigner({
                   <input
                     type="number"
                     min={sizeUnit === "cm" ? "3" : "30"}
-                    max={sizeUnit === "cm" ? "25" : "250"}
+                    max={sizeUnit === "cm" ? "19.4" : "194"}
                     step={sizeUnit === "cm" ? "0.1" : "1"}
                     value={Number((settings.printWidthMm / (sizeUnit === "cm" ? 10 : 1)).toFixed(2))}
                     onChange={(event) => {
-                      const next = Math.max(30, Math.min(250, Number(event.target.value) * (sizeUnit === "cm" ? 10 : 1)));
+                      const next = Math.max(30, Math.min(194, Number(event.target.value) * (sizeUnit === "cm" ? 10 : 1)));
                       updateSetting("printWidthMm", next);
                       if (settings.cardRatio === "custom") setSettings(current => ({ ...current, customWidth: next, customHeight: current.printHeightMm }));
                     }}
@@ -1505,35 +1523,7 @@ function TicketDesigner({
                 </select>
               </label>
 
-              <label className="ticket-number-setting">
-                チケット間の余白
-
-                <input
-                  type="number"
-                  min="0"
-                  max="20"
-                  step="1"
-                  value={
-                    settings.printGapMm
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    updateSetting(
-                      "printGapMm",
-                      Math.max(
-                        0,
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    )
-                  }
-                />
-
-                <span>mm</span>
-              </label>
+              <p>チケット同士の余白は0mmです。A4の印刷範囲に収まる枚数で横に並べます。</p>
             </div>
 <div className="studio-reset"><button type="button" onClick={resetDesign}>初期状態に戻す</button></div></div></FloatingPanel>}
           {panels.includes("range")&&<FloatingPanel title="チケット一覧・印刷範囲" className="studio-inventory" onClose={()=>closePanel("range")} offset={56}><div className="ticket-print-range"><div className="studio-thumbnails">{printableTickets.slice(Math.max(0,startIndex-2),Math.max(0,startIndex-2)+12).map(ticket=><button type="button" key={ticket.id} aria-label={`チケット ${ticket.qrNumber} を表示`} onClick={()=>{const index=printableTickets.indexOf(ticket);setStartIndex(index);if(endIndex<index)setEndIndex(index);}} style={{backgroundImage:settings.backgroundImage?`url("${settings.backgroundImage}")`:undefined}}><span>{ticket.qrNumber}</span></button>)}</div><div className="ticket-range-inputs">
@@ -1651,7 +1641,7 @@ function TicketDesigner({
                 </span>
               </div>
 </div></FloatingPanel>}
-          <div className="studio-status">{reservedIds.length>0&&<span>通常印刷から予備 {reservedIds.length}枚を除外</span>}{reserveNotice&&<span role="alert">{reserveNotice}</span>}<span>{safePrintWidth.toFixed(1)} × {printHeightMm.toFixed(1)} mm</span><span>印刷対象 {selectedTickets.length}枚</span></div>
+          <div className="studio-status">{printFitError&&<span role="alert">{printFitError}</span>}<span>A4縦・チケット間隔0mm・横{printColumns}枚</span>{reservedIds.length>0&&<span>通常印刷から予備 {reservedIds.length}枚を除外</span>}{reserveNotice&&<span role="alert">{reserveNotice}</span>}<span>{safePrintWidth.toFixed(1)} × {printHeightMm.toFixed(1)} mm</span><span>印刷対象 {selectedTickets.length}枚</span></div>
         </main>
       </section>
 
@@ -1675,7 +1665,7 @@ function TicketDesigner({
       <div className="ticket-design-qr" style={{ ...layerStyle(settings,"qr"), left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
                   <LazyQrCode value={previewTicket ? qrValue(previewTicket) : ""} size={500} level="M" marginSize={1} />
                 </div>
-                <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize/textReferenceWidth*safePrintWidth*(96/25.4)*screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
+                <div className="ticket-design-number" style={{ ...numberStyle(settings), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize/textReferenceWidth*safePrintWidth*(96/25.4)*screenScale}px` }}>{previewTicket?.qrNumber ?? ""}</div>
               </div>
             </div>
             <div className="ticket-screen-calibration">
@@ -1710,15 +1700,15 @@ function TicketDesigner({
           {
             length: Math.ceil(
               selectedTickets.length /
-              Math.max(1, Math.min(4, settings.cardsPerRow))
+              printColumns
             ),
           },
           (_, rowIndex) => (
             <div className="ticket-print-row" key={`print-row-${rowIndex}`}>
               {selectedTickets
                 .slice(
-                  rowIndex * Math.max(1, Math.min(4, settings.cardsPerRow)),
-                  (rowIndex + 1) * Math.max(1, Math.min(4, settings.cardsPerRow))
+                  rowIndex * printColumns,
+                  (rowIndex + 1) * printColumns
                 )
                 .map((ticket) => (
                   <PrintableTicket key={ticket.id} ticket={ticket} settings={settings} canvasWidth={textReferenceWidth} value={qrValue(ticket)} immediate/>
@@ -1733,12 +1723,14 @@ function TicketDesigner({
 
 
 
-export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,practice=false,loadSharedDesign }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string;practice?:boolean;loadSharedDesign?:()=>Promise<string|null> }) {
+export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,practice=false,loadSharedDesign,subscribeSharedDesign }: { eventName: string; eventId?: string; ticketNumber: string; qrValue: string;practice?:boolean;loadSharedDesign?:()=>Promise<string|null>;subscribeSharedDesign?: (onDesign:(value:string|null)=>void,onError:(error:unknown)=>void)=>()=>void }) {
   const [settings,setPreviewSettings]=useState(()=>practice?defaultSettings:loadDesignSettings(eventName,eventId));
   useEffect(()=>{let active=true;
     setPreviewSettings(practice?defaultSettings:loadDesignSettings(eventName,eventId));
-    if(!practice&&loadSharedDesign)void designDeadline(loadSharedDesign()).then(value=>{if(!active||value===null)return;setPreviewSettings(loadDesignSettings(eventName,eventId,{getItem:()=>value}));try{localStorage.setItem(createDesignStorageKey(eventName,eventId),value);}catch{}}).catch(()=>{});
-    return()=>{active=false;};
+    const receive=(value:string|null)=>{if(!active||value===null)return;setPreviewSettings(loadDesignSettings(eventName,eventId,{getItem:()=>value}));try{localStorage.setItem(createDesignStorageKey(eventName,eventId),value);}catch{}};
+    const stop=!practice?subscribeSharedDesign?.(receive,()=>{}):undefined;
+    if(!practice&&!stop&&loadSharedDesign)void designDeadline(loadSharedDesign()).then(receive).catch(()=>{});
+    return()=>{active=false;stop?.();};
   },[eventId,practice]);
   const cardRef=useRef<HTMLDivElement|null>(null);
   const [width,setWidth]=useState(560);
@@ -1780,7 +1772,7 @@ export function TicketQrPreview({ eventName, eventId, ticketNumber, qrValue,prac
       <div className="ticket-design-qr" style={{ ...layerStyle(settings,"qr"), left: `${settings.qrX}%`, top: `${settings.qrY}%`, width: `${settings.qrSize}%` }}>
         <LazyQrCode value={qrValue} size={500} level="M" marginSize={1} />
       </div>
-      <div className="ticket-design-number" style={{ ...layerStyle(settings,"number"), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize*textScale}px` }}>{ticketNumber}</div>
+      <div className="ticket-design-number" style={{ ...numberStyle(settings), left: `${settings.numberX}%`, top: `${settings.numberY}%`, fontSize: `${settings.numberSize*textScale}px` }}>{ticketNumber}</div>
     </div>
   );
 }

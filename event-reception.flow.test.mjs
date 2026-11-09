@@ -1025,3 +1025,18 @@ test('a multi-chunk restore advances its own revision and remains downloadable b
   assert.equal(downloaded.tickets.length,402);assert.equal(downloaded.localEvent.ticketCount,402);
   assert.equal(downloaded.tickets.find(ticket=>ticket.ticketId==='restored-400').basicInfo.ticketNumber,402);
 });
+
+
+test('committing a design notifies another open management installation',async()=>{
+ const c=clients();await createPublished(c);
+ const secondDb=env.authenticatedContext('flow-manager').firestore();
+ const second=loadClientModule('./management-app/src/firebaseData.ts',secondDb,'flow-manager','T-FLOW-MANAGER');
+ let resolve,reject,stop;const updated=new Promise((yes,no)=>{resolve=yes;reject=no;});
+ const timer=setTimeout(()=>reject(Error('second device did not receive saved design')),10000);
+ try{
+  stop=second.subscribeTicketDesign('flow-event',value=>{if(value&&JSON.parse(value).numberSize===47)resolve(value);},reject);
+  const design=JSON.stringify({title:'Live shared design',numberSize:47,textReferenceWidth:640});
+  await c.management.saveTicketDesign('flow-event',design);
+  assert.equal(await updated,design);
+ }finally{clearTimeout(timer);stop?.();}
+});
