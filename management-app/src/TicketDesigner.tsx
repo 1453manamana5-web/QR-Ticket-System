@@ -1,3 +1,4 @@
+import {preparePrintedArtwork} from "./printArtwork";
 import {printContentSecurityPolicy} from '../../shared/src/browserSecurity';
 import {
   type ChangeEvent,
@@ -931,9 +932,17 @@ function TicketDesigner({
       const printWindow = window.open("", "_blank");
       if (!printWindow) {
         // ポップアップが制限されている環境では従来の印刷方法へフォールバック。
-        window.focus();
-        void document.body.offsetHeight;
-        window.print();
+        const copy=sourceSheet.cloneNode(true) as HTMLElement;
+        document.querySelectorAll('[data-print-copy]').forEach(node=>node.remove());
+        copy.dataset.printCopy='true';Object.assign(copy.style,{display:'block',position:'fixed',left:'-100000px',top:'0',width:'194mm',visibility:'visible'});
+        copy.querySelectorAll<HTMLElement>('.ticket-print-row').forEach(row=>Object.assign(row.style,{display:'flex',flexFlow:'row nowrap',gap:'0',margin:'0'}));
+        copy.querySelectorAll<HTMLElement>('.ticket-print-card').forEach(card=>Object.assign(card.style,{position:'relative',display:'block',flex:'0 0 var(--ticket-print-width)',width:'var(--ticket-print-width)',height:'var(--ticket-print-height)',minWidth:'var(--ticket-print-width)',maxWidth:'var(--ticket-print-width)',minHeight:'var(--ticket-print-height)',maxHeight:'var(--ticket-print-height)',backgroundSize:'contain',backgroundPosition:'center',backgroundRepeat:'no-repeat',overflow:'hidden',margin:'0',padding:'0'}));
+        document.body.appendChild(copy);
+        void preparePrintedArtwork(copy,window).then(()=>{
+          document.body.classList.add('ticket-print-copy-active');
+          window.addEventListener('afterprint',()=>{copy.remove();document.body.classList.remove('ticket-print-copy-active');},{once:true});
+          window.focus();window.print();
+        });
         return;
       }
 
@@ -958,12 +967,15 @@ function TicketDesigner({
       printWindow.document.title = `${eventName || "チケット"} - 印刷`;
       printWindow.document.body.appendChild(sheet);
       printWindow.document.close();
+      const artwork=preparePrintedArtwork(sheet,printWindow);
 
       // loadイベントとreadyStateの両方から呼ばれても、印刷ダイアログは一度だけ開く。
       let printStarted = false;
-      const startPrint = () => {
+      const startPrint = async () => {
         if (printStarted || printWindow.closed) return;
         printStarted = true;
+        await artwork;
+        if(printWindow.closed)return;
         printWindow.focus();
         printWindow.print();
       };
@@ -1523,7 +1535,7 @@ function TicketDesigner({
                 </select>
               </label>
 
-              <p>チケット同士の余白は0mmです。A4の印刷範囲に収まる枚数で横に並べます。</p>
+              <p>チケット同士の余白は0mmです。背景の外側の白帯も、文字やQRを残して詰めます。A4の印刷範囲に収まる枚数で横に並べます。</p>
             </div>
 <div className="studio-reset"><button type="button" onClick={resetDesign}>初期状態に戻す</button></div></div></FloatingPanel>}
           {panels.includes("range")&&<FloatingPanel title="チケット一覧・印刷範囲" className="studio-inventory" onClose={()=>closePanel("range")} offset={56}><div className="ticket-print-range"><div className="studio-thumbnails">{printableTickets.slice(Math.max(0,startIndex-2),Math.max(0,startIndex-2)+12).map(ticket=><button type="button" key={ticket.id} aria-label={`チケット ${ticket.qrNumber} を表示`} onClick={()=>{const index=printableTickets.indexOf(ticket);setStartIndex(index);if(endIndex<index)setEndIndex(index);}} style={{backgroundImage:settings.backgroundImage?`url("${settings.backgroundImage}")`:undefined}}><span>{ticket.qrNumber}</span></button>)}</div><div className="ticket-range-inputs">

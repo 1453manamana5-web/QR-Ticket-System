@@ -36,7 +36,7 @@ test('number glyph proportions match between the editor, actual size and the rea
   await page.locator('.studio-dock').getByRole('button',{name:/番号/}).click();const size=page.getByLabel('選択パーツのサイズ',{exact:true});await size.focus();await size.press('Home');for(let i=0;i<38;i++)await size.press('ArrowRight');assert.equal(await size.inputValue(),'48');
   const editor=await metrics(page.locator('.ticket-design-card > .ticket-design-number'));
   if(process.env.TICKET_SCREENSHOT_DIR)await page.locator('.ticket-design-card').screenshot({path:process.env.TICKET_SCREENSHOT_DIR+'/ticket-editor-'+width+'.png'});
-  const pending=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await pending;await popup.waitForSelector('.ticket-design-number');await popup.emulateMedia({media:'print'});
+  const pending=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await pending;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
   await popup.evaluate(()=>document.fonts.ready);
   const printed=await metrics(popup.locator('.ticket-design-number').first());
   const usedFonts=[];
@@ -70,7 +70,7 @@ test('tickets meet edge to edge and move intact to the next A4 sheet, including 
   design=JSON.stringify({title:'CUT-CHECK',cardRatio:'custom',customWidth:width,customHeight:height,printWidthMm:width,printHeightMm:height,printGapMm:4,cardsPerRow:requested,numberSize:24,textReferenceWidth:400});
   const {context,page}=await open(1440,'?count='+count);
   try{
-   const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await ready;await popup.waitForSelector('.ticket-print-card');await popup.emulateMedia({media:'print'});
+   const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
    const rows=await popup.locator('.ticket-print-row').evaluateAll(rows=>rows.map(row=>({gap:getComputedStyle(row).gap,margin:getComputedStyle(row).marginBottom,cards:[...row.children].map(card=>{const r=card.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})})));
    assert.equal(rows[0].cards.length,columns);
    for(let i=0;i<rows.length;i++){
@@ -92,12 +92,56 @@ test('old offline reserve templates also print without gaps and fit within A4',a
  design=JSON.stringify({title:'RESERVE',printWidthMm:90,cardsPerRow:4,numberSize:24,textReferenceWidth:400});
  const {context,page}=await open(1440,'?count=12');
  try{
-  const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const original=await ready;await original.waitForSelector('.ticket-print-card');
+  const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const original=await ready;await original.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');
   const packet=await original.evaluate(()=>({eventId:'reserve',eventName:'RESERVE',preparedAt:new Date().toISOString(),css:document.querySelector('style').textContent,template:document.querySelector('.ticket-print-card').outerHTML,sheetStyle:document.querySelector('.ticket-print-sheet').getAttribute('style')+';--ticket-print-gap:4mm',columns:4,confirmed:[],pending:{id:'batch',ids:Array.from({length:12},(_,i)=>'T'+i)},tickets:Array.from({length:12},(_,i)=>({id:'T'+i,number:String(i+1).padStart(3,'0'),svg:document.querySelector('.ticket-design-qr').innerHTML}))}));
-  const pending=page.waitForEvent('popup');await page.evaluate(packet=>window.reserveProbe(packet),packet);const popup=await pending;await popup.waitForSelector('.ticket-print-card');await popup.emulateMedia({media:'print'});
+  const pending=page.waitForEvent('popup');await page.evaluate(packet=>window.reserveProbe(packet),packet);const popup=await pending;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
   assert.equal(await popup.locator('.ticket-print-row').count(),6);assert.equal(await popup.locator('.ticket-print-row').first().locator('.ticket-print-card').count(),2);
   const spacing=await popup.locator('.ticket-print-row').evaluateAll(rows=>rows.map(row=>({gap:getComputedStyle(row).gap,margin:getComputedStyle(row).marginBottom})));
   assert.ok(spacing.every(row=>row.gap==='0px'&&row.margin==='0px'));
   const pdf=await popup.pdf({preferCSSPageSize:true});assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,2);
+ }finally{await context.close();}
+});
+
+
+test('the visible background edges meet when the saved card ratio would add white bands',async()=>{
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="400" height="100" fill="#29a6b0"/><path d="M0 0h400v100H0z" fill="none" stroke="#c93232" stroke-width="6"/></svg>';
+ design=JSON.stringify({backgroundImage:'data:image/svg+xml;base64,'+Buffer.from(svg).toString('base64'),title:'FULL ART',titleX:30,titleY:50,titleSize:12,numberSize:18,numberX:30,numberY:60,qrX:76,qrY:50,qrSize:16,textReferenceWidth:400,printWidthMm:90,cardRatio:'16:9',cardsPerRow:2});
+ const {context,page}=await open(1440,'?count=23');
+ try{
+  const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
+  const geometry=await popup.locator('.ticket-print-card').evaluateAll(cards=>cards.map(card=>{
+   const rect=card.getBoundingClientRect(),canvas=card.querySelector('.ticket-print-artwork').getBoundingClientRect();
+   const top=canvas.top+(canvas.height-canvas.width/4)/2,bottom=top+canvas.width/4;
+   const layers=[...card.querySelectorAll('.ticket-design-number,.ticket-design-qr,.ticket-design-title')].map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom};});
+   return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,paintedTop:top,paintedBottom:bottom,layers};
+  }));
+  assert.equal(geometry.length,23);
+  assert.equal(await popup.locator('.ticket-design-number').first().evaluate(el=>el.style.fontSize),'4.05mm');
+  assert.ok(Math.abs(await popup.locator('.ticket-design-qr').first().evaluate(el=>el.getBoundingClientRect().width)-14.4*96/25.4)<.1,'QR physical size is unchanged');
+  for(const card of geometry){
+   assert.ok(Math.abs(card.paintedTop-card.top)<.05);assert.ok(Math.abs(card.paintedBottom-card.bottom)<.05,'no white band between artwork and cutting edge');
+   for(const layer of card.layers)assert.ok(layer.left>=card.left-.1&&layer.right<=card.right+.1&&layer.top>=card.top-.1&&layer.bottom<=card.bottom+.1,'all text and the complete QR stay inside the cut ticket');
+  }
+  assert.ok(Math.abs(geometry[2].paintedTop-geometry[0].paintedBottom)<.05,'adjacent artwork must touch');
+  const pdf=await popup.pdf({preferCSSPageSize:true,printBackground:true,...(process.env.TICKET_PDF_DIR?{path:process.env.TICKET_PDF_DIR+'/artwork-no-bands.pdf'}:{})});
+  assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,1);
+  if(process.env.TICKET_SCREENSHOT_DIR)await popup.locator('.ticket-print-sheet').screenshot({path:process.env.TICKET_SCREENSHOT_DIR+'/artwork-no-bands.png'});
+ }finally{await context.close();}
+});
+
+
+test('packing preserves layers outside the background and also works when popups are blocked',async()=>{
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="400" height="100" fill="#29a6b0"/></svg>';
+ design=JSON.stringify({backgroundImage:'data:image/svg+xml;base64,'+Buffer.from(svg).toString('base64'),title:'KEEP THIS TITLE',titleX:35,titleY:15,titleSize:18,numberSize:18,numberX:30,numberY:60,qrX:76,qrY:50,qrSize:16,textReferenceWidth:400,printWidthMm:90,cardRatio:'16:9',cardsPerRow:2});
+ const {context,page}=await open(1440,'?count=4');
+ try{
+  await page.evaluate(()=>{window.open=()=>null;window.print=()=>{window.fallbackPrints=(window.fallbackPrints||0)+1;};});
+  await page.getByRole('button',{name:'印刷',exact:true}).click();await page.waitForFunction(()=>window.fallbackPrints===1);await page.emulateMedia({media:'print'});
+  const geometry=await page.locator('[data-print-copy] .ticket-print-card').evaluateAll(cards=>cards.map(card=>{
+   const rect=card.getBoundingClientRect();return {top:rect.top,bottom:rect.bottom,layers:[...card.querySelectorAll('.ticket-design-number,.ticket-design-title,.ticket-design-qr')].map(el=>{const r=el.getBoundingClientRect();return {top:r.top,bottom:r.bottom};})};
+  }));
+  assert.equal(geometry.length,4);for(const card of geometry)for(const layer of card.layers)assert.ok(layer.top>=card.top-.1&&layer.bottom<=card.bottom+.1,'keep the title even when it extends beyond the background image');
+  assert.equal(await page.locator('[data-print-copy] [data-artwork-packed]').count(),4);
+  await page.evaluate(()=>dispatchEvent(new Event('afterprint')));assert.equal(await page.locator('[data-print-copy]').count(),0);await page.emulateMedia({media:'screen'});await page.locator('.studio-dock').getByRole('button',{name:/番号/}).click();
  }finally{await context.close();}
 });

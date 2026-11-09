@@ -2810,3 +2810,7 @@
   }
   .ticket-actual-size-overlay { display: none !important; }
 }
+
+@media print {
+  body.ticket-print-copy-active > :not([data-print-copy]) { display:none !important; }
+}

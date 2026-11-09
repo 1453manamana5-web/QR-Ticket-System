@@ -9,6 +9,7 @@ import {act,create} from 'react-test-renderer';
 
 const require=createRequire(import.meta.url),ts=require('typescript');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+const printArtworkModule={};new Function('exports',ts.transpileModule(readFileSync('management-app/src/printArtwork.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(printArtworkModule);
 const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const label=node=>node.children.map(child=>typeof child==='string'?child:label(child)).join('');
@@ -20,14 +21,14 @@ const packet=(eventId='event-a')=>({eventId,eventName:`Event ${eventId}`,prepare
 function reserveModule({store={},globals={}}={}){
   const exports={},source=readFileSync('management-app/src/ReservePrinting.tsx','utf8').replaceAll('import.meta.env.BASE_URL','"/qr-system/control/"');
   const values={navigator:{},window:{},setInterval:()=>0,clearInterval(){},...globals};
-  new Function('exports','require',...Object.keys(values),compile(source))(exports,name=>name==='react'?React:name==='react/jsx-runtime'?require(name):name==='./reservePrintStore'?store:name==='./reservePrintLedger'?{useReservePrintLedger:()=>({unsynced:0})}:{},...Object.values(values));
+  new Function('exports','require',...Object.keys(values),compile(source))(exports,name=>name==='./printArtwork'?printArtworkModule:name==='react'?React:name==='react/jsx-runtime'?require(name):name==='./reservePrintStore'?store:name==='./reservePrintLedger'?{useReservePrintLedger:()=>({unsynced:0})}:{},...Object.values(values));
   return exports;
 }
 
 function designerModule(storage,{globals={},onReserve=()=>{}}={}){
   const exports={};
   const values={localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},window:{confirm:()=>true},alert(){},...globals};
-  new Function('exports','require',...Object.keys(values),compile(readFileSync('management-app/src/TicketDesigner.tsx','utf8')))(exports,name=>name==='react'?React:name==='react/jsx-runtime'||name==='qrcode.react'||name==='react-dom/server'?require(name):name==='./reservePrintStore'?{loadReservePackage:async()=>null}:name==='./ReservePrinting'?{ReserveConfiguration:props=>{onReserve(props);return null;}}:name==='./LazyQrCode'?{default:()=>React.createElement('span',{'data-lazy-qr':true})}:{},...Object.values(values));
+  new Function('exports','require',...Object.keys(values),compile(readFileSync('management-app/src/TicketDesigner.tsx','utf8')))(exports,name=>name==='./printArtwork'?printArtworkModule:name==='react'?React:name==='react/jsx-runtime'||name==='qrcode.react'||name==='react-dom/server'?require(name):name==='./reservePrintStore'?{loadReservePackage:async()=>null}:name==='./ReservePrinting'?{ReserveConfiguration:props=>{onReserve(props);return null;}}:name==='./LazyQrCode'?{default:()=>React.createElement('span',{'data-lazy-qr':true})}:{},...Object.values(values));
   return exports;
 }
 
