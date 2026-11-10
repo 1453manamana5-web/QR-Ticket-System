@@ -437,6 +437,17 @@ export default function App({practice=false}:AppProps={}) {
   const [ticketZoomOrigin,setTicketZoomOrigin]=useState<TicketZoomOrigin|null>(null);
   const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
   const [ticketListOpen, setTicketListOpen] = useState(false);
+  // The dedicated online refresh URL can open the bulk-delete screen directly.
+  // This runs only after a non-finished event has been loaded; registration is unchanged.
+  const bulkTicketDeepLinkPending = useRef(
+    typeof window.location?.search === "string" && new URLSearchParams(window.location.search).get("bulk-delete") === "1"
+  );
+  useEffect(() => {
+    if (!bulkTicketDeepLinkPending.current || !event.eventId || event.eventStatus === "finished") return;
+    bulkTicketDeepLinkPending.current = false;
+    setPage("チケット管理");
+    setTicketListOpen(true);
+  }, [event.eventId, event.eventStatus]);
   const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
   const [ticketBulkDeleting, setTicketBulkDeleting] = useState(false);
   const ticketBulkDeleteRunning = useRef(false);
