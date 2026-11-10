@@ -902,37 +902,6 @@ export default function App({practice=false}:AppProps={}) {
       return matchesQuery && matchesStatus;
     });
   }, [tickets, ticketQuery, ticketStatusFilter]);
-  const selectableFilteredTickets = filteredTickets.filter(ticket => !pendingTicketIds.has(ticket.ticketId));
-  const visibleTicketIds = selectableFilteredTickets.map(ticket => ticket.ticketId);
-  const selectedVisibleCount = visibleTicketIds.filter(id => selectedTicketIds.includes(id)).length;
-  const allVisibleTicketsSelected = visibleTicketIds.length > 0 && selectedVisibleCount === visibleTicketIds.length;
-  useEffect(() => {
-    const validIds = new Set(tickets.map(ticket => ticket.ticketId));
-    setSelectedTicketIds(current => current.filter(id => validIds.has(id)));
-  }, [tickets]);
-  useEffect(() => {
-    setSelectedTicketIds([]);
-    setTicketBulkNotice("");
-  }, [event.eventId]);
-  const toggleTicketSelection = (ticketId: string) => {
-    if (ticketBulkDeleteRunning.current || pendingTicketIds.has(ticketId)) return;
-    setSelectedTicketIds(current => current.includes(ticketId)
-      ? current.filter(id => id !== ticketId)
-      : [...current, ticketId]);
-  };
-  const toggleVisibleTickets = () => {
-    if (ticketBulkDeleteRunning.current) return;
-    setSelectedTicketIds(current => {
-      const selected = new Set(current);
-      if (visibleTicketIds.every(id => selected.has(id))) {
-        visibleTicketIds.forEach(id => selected.delete(id));
-      } else {
-        visibleTicketIds.forEach(id => selected.add(id));
-      }
-      return [...selected];
-    });
-  };
-
   const saveEvent = async () => {
     if (publishing) return;
     if (eventSettingsReady !== event.eventId) { setError("受付設定を読み込んでいます。読み込み完了後にもう一度保存してください。"); return; }
@@ -1140,6 +1109,37 @@ export default function App({practice=false}:AppProps={}) {
   const ticketIssuanceOperation=useRef<object|null>(null);
   const ticketWrites=useRef(new Map<string,object>());
   const [pendingTicketIds,setPendingTicketIds]=useState<Set<string>>(new Set());
+  const selectableFilteredTickets = filteredTickets.filter(ticket => !pendingTicketIds.has(ticket.ticketId));
+  const visibleTicketIds = selectableFilteredTickets.map(ticket => ticket.ticketId);
+  const selectedVisibleCount = visibleTicketIds.filter(id => selectedTicketIds.includes(id)).length;
+  const allVisibleTicketsSelected = visibleTicketIds.length > 0 && selectedVisibleCount === visibleTicketIds.length;
+  useEffect(() => {
+    const validIds = new Set(tickets.map(ticket => ticket.ticketId));
+    setSelectedTicketIds(current => current.filter(id => validIds.has(id)));
+  }, [tickets]);
+  useEffect(() => {
+    setSelectedTicketIds([]);
+    setTicketBulkNotice("");
+  }, [event.eventId]);
+  const toggleTicketSelection = (ticketId: string) => {
+    if (ticketBulkDeleteRunning.current || pendingTicketIds.has(ticketId)) return;
+    setSelectedTicketIds(current => current.includes(ticketId)
+      ? current.filter(id => id !== ticketId)
+      : [...current, ticketId]);
+  };
+  const toggleVisibleTickets = () => {
+    if (ticketBulkDeleteRunning.current) return;
+    setSelectedTicketIds(current => {
+      const selected = new Set(current);
+      if (visibleTicketIds.every(id => selected.has(id))) {
+        visibleTicketIds.forEach(id => selected.delete(id));
+      } else {
+        visibleTicketIds.forEach(id => selected.add(id));
+      }
+      return [...selected];
+    });
+  };
+
   const deleteSelectedTickets = async () => {
     if (ticketBulkDeleteRunning.current || ticketGenerating || !event.eventId) return;
     const ids = selectedTicketIds.filter(id => tickets.some(ticket => ticket.ticketId === id) &&
