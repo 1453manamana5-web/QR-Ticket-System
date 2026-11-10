@@ -766,7 +766,7 @@ test('bulk delete shortcut is visible on the ticket home and opens selection',as
   try{
     await h.nav('チケット管理');
     const shortcut=h.renderer.root.findByProps({className:'ticket-tool-button ticket-tool-bulk-delete'});
-    assert.match(JSON.stringify(shortcut.toJSON()),/チケットをまとめて削除/);
+    assert.match(shortcut.findByType('b').children.join(''),/チケットをまとめて削除/);
     assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,0);
     await act(async()=>shortcut.props.onClick());await h.flush();
     assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,1);
