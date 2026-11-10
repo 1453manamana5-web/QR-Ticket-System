@@ -704,3 +704,59 @@ test('writes to different tickets stay independent while each ticket is protecte
     assert.deepEqual(writes,['TKT000001','TKT000002']);
   }finally{for(const wait of waits)wait.resolve();await h.flush();await h.close();}
 });
+
+test('bulk selection deletes only the checked tickets after confirmation',async()=>{
+  const removed=[],rows=[ticket(),{...ticket(),ticketId:'TKT000002',basicInfo:{ticketNumber:2}},{...ticket(),ticketId:'TKT000003',basicInfo:{ticketNumber:3}}];
+  const h=await harness({subscribeTickets:(id,cb)=>{cb(rows.map(t=>({...t,eventId:id})));return()=>{};},deleteTickets:async(id,ids)=>{removed.push({id,ids});return ids.length;}});
+  try{
+    await openTicketList(h);
+    const check=h.renderer.root.findByProps({'aria-label':'TKT000002を選択'});
+    await act(async()=>check.props.onChange());await h.flush();
+    const bulk=h.renderer.root.findByProps({className:'ticket-bulk-delete-button'});
+    assert.equal(bulk.props.disabled,false);
+    await act(async()=>bulk.props.onClick());await h.flush();
+    assert.deepEqual(removed,[{id:'event-a',ids:['TKT000002']}]);
+    assert.match(h.text(),/1枚のチケットを削除しました/);
+  }finally{await h.close();}
+});
+
+test('visible bulk selection follows the search results and preserves other selections',async()=>{
+  const rows=[ticket(),{...ticket(),ticketId:'TKT000002',basicInfo:{ticketNumber:2}}],removed=[];
+  const h=await harness({subscribeTickets:(id,cb)=>{cb(rows.map(t=>({...t,eventId:id})));return()=>{};},deleteTickets:async(_id,ids)=>{removed.push(ids);return ids.length;}});
+  try{
+    await openTicketList(h);
+    const all=h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'});
+    await act(async()=>all.props.onChange());await h.flush();
+    const search=h.renderer.root.findByProps({placeholder:'QR番号を検索'});
+    await act(async()=>search.props.onChange({target:{value:'TKT000002'}}));await h.flush();
+    assert.equal(h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.checked,true);
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.onChange());await h.flush();
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-bulk-delete-button'}).props.onClick());await h.flush();
+    assert.deepEqual(removed,[['TKT000001']]);
+  }finally{await h.close();}
+});
+
+test('bulk ticket deletion cannot be submitted twice before the first request finishes',async()=>{
+  const wait=ticketDeferred();let calls=0;
+  const h=await harness({deleteTickets:()=>{calls++;return wait.promise;}});
+  try{
+    await openTicketList(h);
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'TKT000001を選択'}).props.onChange());await h.flush();
+    const start=h.renderer.root.findByProps({className:'ticket-bulk-delete-button'}).props.onClick;
+    await act(async()=>{void start();void start();});await h.flush();
+    assert.equal(calls,1);
+    assert.equal(h.renderer.root.findByProps({className:'ticket-bulk-delete-button'}).props.disabled,true);
+    await act(async()=>wait.resolve(1));await h.flush();
+  }finally{wait.resolve(1);await h.flush();await h.close();}
+});
+
+test('bulk deletion failure reports partial deletion risk without announcing success',async()=>{
+  const h=await harness({deleteTickets:async()=>{throw Error('network unavailable');}});
+  try{
+    await openTicketList(h);
+    await act(async()=>h.renderer.root.findByProps({'aria-label':'TKT000001を選択'}).props.onChange());await h.flush();
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-bulk-delete-button'}).props.onClick());await h.flush();
+    assert.match(h.text(),/一部のチケットだけ削除された可能性があります/);
+    assert.doesNotMatch(h.text(),/枚のチケットを削除しました/);
+  }finally{await h.close();}
+});
