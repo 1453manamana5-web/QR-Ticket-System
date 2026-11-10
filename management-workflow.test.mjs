@@ -760,3 +760,28 @@ test('bulk deletion failure reports partial deletion risk without announcing suc
     assert.doesNotMatch(h.text(),/枚のチケットを削除しました/);
   }finally{await h.close();}
 });
+
+test('bulk delete shortcut is visible on the ticket home and opens selection',async()=>{
+  const h=await harness();
+  try{
+    await h.nav('チケット管理');
+    const shortcut=h.renderer.root.findByProps({className:'ticket-tool-button ticket-tool-bulk-delete'});
+    assert.match(JSON.stringify(shortcut.toJSON()),/チケットをまとめて削除/);
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,0);
+    await act(async()=>shortcut.props.onClick());await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,1);
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-row-checkbox'}).length,1);
+  }finally{await h.close();}
+});
+
+test('empty ticket inventories still show bulk controls without enabling deletion',async()=>{
+  const h=await harness({subscribeTickets:(_id,cb)=>{cb([]);return()=>{};}});
+  try{
+    await h.nav('チケット管理');
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-tool-button ticket-tool-bulk-delete'}).props.onClick());await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,1);
+    assert.equal(h.renderer.root.findByProps({className:'ticket-bulk-delete-button'}).props.disabled,true);
+    assert.equal(h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.disabled,true);
+    assert.match(h.text(),/チケットがありません/);
+  }finally{await h.close();}
+});
