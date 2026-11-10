@@ -40,6 +40,7 @@ export function createGuidePractice(){
     appendTickets:async(id:string,items:Ticket[])=>{inventories.set(id,[...getTickets(id),...copy(items)]);emitTickets(id);},
     saveTicket:async(id:string,ticket:Ticket)=>{inventories.set(id,getTickets(id).map(t=>t.ticketId===ticket.ticketId?copy(ticket):t));emitTickets(id);},
     deleteTicket:async(id:string,ticketId:string)=>{inventories.set(id,getTickets(id).filter(t=>t.ticketId!==ticketId));emitTickets(id);},
+    deleteTickets:async(id:string,ticketIds:string[])=>{const selected=new Set(ticketIds);const before=getTickets(id);inventories.set(id,before.filter(t=>!selected.has(t.ticketId)));emitTickets(id);return before.length-getTickets(id).length;},
     deleteEvent:async(id:string)=>{events=events.filter(e=>e.eventId!==id);inventories.delete(id);emitEvents();},
     saveTerminal:async(t:any)=>{terminals=terminals.map(v=>v.terminalId===t.terminalId?copy(t):v);emitTerminals();},
     approveTerminal:async(id:string)=>{terminals=terminals.map(t=>t.terminalId===id?{...t,approved:true,receptionApproved:true,status:'online',lastSeen:now()}:t);emitTerminals();},

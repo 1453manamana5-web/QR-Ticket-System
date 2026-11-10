@@ -254,6 +254,38 @@ export async function saveTicket(eventId: string, ticket: Ticket, fields?: Array
   });
 }
 
+/**
+ * Delete selected tickets without loading or rewriting unrelated tickets.
+ * Each transaction updates the inventory count and published bundle together.
+ * Chunking makes large selections safe under Firestore transaction limits.
+ */
+export async function deleteTickets(eventId: string, ticketIds: string[]): Promise<number> {
+  if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
+  if (!eventId) throw new Error("EVENT_NOT_FOUND");
+  const ids = [...new Set(ticketIds)];
+  if (ids.some(id => !id || id.includes("/"))) throw new Error("INVALID_TICKET_ID");
+  if (ids.length === 0) return 0;
+
+  const db = getFirebaseDb();
+  let deleted = 0;
+  for (let start = 0; start < ids.length; start += 100) {
+    const chunk = ids.slice(start, start + 100);
+    const count = await runTransaction(db, async tx => {
+      const metadata = await readInventoryMetadata(tx, eventId);
+      const refs = chunk.map(id => doc(db, "events", eventId, "tickets", id));
+      // Firestore transactions must finish every read before issuing a write.
+      const snapshots = await Promise.all(refs.map(ref => tx.get(ref)));
+      const existingRefs = refs.filter((_, index) => snapshots[index].exists());
+      if (existingRefs.length === 0) return 0;
+      for (const ref of existingRefs) tx.delete(ref);
+      writeInventoryMetadata(tx, metadata, -existingRefs.length);
+      return existingRefs.length;
+    });
+    deleted += count;
+  }
+  return deleted;
+}
+
 export async function deleteTicket(eventId: string, ticketId: string): Promise<void> {
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
