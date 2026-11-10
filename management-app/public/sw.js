@@ -1,4 +1,4 @@
-const CACHE='qr-ticket-management-shell-v3';
+const CACHE='qr-ticket-management-shell-v4';
 const BASE=new URL('./',self.location.href).pathname;
 const INDEX=new URL('index.html',self.location.href).href;
 async function saveShell(cache,response){

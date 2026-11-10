@@ -5018,3 +5018,16 @@ body:has(.ticket-screen),
 .ticket-bulk-notice{color:#216647}.ticket-bulk-error{color:#b42318}
 .ticket-number-cell strong{min-width:0;overflow-wrap:anywhere}
 @media(max-width:680px){.ticket-bulk-toolbar{padding:0 15px 12px}.ticket-bulk-notice,.ticket-bulk-error{margin:0 15px 12px}.ticket-selection-clear{margin-left:0}}
+
+/* Ticket-home shortcut makes bulk operations discoverable before opening the list. */
+.ticket-tool-bulk-delete{background:linear-gradient(135deg,#fff0f0,#fbd7d8);color:#862c36}
+.ticket-tool-bulk-delete .tool-icon{background:rgba(255,255,255,.68);font-size:24px;font-weight:900;color:#9a3038}
+.ticket-tool-bulk-delete:hover{filter:saturate(1.05)}
+/* Desktop cards have a fixed height: three actions must share one row. */
+@media(min-width:761px){
+  .ticket-operation-buttons{display:grid !important;grid-template-columns:repeat(3,minmax(0,1fr)) !important;align-items:stretch}
+  .ticket-operation-buttons .ticket-tool-bulk-delete{grid-column:auto}
+}
+@media(max-width:760px){
+  .ticket-operation-buttons{display:grid;grid-template-columns:1fr}
+}
