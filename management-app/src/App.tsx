@@ -82,7 +82,7 @@ type AppProps={practice?:boolean};
 export default function App({practice=false}:AppProps={}) {
   const practiceBackend=useMemo(()=>createGuidePractice(),[]);
   const appStorage=practice?practiceBackend.storage:localStorage;
-  const {deleteEvent: deleteFirebaseEvent, deleteMember: deleteFirebaseMember, deleteTicket: deleteFirebaseTicket, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal: approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception: releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets}=practice?practiceBackend.api:liveData;
+  const {deleteEvent: deleteFirebaseEvent, deleteMember: deleteFirebaseMember, deleteTicket: deleteFirebaseTicket, deleteTickets: deleteFirebaseTickets, deleteTerminal, loadAnalysis, loadAppSettings, loadEventReceptionRecords, loadEventTickets, loadNextTicketNumber, loadMembers, loadReceptionErrors, loadReceptionSettings, loadTerminals, getOwnTerminalStatus, requestTerminalRegistration, approveTerminal: approveTerminalOnServer, setManagedTerminalMode, setManagedSubAdmin, revokeManagedReception, releaseOwnReception: releaseOwnReceptionOnServer, saveAnalysis, saveAppSettings, saveManagementTerminalHeartbeat, saveMember, saveReceptionSettings, saveTicket, appendTickets, saveTerminal, subscribeEvents, subscribeReceptionRecords, subscribeTerminals, subscribeTickets}=practice?practiceBackend.api:liveData;
   const {loadPublishedEventBundle,publishEventBundle,saveEventMetadata,saveEventStatus}=practice?practiceBackend.publisher:livePublisher;
 
   const [isOffline,setIsOffline]=useState(()=>navigator.onLine===false);
@@ -437,6 +437,10 @@ export default function App({practice=false}:AppProps={}) {
   const [ticketZoomOrigin,setTicketZoomOrigin]=useState<TicketZoomOrigin|null>(null);
   const [ticketQrModalTicket, setTicketQrModalTicket] = useState<Ticket | null>(null);
   const [ticketListOpen, setTicketListOpen] = useState(false);
+  const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
+  const [ticketBulkDeleting, setTicketBulkDeleting] = useState(false);
+  const ticketBulkDeleteRunning = useRef(false);
+  const [ticketBulkNotice, setTicketBulkNotice] = useState("");
   const [members, setMembers] = useState<Array<{ memberId: string; memberNumber: number; name: string }>>([]);
   const [memberName, setMemberName] = useState("");
   const [memberRegistrationOpen, setMemberRegistrationOpen] = useState(false);
@@ -898,6 +902,36 @@ export default function App({practice=false}:AppProps={}) {
       return matchesQuery && matchesStatus;
     });
   }, [tickets, ticketQuery, ticketStatusFilter]);
+  const selectableFilteredTickets = filteredTickets.filter(ticket => !pendingTicketIds.has(ticket.ticketId));
+  const visibleTicketIds = selectableFilteredTickets.map(ticket => ticket.ticketId);
+  const selectedVisibleCount = visibleTicketIds.filter(id => selectedTicketIds.includes(id)).length;
+  const allVisibleTicketsSelected = visibleTicketIds.length > 0 && selectedVisibleCount === visibleTicketIds.length;
+  useEffect(() => {
+    const validIds = new Set(tickets.map(ticket => ticket.ticketId));
+    setSelectedTicketIds(current => current.filter(id => validIds.has(id)));
+  }, [tickets]);
+  useEffect(() => {
+    setSelectedTicketIds([]);
+    setTicketBulkNotice("");
+  }, [event.eventId]);
+  const toggleTicketSelection = (ticketId: string) => {
+    if (ticketBulkDeleteRunning.current || pendingTicketIds.has(ticketId)) return;
+    setSelectedTicketIds(current => current.includes(ticketId)
+      ? current.filter(id => id !== ticketId)
+      : [...current, ticketId]);
+  };
+  const toggleVisibleTickets = () => {
+    if (ticketBulkDeleteRunning.current) return;
+    setSelectedTicketIds(current => {
+      const selected = new Set(current);
+      if (visibleTicketIds.every(id => selected.has(id))) {
+        visibleTicketIds.forEach(id => selected.delete(id));
+      } else {
+        visibleTicketIds.forEach(id => selected.add(id));
+      }
+      return [...selected];
+    });
+  };
 
   const saveEvent = async () => {
     if (publishing) return;
@@ -1106,12 +1140,48 @@ export default function App({practice=false}:AppProps={}) {
   const ticketIssuanceOperation=useRef<object|null>(null);
   const ticketWrites=useRef(new Map<string,object>());
   const [pendingTicketIds,setPendingTicketIds]=useState<Set<string>>(new Set());
+  const deleteSelectedTickets = async () => {
+    if (ticketBulkDeleteRunning.current || ticketGenerating || !event.eventId) return;
+    const ids = selectedTicketIds.filter(id => tickets.some(ticket => ticket.ticketId === id) &&
+      !pendingTicketIds.has(id) && !ticketWrites.current.has(JSON.stringify([event.eventId, id])));
+    if (!ids.length) return;
+    if (!window.confirm("選択した" + ids.length + "枚のチケットを削除しますか？\n削除するとQRコードは使えなくなります。この操作は元に戻せません。")) return;
+    ticketBulkDeleteRunning.current = true;
+    setTicketBulkDeleting(true);
+    setTicketBulkNotice("");
+    setError("");
+    const eventId = event.eventId;
+    const version = ticketContextVersion.current;
+    const stillCurrent = () => ticketContextVersion.current === version && currentEventId.current === eventId;
+    setPendingTicketIds(current => new Set([...current, ...ids]));
+    try {
+      const count = await deleteFirebaseTickets(eventId, ids);
+      if (stillCurrent()) {
+        setSelectedTicketIds(current => current.filter(id => !ids.includes(id)));
+        setTicketBulkNotice(count + "枚のチケットを削除しました。");
+      }
+    } catch (reason) {
+      console.error("Bulk ticket deletion failed", reason);
+      if (stillCurrent()) setError("一括削除が完了しませんでした。一部のチケットだけ削除された可能性があります。最新の一覧を確認してから、残りのチケットを再選択してください。通信状態とFirestoreの削除権限も確認してください。");
+    } finally {
+      ticketBulkDeleteRunning.current = false;
+      if (stillCurrent()) {
+        setPendingTicketIds(current => {
+          const next = new Set(current);
+          ids.forEach(id => next.delete(id));
+          return next;
+        });
+        setTicketBulkDeleting(false);
+      }
+    }
+  };
   useEffect(()=>{
     ++ticketContextVersion.current;
     ticketIssuanceOperation.current=null;
     ticketWrites.current.clear();
     setTicketGenerating(false);
     setPendingTicketIds(new Set());
+    setTicketBulkDeleting(false);
     return()=>{
       ++ticketContextVersion.current;
       ticketIssuanceOperation.current=null;
@@ -2163,12 +2233,29 @@ export default function App({practice=false}:AppProps={}) {
             </select></div>
             <div className="ticket-list-total">発行済み<strong>{ticketStats.total}</strong>枚 ／ 未印刷予備 {waitingReserveCount}枚</div>
           </div>
+          {tickets.length > 0 && <>
+            <div className="ticket-bulk-toolbar">
+              <label className="ticket-select-all">
+                <input type="checkbox" aria-label="表示中のチケットをすべて選択" checked={allVisibleTicketsSelected} disabled={ticketBulkDeleting || visibleTicketIds.length === 0} onChange={toggleVisibleTickets} />
+                表示中をすべて選択
+              </label>
+              <span className="ticket-selection-count">{selectedTicketIds.length}枚選択中</span>
+              <button className="ticket-selection-clear" disabled={ticketBulkDeleting || selectedTicketIds.length === 0} onClick={() => setSelectedTicketIds([])}>選択解除</button>
+              <button className="ticket-bulk-delete-button" disabled={ticketBulkDeleting || ticketGenerating || selectedTicketIds.length === 0 || selectedTicketIds.some(id => pendingTicketIds.has(id))} onClick={() => void deleteSelectedTickets()}>
+                {ticketBulkDeleting ? "削除中…" : "選択した" + selectedTicketIds.length + "枚を削除"}
+              </button>
+            </div>
+            {ticketBulkNotice && <p className="ticket-bulk-notice" role="status">{ticketBulkNotice}</p>}
+            {error && <p className="ticket-bulk-error" role="alert">{error}</p>}
+          </>}
           {tickets.length > 0 ? <div className="ticket-screen-table ticket-full-table">
             <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
-                <div className="ticket-number-cell"><span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
-                <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} disabled={pendingTicketIds.has(ticket.ticketId)} aria-busy={pendingTicketIds.has(ticket.ticketId)} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
+                <div className="ticket-number-cell">
+                  <input className="ticket-row-checkbox" type="checkbox" aria-label={ticket.ticketId + "を選択"} checked={selectedTicketIds.includes(ticket.ticketId)} disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} onChange={() => toggleTicketSelection(ticket.ticketId)} />
+                  <span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
+                <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} aria-busy={pendingTicketIds.has(ticket.ticketId)} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
                 <div className="ticket-row-actions">
@@ -2177,9 +2264,9 @@ export default function App({practice=false}:AppProps={}) {
                     setTicketZoomOrigin(source?{left:source.left,top:source.top,width:source.width,height:source.height}:null);
                     setTicketQrModalTicket(ticket);
                   }}>QR表示</button>
-                  <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={event.eventStatus === "finished"||pendingTicketIds.has(ticket.ticketId)}>番号変更</button>
-                  <button className="ticket-row-disable" disabled={pendingTicketIds.has(ticket.ticketId)} onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
-                  <button className="ticket-row-delete" disabled={pendingTicketIds.has(ticket.ticketId)} onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
+                  <button className="ticket-row-view" onClick={() => updateTicketNumber(ticket.ticketId)} disabled={ticketBulkDeleting || event.eventStatus === "finished"||pendingTicketIds.has(ticket.ticketId)}>番号変更</button>
+                  <button className="ticket-row-disable" disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} onClick={() => toggleTicketValidity(ticket.ticketId)}>{ticket.valid ? "無効化" : "有効化"}</button>
+                  <button className="ticket-row-delete" disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} onClick={() => deleteTicket(ticket.ticketId)}>削除</button>
                 </div>
               </div>
             ))}
