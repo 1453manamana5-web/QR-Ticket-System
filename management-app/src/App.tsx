@@ -2188,6 +2188,10 @@ export default function App({practice=false}:AppProps={}) {
                 <span className="tool-icon"><PaletteIcon /></span>
                 <span><small>DESIGN & PRINT</small><b>デザイン・印刷</b></span>
               </button>
+              <button className="ticket-tool-button ticket-tool-bulk-delete" onClick={() => { setTicketBulkNotice(""); setTicketListOpen(true); }}>
+                <span className="tool-icon">✓</span>
+                <span><small>BULK TICKET MANAGEMENT</small><b>チケットをまとめて削除</b></span>
+              </button>
             </div>
           </section>
 
@@ -2200,7 +2204,7 @@ export default function App({practice=false}:AppProps={}) {
               <span className="ticket-launch-arrow">→</span>
             </div>
             <div className="ticket-list-launch-bottom">
-              <span>QR番号・状態・操作を確認</span>
+              <span>QR番号・状態・一括削除を確認</span>
               <strong>{ticketStats.total}<small>件</small></strong>
             </div>
           </button>
@@ -2233,8 +2237,7 @@ export default function App({practice=false}:AppProps={}) {
             </select></div>
             <div className="ticket-list-total">発行済み<strong>{ticketStats.total}</strong>枚 ／ 未印刷予備 {waitingReserveCount}枚</div>
           </div>
-          {tickets.length > 0 && <>
-            <div className="ticket-bulk-toolbar">
+          <div className="ticket-bulk-toolbar">
               <label className="ticket-select-all">
                 <input type="checkbox" aria-label="表示中のチケットをすべて選択" checked={allVisibleTicketsSelected} disabled={ticketBulkDeleting || visibleTicketIds.length === 0} onChange={toggleVisibleTickets} />
                 表示中をすべて選択
@@ -2247,7 +2250,6 @@ export default function App({practice=false}:AppProps={}) {
             </div>
             {ticketBulkNotice && <p className="ticket-bulk-notice" role="status">{ticketBulkNotice}</p>}
             {error && <p className="ticket-bulk-error" role="alert">{error}</p>}
-          </>}
           {tickets.length > 0 ? <div className="ticket-screen-table ticket-full-table">
             <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
