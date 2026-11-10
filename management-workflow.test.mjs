@@ -16,7 +16,7 @@ const safety=load('management-app/src/operationSafety.ts');
 const event=(id='event-a')=>({eventId:id,eventName:id,eventDate:'2099-10-27',startTime:'09:00',endTime:'17:00',eventStatus:'preparing',dataVersion:1});
 const ticket=(eventId='event-a')=>({eventId,ticketId:'TKT000001',basicInfo:{ticketNumber:1},currentStatus:'unused',valid:true,updatedAt:'2026-10-27T00:00:00.000Z'});
 const manager={terminalId:'T-TEST-MANAGER',name:'Manager',type:'Web / iPad',role:'management',approved:true,managementApproved:true,receptionApproved:false,status:'online',lastSeen:null,networkMbps:null,battery:null,admin:true};
-async function harness(overrides={}, {quota=false,fileText,geometry,motion=false,ledger={confirmed:[],unsynced:0},practice=false,enableMembers=false}={}) {
+async function harness(overrides={}, {quota=false,fileText,geometry,motion=false,ledger={confirmed:[],unsynced:0},practice=false,enableMembers=false,search=''}={}) {
   const storage=new Map([['qr-ticket-terminal-id',manager.terminalId],['qr-ticket-device-id',manager.terminalId]]);
   let eventsCallback;const ticketCallbacks=new Map(),recordCallbacks=new Map(),savedSettings=[],deleted=[];
   const intervals=new Map();let next=0;
@@ -34,7 +34,7 @@ async function harness(overrides={}, {quota=false,fileText,geometry,motion=false
     ...overrides,
   };
   const publisher={loadPublishedEventBundle:async()=>null,saveEventMetadata:async()=>{},saveEventStatus:async()=>{},publishEventBundle:async updated=>({event:updated,tickets:[],authToken:'token',settings:{},ticketCount:0}),...(overrides.publisher??{})};
-  const window={addEventListener(){},removeEventListener(){},matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
+  const window={location:{search},addEventListener(){},removeEventListener(){},matchMedia:()=>({matches:motion}),setInterval:(fn,ms)=>{intervals.set(++next,{fn,ms});return next;},clearInterval:id=>intervals.delete(id),setTimeout:()=>++next,clearTimeout:()=>{},confirm:()=>true,prompt:()=>null};
   const exported=load('management-app/src/App.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime'),'qrcode.react':{QRCodeSVG:()=>null},'./SurfaceMotion':load('management-app/src/SurfaceMotion.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')},{window}), './VenueOccupancyChart':load('management-app/src/VenueOccupancyChart.tsx',{'react':React,'react/jsx-runtime':require('react/jsx-runtime')}),'./OfflineEventTransfer':{default:()=>null},'./TicketDesigner':{default:()=>null,TicketQrPreview:()=>null},'./guidePractice':load('management-app/src/guidePractice.ts'),'./ManagementGuide':{default:()=>null,managementGuideTopics:[],useManagementGuide:()=>({open:false,start(){}})},'./reservePrintLedger':{useReservePrintLedger:()=>ledger},'./operationSafety':safety,'./backup':load('management-app/src/backup.ts'),'./eventUtils':load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto}),'./firebaseData':api,'./eventPublisher':publisher},{localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(quota&&k!=='qr-ticket-terminal-id'&&k!=='qr-ticket-device-id')throw Error('QuotaExceeded');storage.set(k,v);},removeItem:k=>storage.delete(k)},window,document:{querySelector:selector=>selector===".management-main"?(geometry?.main??null):null,querySelectorAll:()=>geometry?.items??[],createElement:()=>{const input={files:[{}],click(){input.onchange?.();}};return input;}},FileReader:class{readAsText(){this.result=fileText;void this.onload();}},navigator:{},crypto:webcrypto,console:{warn(){},error(){}}},enableMembers?source=>{
     // The member page is coming-soon in production. Opt in only inside these
     // focused tests to exercise its real handlers without enabling the feature.
@@ -784,4 +784,19 @@ test('empty ticket inventories still show bulk controls without enabling deletio
     assert.equal(h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.disabled,true);
     assert.match(h.text(),/チケットがありません/);
   }finally{await h.close();}
+});
+
+test('online fresh-entry deep link opens bulk delete after an event is available', async()=>{
+  const h=await harness({}, {search:'?bulk-delete=1'});
+  try {
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,1);
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-row-checkbox'}).length,1);
+  }finally {await h.close();}
+});
+
+test('ordinary management entry does not force-open bulk deletion', async()=>{
+  const h=await harness({}, {search:'?other=1'});
+  try {
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,0);
+  }finally {await h.close();}
 });
