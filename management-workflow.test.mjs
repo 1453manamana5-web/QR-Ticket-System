@@ -820,3 +820,44 @@ test('an inverted explicit range is rejected without issuing tickets',async()=>{
   await h.click('QR・チケットを発行');assert.equal(writes,0);assert.match(h.text(),/終了番号を開始番号以上/);
  }finally{await h.close();}
 });
+
+
+test('ticket display numbers use the current printed number and hide reissue UUIDs without changing QR identity',()=>{
+  const domain=load('management-app/src/eventUtils.ts',{}, {crypto:webcrypto});
+  const internalId='TKT000500-aea47bff-45ff-4bdd-8c6c-7620bcc84217';
+  const issued={...ticket(),ticketId:internalId,basicInfo:{ticketNumber:500}};
+  assert.equal(domain.ticketDisplayNumber(issued),'TKT000500');
+  assert.equal(domain.ticketDisplayNumber({...issued,basicInfo:{ticketNumber:27}}),'TKT000027');
+  assert.equal(domain.ticketDisplayNumber({...issued,ticketId:'EVENT_000500'}),'EVENT_000500');
+  assert.equal(domain.ticketDisplayNumber(ticket()),'TKT000001');
+  assert.equal(JSON.parse(domain.ticketQrValue('event-a',issued)).ticketId,internalId);
+});
+
+test('ticket list, search and QR details display a short ticket number, not the UUID-backed ID',async()=>{
+  const h=await harness();
+  const internalId='TKT000500-aea47bff-45ff-4bdd-8c6c-7620bcc84217';
+  try {
+    await h.nav('チケット管理');
+    await act(async()=>h.ticketCallbacks.get('event-a')([{...ticket(),ticketId:internalId,basicInfo:{ticketNumber:500}}]));
+    await h.flush();
+    await act(async()=>h.renderer.root.findByProps({className:'ticket-home-card ticket-list-launch'}).props.onClick());
+    await h.flush();
+    assert.match(h.text(),/TKT000500/);
+    assert.doesNotMatch(h.text(),/aea47bff/);
+    const search=h.renderer.root.findByProps({placeholder:'チケット番号を検索'});
+    await act(async()=>search.props.onChange({target:{value:'TKT000500'}}));
+    await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-screen-row'}).length,1);
+    const qrButton=h.renderer.root.findAllByProps({className:'ticket-row-view'}).find(node=>node.children.includes('QR表示'));
+    assert.ok(qrButton);
+    await act(async()=>qrButton.props.onClick({currentTarget:{closest:()=>null}}));
+    await h.flush();
+    assert.equal(h.renderer.root.findByProps({className:'ticket-qr-number'}).children.join(''),'TKT000500');
+    await act(async()=>h.ticketCallbacks.get('event-a')([{...ticket(),ticketId:internalId,basicInfo:{ticketNumber:27}}]));
+    await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-screen-row'}).length,0);
+    await act(async()=>search.props.onChange({target:{value:'TKT000027'}}));
+    await h.flush();
+    assert.equal(h.renderer.root.findAllByProps({className:'ticket-screen-row'}).length,1);
+  }finally{await h.close();}
+});
