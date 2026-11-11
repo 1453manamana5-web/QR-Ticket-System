@@ -800,3 +800,23 @@ test('ordinary management entry does not force-open bulk deletion', async()=>{
     assert.equal(h.renderer.root.findAllByProps({className:'ticket-bulk-toolbar'}).length,0);
   }finally {await h.close();}
 });
+
+test('explicit start and end issue exactly the chosen range below the old issuance floor with new QR identities',async()=>{
+ let issued,mode,lookups=0;const h=await harness({loadNextTicketNumber:async()=>{lookups++;return 501;},appendTickets:async(_id,items,option)=>{issued=items;mode=option;}});
+ try{
+  await h.nav('チケット管理');const label=node=>node.children.map(c=>typeof c==='string'?c:label(c)).join('');
+  await act(async()=>h.renderer.root.findAllByType('button').find(node=>label(node).includes('チケットを新規発行')).props.onClick());
+  for(const [field,value] of [['開始番号','21'],['終了番号','23']])await act(async()=>h.renderer.root.findByProps({'aria-label':field}).props.onChange({target:{value}}));
+  await h.click('QR・チケットを発行');
+  assert.deepEqual(issued.map(t=>t.basicInfo.ticketNumber),[21,22,23]);assert.equal(mode,'range');assert.equal(lookups,0);
+  assert.ok(issued.every(t=>t.ticketId.startsWith('TKT')&&t.ticketId.includes('-')));
+ }finally{await h.close();}
+});
+test('an inverted explicit range is rejected without issuing tickets',async()=>{
+ let writes=0;const h=await harness({appendTickets:async()=>{writes++;}});
+ try{
+  await h.nav('チケット管理');const label=node=>node.children.map(c=>typeof c==='string'?c:label(c)).join('');await act(async()=>h.renderer.root.findAllByType('button').find(node=>label(node).includes('チケットを新規発行')).props.onClick());
+  for(const [field,value] of [['開始番号','30'],['終了番号','20']])await act(async()=>h.renderer.root.findByProps({'aria-label':field}).props.onChange({target:{value}}));
+  await h.click('QR・チケットを発行');assert.equal(writes,0);assert.match(h.text(),/終了番号を開始番号以上/);
+ }finally{await h.close();}
+});

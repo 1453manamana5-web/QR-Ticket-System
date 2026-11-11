@@ -1040,3 +1040,17 @@ test('committing a design notifies another open management installation',async()
   assert.equal(await updated,design);
  }finally{clearTimeout(timer);stop?.();}
 });
+
+test('an explicit range can refill deleted display numbers while keeping old QR identities deleted',async()=>{
+ const c=clients(),old={...makeTicket('flow-event','old-qr'),basicInfo:{ticketNumber:21}};
+ await createPublished(c,makeEvent(),[old]);await c.management.deleteTicket('flow-event',old.ticketId);
+ const replacement={...makeTicket('flow-event','new-qr'),basicInfo:{ticketNumber:21}};
+ await c.management.appendTickets('flow-event',[replacement],'range');
+ assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event','tickets','old-qr'))).exists(),false);
+ assert.equal((await getDocFromServer(doc(c.managerDb,'events','flow-event','tickets','new-qr'))).data().basicInfo.ticketNumber,21);
+ await assert.rejects(c.management.appendTickets('flow-event',[{...replacement,ticketId:'another-qr'}],'range'),/DUPLICATE_TICKET_NUMBER/);
+});
+test('explicit ranges still reject finished events',async()=>{
+ const c=clients();await createPublished(c);await updateDoc(doc(c.managerDb,'events','flow-event'),{eventStatus:'finished'});
+ await assert.rejects(c.management.appendTickets('flow-event',[{...makeTicket('flow-event','range-finished'),basicInfo:{ticketNumber:10}}],'range'),/EVENT_FINISHED/);
+});

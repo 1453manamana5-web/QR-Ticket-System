@@ -37,7 +37,7 @@ export function createGuidePractice(){
     loadMembers:async()=>[],loadAnalysis:async()=>[],loadReceptionErrors:async()=>[],saveAnalysis:async()=>{},
     saveManagementTerminalHeartbeat:async()=>{},
     loadNextTicketNumber:async(id:string)=>Math.max(0,...getTickets(id).map(t=>Number(t.basicInfo.ticketNumber)))+1,
-    appendTickets:async(id:string,items:Ticket[])=>{inventories.set(id,[...getTickets(id),...copy(items)]);emitTickets(id);},
+    appendTickets:async(id:string,items:Ticket[],mode?:boolean|"range")=>{if(mode&&events.find(e=>e.eventId===id)?.eventStatus==="finished")throw Error("EVENT_FINISHED");const before=getTickets(id),numbers=new Set(before.map(t=>Number(t.basicInfo.ticketNumber)));for(const t of items){const n=Number(t.basicInfo.ticketNumber);if(numbers.has(n))throw Error("DUPLICATE_TICKET_NUMBER");numbers.add(n);}inventories.set(id,[...before,...copy(items)]);emitTickets(id);},
     saveTicket:async(id:string,ticket:Ticket)=>{inventories.set(id,getTickets(id).map(t=>t.ticketId===ticket.ticketId?copy(ticket):t));emitTickets(id);},
     deleteTicket:async(id:string,ticketId:string)=>{inventories.set(id,getTickets(id).filter(t=>t.ticketId!==ticketId));emitTickets(id);},
     deleteTickets:async(id:string,ticketIds:string[])=>{const selected=new Set(ticketIds);const before=getTickets(id);inventories.set(id,before.filter(t=>!selected.has(t.ticketId)));emitTickets(id);return before.length-getTickets(id).length;},

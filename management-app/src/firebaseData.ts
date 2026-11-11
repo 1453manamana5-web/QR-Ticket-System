@@ -178,7 +178,7 @@ export async function loadNextTicketNumber(eventId:string,prefix:string):Promise
 }
 
 /** Add only newly issued tickets; existing reception state is never rewritten. */
-export async function appendTickets(eventId: string, tickets: Ticket[], enforceNewNumbers = false): Promise<void> {
+export async function appendTickets(eventId: string, tickets: Ticket[], enforceNewNumbers: boolean | "range" = false): Promise<void> {
   if (offline()) throw new Error("この操作にはオンライン接続が必要です。保存済みデータの閲覧・印刷は利用できます。");
   const db = getFirebaseDb();
   const ids = new Set<string>();
@@ -193,7 +193,7 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
     if (Number.isSafeInteger(number) && number > 0) issuedNumbers.add(number);
   }
   let expectedRevision: number | undefined;
-  if (!enforceNewNumbers && issuedNumbers.size) {
+  if (enforceNewNumbers !== true && issuedNumbers.size) {
     const before = await getDocFromServer(doc(db, "events", eventId));
     expectedRevision = Number(before.data()?.inventoryRevision) || 0;
     const inventory = await loadEventTickets(eventId);
@@ -206,7 +206,7 @@ export async function appendTickets(eventId: string, tickets: Ticket[], enforceN
       if (expectedRevision !== undefined && expectedRevision !== (Number(metadata.data.inventoryRevision) || 0)) throw new Error("TICKET_CHANGED_RETRY");
       if(enforceNewNumbers && metadata.data.eventStatus==="finished")throw new Error("EVENT_FINISHED");
       const numbers = chunk.map(ticket=>Number(ticket.basicInfo.ticketNumber));
-      if (enforceNewNumbers && (numbers.some(number=>!Number.isSafeInteger(number)||number<1) || Math.min(...numbers) <= (Number(metadata.data.lastIssuedNumber)||0))) throw new Error("TICKET_NUMBER_CONFLICT_RETRY");
+      if (enforceNewNumbers === true && (numbers.some(number=>!Number.isSafeInteger(number)||number<1) || Math.min(...numbers) <= (Number(metadata.data.lastIssuedNumber)||0))) throw new Error("TICKET_NUMBER_CONFLICT_RETRY");
       const refs = chunk.map(ticket => doc(db,"events",eventId,"tickets",ticket.ticketId));
       const snapshots = await Promise.all(refs.map(ref => tx.get(ref)));
       if (snapshots.some(snapshot => snapshot.exists())) throw new Error("TICKET_ALREADY_EXISTS");

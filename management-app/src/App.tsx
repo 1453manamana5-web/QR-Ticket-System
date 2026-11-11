@@ -256,7 +256,13 @@ export default function App({practice=false}:AppProps={}) {
   const [endTime, setEndTime] = useState("");
   const [ticketCount, setTicketCount] = useState("500");
   const [reserveTicketCount,setReserveTicketCount]=useState("0");
-  const regularCount=Number(ticketCount);
+  const [ticketStartNumber,setTicketStartNumber]=useState("");
+  const [ticketEndNumber,setTicketEndNumber]=useState("");
+  const suggestedTicketStart=Math.max(Number((event as Event & {lastIssuedNumber?:number}).lastIssuedNumber)||0,...tickets.map(ticket=>Number(ticket.basicInfo.ticketNumber)||0))+1;
+  const explicitTicketRange=ticketStartNumber!==""||ticketEndNumber!=="";
+  const rangeStart=Number(ticketStartNumber||suggestedTicketStart);
+  const rangeEnd=Number(ticketEndNumber||rangeStart+Number(ticketCount)+Number(reserveTicketCount)-1);
+  const regularCount=explicitTicketRange?rangeEnd-rangeStart+1-Number(reserveTicketCount):Number(ticketCount);
   const reserveCount=Number(reserveTicketCount);
   const [ticketDesignReserveOpen,setTicketDesignReserveOpen]=useState(false);
   const [ticketPrefix, setTicketPrefix] = useState("TKT");
@@ -1191,6 +1197,7 @@ export default function App({practice=false}:AppProps={}) {
     ticketIssuanceOperation.current=null;
     ticketWrites.current.clear();
     setTicketGenerating(false);
+    setTicketStartNumber("");setTicketEndNumber("");
     setPendingTicketIds(new Set());
     setTicketBulkDeleting(false);
     return()=>{
@@ -1225,6 +1232,9 @@ export default function App({practice=false}:AppProps={}) {
       return;
     }
     const count = regularCount+reserveCount;
+    if(explicitTicketRange&&(!Number.isSafeInteger(rangeStart)||rangeStart<1||!Number.isSafeInteger(rangeEnd)||rangeEnd<rangeStart)){
+      setError("開始番号と終了番号は1以上の整数で、終了番号を開始番号以上にしてください。");return;
+    }
     if (![regularCount,reserveCount].every(n=>Number.isSafeInteger(n)&&n>=0) || count < 1 || count > 5000) {
       setError("通常分と予備分は0以上の整数で、合計1〜5000枚にしてください。");
       return;
@@ -1241,22 +1251,24 @@ export default function App({practice=false}:AppProps={}) {
     setError("");
     try {
       // React stateは購読更新の途中で古い場合があるため、発行前にサーバーの正本を読む。
-      const startNumber = await loadNextTicketNumber(event.eventId,prefix);
+      const startNumber = explicitTicketRange?rangeStart:await loadNextTicketNumber(event.eventId,prefix);
       if(!current())return;
       if(!Number.isSafeInteger(startNumber+count-1))throw new Error("TICKET_NUMBER_OVERFLOW");
 
-      const generated = createTickets(event.eventId, count, startNumber, prefix).map((ticket,index)=>index<regularCount?ticket:{...ticket,basicInfo:{...ticket.basicInfo,reserve:true}});
+      const generated = createTickets(event.eventId, count, startNumber, prefix).map((ticket,index)=>({...ticket,...(explicitTicketRange?{ticketId:ticket.ticketId+"-"+crypto.randomUUID()}:{}),...(index<regularCount?{}:{basicInfo:{...ticket.basicInfo,reserve:true}})}));
 
       // 保存と件数同期が成功してから画面を更新し、失敗時に成功したように見せない。
-      await appendTickets(event.eventId, generated, true);
+      await appendTickets(event.eventId, generated, explicitTicketRange?"range":true);
       if (!current()) return;
       // Subscription owns the current inventory, including concurrent reception changes.
       setTicketStatusFilter("all");
+      setTicketStartNumber("");setTicketEndNumber("");
       setTicketCreateModalOpen(false);
       if(reserveCount>0){setTicketDesignReserveOpen(true);setTicketDesignModalOpen(true);}
     } catch (reason) {
       console.error("Ticket generation/save failed", reason);
       if(!current())return;
+      if(reason instanceof Error&&/DUPLICATE_TICKET_NUMBER|TICKET_ALREADY_EXISTS/.test(reason.message)){setError("指定範囲には既存のチケット番号が含まれています。番号を確認してください。");return;}
       setError("チケットをFirebaseへ保存できませんでした。接続・権限・他端末の発行状況を確認してください。一部だけ発行済みの場合があるため、一覧の枚数を確認してから再試行してください。");
     } finally {
       if(ticketIssuanceOperation.current===operation){ticketIssuanceOperation.current=null;setTicketGenerating(false);}
@@ -2293,10 +2305,11 @@ export default function App({practice=false}:AppProps={}) {
           <small>CREATE TICKETS</small><h2>チケットを新規発行</h2><p>番号とQRコードをまとめて生成します。</p>
           <div className="ticket-modal-grid">
             <label>チケットタイトル<input value={ticketTitle} onChange={e => setTicketTitle(e.target.value)} /></label>
-            <label>通常分の枚数<input aria-label="通常分の枚数" type="number" min="0" max="5000" value={ticketCount} onChange={e=>setTicketCount(e.target.value)} /></label>
+            <label>通常分の枚数<input aria-label="通常分の枚数" type="number" min="0" max="5000" disabled={explicitTicketRange} value={explicitTicketRange?regularCount:ticketCount} onChange={e=>setTicketCount(e.target.value)} /></label>
             <label>予備分の枚数（通常分に追加）<input aria-label="予備分の枚数" type="number" min="0" max="5000" value={reserveTicketCount} onChange={e=>setReserveTicketCount(e.target.value)}/></label>
             <label>番号プレフィックス<input value={ticketPrefix} maxLength={12} onChange={e => setTicketPrefix(e.target.value)} /></label>
-            <label>開始番号<input type="number" value={Math.max(Number((event as Event & {lastIssuedNumber?:number}).lastIssuedNumber)||0,...tickets.map(ticket=>Number(ticket.basicInfo.ticketNumber)||0))+1} disabled /><small>発行時に最新の番号を確認します。削除済みの番号は再利用しません。</small></label>
+            <label>開始番号<input aria-label="開始番号" type="number" min="1" step="1" value={ticketStartNumber} placeholder={String(suggestedTicketStart)} onChange={e=>setTicketStartNumber(e.target.value)} /><small>未指定なら自動連番。削除した番号も指定できます。</small></label>
+            <label>終了番号<input aria-label="終了番号" type="number" min="1" step="1" value={ticketEndNumber} placeholder={String(rangeEnd)} onChange={e=>setTicketEndNumber(e.target.value)} /><small>指定範囲の枚数を発行します。既存番号との重複はできません。</small></label>
           </div>
           <p role="status">集計対象 {regularCount}枚 ／ 未印刷予備 {reserveCount}枚（準備するQRは計 {regularCount+reserveCount}枚）</p><p>予備分は通常分に続く番号で発行し、通常印刷から除外します。発行後にデザインとQRを端末へ保存してください。</p>
           {error && <p className="notice error" role="alert">{error}</p>}
