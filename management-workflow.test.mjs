@@ -727,7 +727,7 @@ test('visible bulk selection follows the search results and preserves other sele
     await openTicketList(h);
     const all=h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'});
     await act(async()=>all.props.onChange());await h.flush();
-    const search=h.renderer.root.findByProps({placeholder:'QR番号を検索'});
+    const search=h.renderer.root.findByProps({placeholder:'チケット番号を検索'});
     await act(async()=>search.props.onChange({target:{value:'TKT000002'}}));await h.flush();
     assert.equal(h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.checked,true);
     await act(async()=>h.renderer.root.findByProps({'aria-label':'表示中のチケットをすべて選択'}).props.onChange());await h.flush();
