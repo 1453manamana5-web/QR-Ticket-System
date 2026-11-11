@@ -40,6 +40,16 @@ export function createTickets(eventId: string, count: number, startNumber = 1, p
   });
 }
 
+/** Human-readable issue number; the stable ticketId stays untouched for QR/reception history. */
+export function ticketDisplayNumber(ticket: Pick<Ticket, "ticketId" | "basicInfo">): string {
+  const number = Number(ticket.basicInfo.ticketNumber);
+  if (!Number.isSafeInteger(number) || number < 1) return ticket.ticketId;
+  // Explicitly reissued tickets have a unique UUID suffix on their internal identity.
+  const baseId = ticket.ticketId.replace(/-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "");
+  const match = baseId.match(/^([A-Za-z][A-Za-z0-9_-]*?)(\d{6,})$/);
+  return `${match?.[1] || "TKT"}${String(number).padStart(6, "0")}`;
+}
+
 export function ticketQrValue(eventId: string, ticket: Ticket) {
   return JSON.stringify({
     type: "qr-ticket",
