@@ -10,7 +10,7 @@ import * as livePublisher from "./eventPublisher";
 import type {PublishedEventBundle} from "./eventPublisher";
 import {createGuidePractice} from "./guidePractice";
 import ManagementGuide,{useManagementGuide,managementGuideTopics} from "./ManagementGuide";
-import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, ticketQrValue } from "./eventUtils";
+import { baseEvent, createEventId, createTickets, getAutomaticEventStatus, ticketDisplayNumber, ticketQrValue } from "./eventUtils";
 import {parseManagementBackup} from "./backup";
 import {localDateValue, receptionDataCollected, csvCell,isCountedTicket} from "./operationSafety";
 import {useReservePrintLedger} from "./reservePrintLedger";
@@ -913,7 +913,7 @@ export default function App({practice=false}:AppProps={}) {
     const query = ticketQuery.trim().toLowerCase();
     return tickets.filter(ticket => {
       const matchesQuery = !query ||
-        ticket.ticketId.toLowerCase().includes(query) ||
+        ticketDisplayNumber(ticket).toLowerCase().includes(query) ||
         String(ticket.basicInfo.ticketNumber).includes(query);
       const matchesStatus = ticketStatusFilter === "all" || ticket.currentStatus === ticketStatusFilter;
       return matchesQuery && matchesStatus;
@@ -2227,7 +2227,7 @@ export default function App({practice=false}:AppProps={}) {
               <span className="ticket-launch-arrow">→</span>
             </div>
             <div className="ticket-list-launch-bottom">
-              <span>QR番号・状態・一括削除を確認</span>
+              <span>チケット番号・状態・一括削除を確認</span>
               <strong>{ticketStats.total}<small>件</small></strong>
             </div>
           </button>
@@ -2254,7 +2254,7 @@ export default function App({practice=false}:AppProps={}) {
             <button className="ticket-list-close" onClick={() => setTicketListOpen(false)}>×</button>
           </header>
           <div className="ticket-list-toolbar">
-            <div className="ticket-search-box"><SearchIcon /><input placeholder="QR番号を検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} /></div>
+            <div className="ticket-search-box"><SearchIcon /><input placeholder="チケット番号を検索" value={ticketQuery} onChange={e => setTicketQuery(e.target.value)} /></div>
             <div className="ticket-filter-box"><FilterIcon /><select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value as typeof ticketStatusFilter)}>
               <option value="all">すべての状態</option><option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
             </select></div>
@@ -2274,12 +2274,12 @@ export default function App({practice=false}:AppProps={}) {
             {ticketBulkNotice && <p className="ticket-bulk-notice" role="status">{ticketBulkNotice}</p>}
             {error && <p className="ticket-bulk-error" role="alert">{error}</p>}
           {tickets.length > 0 ? <div className="ticket-screen-table ticket-full-table">
-            <div className="ticket-screen-table-head"><span>QR番号</span><span>状態</span><span>操作</span></div>
+            <div className="ticket-screen-table-head"><span>チケット番号</span><span>状態</span><span>操作</span></div>
             {filteredTickets.map(ticket => (
               <div className="ticket-screen-row" key={ticket.ticketId}>
                 <div className="ticket-number-cell">
-                  <input className="ticket-row-checkbox" type="checkbox" aria-label={ticket.ticketId + "を選択"} checked={selectedTicketIds.includes(ticket.ticketId)} disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} onChange={() => toggleTicketSelection(ticket.ticketId)} />
-                  <span className="mini-qr"><QrIcon /></span><strong>{ticket.ticketId}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
+                  <input className="ticket-row-checkbox" type="checkbox" aria-label={ticketDisplayNumber(ticket) + "を選択"} checked={selectedTicketIds.includes(ticket.ticketId)} disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} onChange={() => toggleTicketSelection(ticket.ticketId)} />
+                  <span className="mini-qr"><QrIcon /></span><strong>{ticketDisplayNumber(ticket)}{ticket.basicInfo.reserve===true&&<small>（{isCountedTicket(ticket,reserveLedger.confirmed,reserveLedger.reserved)?"予備・発行済み":"未印刷予備"}）</small>}</strong></div>
                 <select className={`ticket-status-select status-${ticket.currentStatus}`} value={ticket.currentStatus} disabled={ticketBulkDeleting || pendingTicketIds.has(ticket.ticketId)} aria-busy={pendingTicketIds.has(ticket.ticketId)} onChange={e => updateTicketStatus(ticket.ticketId, e.target.value as Ticket["currentStatus"])}>
                   <option value="unused">未使用</option><option value="inside">入場中</option><option value="exited">使用済み</option>
                 </select>
@@ -2360,7 +2360,7 @@ export default function App({practice=false}:AppProps={}) {
             ticketNumber={String(ticketQrModalTicket.basicInfo.ticketNumber).padStart(6, "0")}
             qrValue={ticketQrValue(event.eventId, ticketQrModalTicket)}
           />
-          <strong className="ticket-qr-number">{ticketQrModalTicket.ticketId}</strong>
+          <strong className="ticket-qr-number">{ticketDisplayNumber(ticketQrModalTicket)}</strong>
           <div className={`ticket-qr-status ticket-qr-status-${ticketQrModalTicket.currentStatus}`}>
             <span>●</span>{ticketQrModalTicket.currentStatus === "inside" ? "入場中" : ticketQrModalTicket.currentStatus === "exited" ? "使用済み" : "未使用"}
           </div>
