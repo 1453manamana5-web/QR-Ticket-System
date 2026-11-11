@@ -1,0 +1,44 @@
+name: Generate mature reception audio
+
+on:
+  push:
+    branches:
+      - voice/mature-natural-20261111
+    paths:
+      - scripts/generate_reception_voice.py
+      - .github/workflows/generate-reception-voice.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    if: github.ref == 'refs/heads/voice/mature-natural-20261111'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install speech renderer
+        run: pip install 'edge-tts>=7.2,<9'
+      - name: Render announcement files
+        run: python scripts/generate_reception_voice.py
+      - name: Check regenerated audio
+        run: |
+          for file in reception-app/public/sounds/*voice_d_v1.mp3 reception-app/public/sounds/error_retry_*_d_v1.mp3; do
+            test -s "$file"
+            ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1 "$file" | grep -q 'codec_name=mp3'
+          done
+      - name: Commit rendered audio to the feature branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add reception-app/public/sounds/*.mp3
+          if ! git diff --cached --quiet; then
+            git commit -m 'audio: render mature natural female reception announcements'
+            git push
+          fi
