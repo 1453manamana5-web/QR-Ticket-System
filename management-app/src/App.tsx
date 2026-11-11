@@ -913,7 +913,6 @@ export default function App({practice=false}:AppProps={}) {
     const query = ticketQuery.trim().toLowerCase();
     return tickets.filter(ticket => {
       const matchesQuery = !query ||
-        ticket.ticketId.toLowerCase().includes(query) ||
         ticketDisplayNumber(ticket).toLowerCase().includes(query) ||
         String(ticket.basicInfo.ticketNumber).includes(query);
       const matchesStatus = ticketStatusFilter === "all" || ticket.currentStatus === ticketStatusFilter;
