@@ -22,7 +22,7 @@ function preloadSounds(){
     if(objectUrls.has(kind))return;
     try{
       let cache:Cache|undefined;
-      try{if(window.caches)cache=await window.caches.open("qr-reception-sounds-v2");}catch{/* Cache Storage may be unavailable */}
+      try{if(window.caches)cache=await window.caches.open("qr-reception-sounds-v3");}catch{/* Cache Storage may be unavailable */}
       let response=await cache?.match(path(kind));
       if(!response?.ok){response=await fetch(path(kind));if(!response.ok)throw Error(`Audio HTTP ${response.status}`);try{await cache?.put(path(kind),response.clone());}catch{/* Playback can still use the downloaded blob. */}}
       objectUrls.set(kind,URL.createObjectURL(await response.blob()));
