@@ -25,6 +25,10 @@ jobs:
           python-version: '3.12'
       - name: Install speech renderer
         run: pip install 'edge-tts>=7.2,<9'
+      - name: Install FFmpeg for mixing the original chimes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
       - name: Render announcement files
         run: python scripts/generate_reception_voice.py
       - name: Check regenerated audio
