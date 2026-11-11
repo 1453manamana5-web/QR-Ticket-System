@@ -75,7 +75,7 @@ export default function App(){
     const errorPreview=screen==="test"&&testResultKind==="error";
     const status=await playReceptionAudio(errorPreview?"error":exit?"exitSuccess":"entrySuccess");
     reportAudioStatus(status);
-    if(status==="played")setAudioNotice(`音声案内を有効にしました。Dの声で「${errorPreview?"やり直してください":exit?"ご来場ありがとうございました":"お進みください"}」を再生しています。`);
+    if(status==="played")setAudioNotice(`音声案内を有効にしました。落ち着いた女性の声で「${errorPreview?"やり直してください":exit?"ご来場ありがとうございました":"お進みください"}」を再生しています。`);
   };
   const announceReception=(type:ReceptionType)=>{void speakReception(type).then(reportAudioStatus);};
   useEffect(()=>prepareReceptionAudio(),[]);
