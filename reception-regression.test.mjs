@@ -202,6 +202,8 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
+  let fakeNow=Date.now(),otherAudioPlaying=false;
+  class FakeDate extends Date {static now(){return fakeNow;}}
   let approvedEventId="event-one";
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
@@ -216,7 +218,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,prepareLocalEventData:async(...args)=>{await local.prepareLocalEventData(...args);if(prepare)await prepare(...args);}},
+    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},stopReceptionPrompt:()=>{},isReceptionAudioPlaying:()=>otherAudioPlaying,enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,prepareLocalEventData:async(...args)=>{await local.prepareLocalEventData(...args);if(prepare)await prepare(...args);}},
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -240,7 +242,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
     },
   };
   const App=load("./reception-app/src/App.tsx",dependencies,{
-    navigator,window,crypto:webcrypto,
+    navigator,window,crypto:webcrypto,Date:FakeDate,
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
     console:{error:()=>{},warn:()=>{},info:()=>{}},
   }).default;
@@ -255,6 +257,12 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
     await act(async()=>{await button.props.onClick();});await flush();
   };
   return {local,renderer,Scanner,click,flush,navigator,audioRequests,
+    setAudioPlaying:value=>{otherAudioPlaying=value;},
+    advancePrompt:async milliseconds=>{
+      fakeNow+=milliseconds;
+      await act(async()=>{for(const {fn,ms} of [...intervals.values()])if(ms===5000)await fn();});
+      await flush();
+    },
     text:()=>JSON.stringify(renderer.toJSON()),
     terminalId:()=>storage.get("qr-ticket-terminal-id"),
     get registerCalls(){return registerCalls;},
