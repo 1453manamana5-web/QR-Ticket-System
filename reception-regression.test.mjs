@@ -202,6 +202,8 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   const local=localDb();
   if(saved)await local.prepareLocalEventData(makeEvent(),[makeTicket()]);
   const intervals=new Map(),timeouts=new Map(),audioRequests=[];
+  let fakeNow=Date.now(),otherAudioPlaying=false;
+  class FakeDate extends Date {static now(){return fakeNow;}}
   let approvedEventId="event-one";
   let nextId=0,registrationCallback,registrationError,controlCallback,registerCalls=0,inventoryDownloads=0;
   const storage=new Map([["qr-ticket-terminal-id","T-REGRESSION-01"]]);
@@ -216,7 +218,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
   function Scanner(){return null;}
   const dependencies={
     "./QrScanner":{default:Scanner},
-    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,prepareLocalEventData:async(...args)=>{await local.prepareLocalEventData(...args);if(prepare)await prepare(...args);}},
+    "./ReceptionGuide":{default:()=>null,receptionGuideTopics:[],useReceptionGuide:()=>({open:false,start(){}})},"./receptionAudio":{prepareReceptionAudio:()=>()=>{},playReceptionAudio:async kind=>{audioRequests.push(kind);return "played";},stopReceptionGuidance:()=>{},stopReceptionPrompt:()=>{},isReceptionAudioPlaying:()=>otherAudioPlaying,enableReceptionVoice:()=>{storage.set("qr-ticket-app-settings",JSON.stringify({volume:.7,voiceGuidance:true,successSound:true}));return true;},getReceptionAudioSettings:()=>JSON.parse(storage.get("qr-ticket-app-settings")??'{"volume":1,"voiceGuidance":false}')},"./localDb":{...local,prepareLocalEventData:async(...args)=>{await local.prepareLocalEventData(...args);if(prepare)await prepare(...args);}},
     "./syncQueue":{syncPendingReceptionRecords:async()=>{}},
     "./eventDownloader":{
       getCurrentFirebaseEventAuthPayload:async()=>{
@@ -240,7 +242,7 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
     },
   };
   const App=load("./reception-app/src/App.tsx",dependencies,{
-    navigator,window,crypto:webcrypto,
+    navigator,window,crypto:webcrypto,Date:FakeDate,
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
     console:{error:()=>{},warn:()=>{},info:()=>{}},
   }).default;
@@ -255,6 +257,12 @@ async function harness({saved=true,automatic,latestTicket,download,readRegistrat
     await act(async()=>{await button.props.onClick();});await flush();
   };
   return {local,renderer,Scanner,click,flush,navigator,audioRequests,
+    setAudioPlaying:value=>{otherAudioPlaying=value;},
+    advancePrompt:async milliseconds=>{
+      fakeNow+=milliseconds;
+      await act(async()=>{for(const {fn,ms} of [...intervals.values()])if(ms===5000)await fn();});
+      await flush();
+    },
     text:()=>JSON.stringify(renderer.toJSON()),
     terminalId:()=>storage.get("qr-ticket-terminal-id"),
     get registerCalls(){return registerCalls;},
@@ -843,7 +851,7 @@ test('recorded entry guidance obeys voice settings independently of chimes and s
 
 test('recorded D is the selected sample and plays offline using a cached blob',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/entry_osusumi_voice_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'db8b652a46de3cc1aa09de6703722c558f4ecabf2bcad56a0de6817e6889cce5');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'8b5c7f6533da3b5d3315605c05a1c45e7008d8afe1cf59e4381d89fff9e1fde0');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');assert.match(h.players[0].src,/^blob:/);
 });
@@ -876,7 +884,7 @@ test('reception voice check enables and auditions D directly on the actual recep
 
 test('recorded exit is the approved revised D sample and reuses the single offline audio player',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/exit_thank_you_voice_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'641e24f3f9ade1eba8f5a84559f8da3d8309597000fe9ca074c3fcf028072a2b');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'cb46d6e2f9e6d89ff930b2d0c6fcef668ef4a162f6a2f305fe7f30007c6bfe20');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();
   assert.equal(await h.audio.playReceptionAudio('entrySuccess'),'played');
@@ -910,7 +918,7 @@ test('error guidance reuses one player, respects voice and volume settings, and 
 
 test('error D is available offline and the generated standalone sample is unchanged',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/error_retry_guidance_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'d03b4f629181a15f35586dd85e36ae1f979ef22983d909b728eedc6fdd3ee3ad');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'6059d07158525ecde16b7c87ea5cbc68b792a09ed0951e26d5b959c928477c61');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('error'),'played');assert.match(h.players[0].src,/^blob:/);
 });
@@ -1157,4 +1165,57 @@ test("obsolete communication permission failure cannot revoke a newer event appr
     assert.doesNotMatch(h.text(),/受付端末を登録|承認待ち/);
     assert.equal(h.renderer.root.findAll(node=>node.props["data-reception-phase"]==="preparing").length>0,true);
   }finally{await h.close();}
+});
+
+
+test('idle reminder waits one minute, respects active audio and stops outside reception',async()=>{
+  const h=await harness();
+  try{
+    await h.advancePrompt(120000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'No reminder on setup screens');
+    await h.click('受付を開始する');
+    await h.advancePrompt(59999);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not announce before a full idle minute');
+    h.setAudioPlaying(true);
+    await h.advancePrompt(1);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not interrupt another announcement');
+    h.setAudioPlaying(false);
+    await h.advancePrompt(1);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,1);
+    await h.advancePrompt(59000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,1,'Do not repeat too soon');
+    await h.advancePrompt(1000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,2);
+    await h.click('受付を停止');
+    await h.advancePrompt(180000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,2,'Stop reminders when reception stops');
+  }finally{await h.close();}
+});
+
+test('scanning a ticket resets idle reminder and the result suppresses playback',async()=>{
+  const h=await harness();
+  try{
+    await h.click('受付を開始する');
+    await h.advancePrompt(54000);
+    await h.scan('ticket-one');
+    await h.advancePrompt(10000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not announce while showing a scan result');
+    await h.advancePrompt(120000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'A displayed result must suppress the reminder');
+  }finally{await h.close();}
+});
+
+test('idle reminder respects voice settings and never stops successful scan audio',async()=>{
+  const muted=recordedAudioHarness();
+  assert.equal(await muted.audio.playReceptionAudio('scanPrompt'),'muted');
+  const h=recordedAudioHarness({voiceGuidance:true,fetch:()=>new Promise(()=>{})});
+  h.audio.prepareReceptionAudio();
+  assert.equal(await h.audio.playReceptionAudio('scanPrompt'),'played');
+  assert.match(h.players[0].src,/qr_scan_prompt_voice_d_v1\.mp3$/);
+  assert.equal(h.audio.isReceptionAudioPlaying(),true);
+  h.audio.stopReceptionPrompt();
+  assert.equal(h.players[0].paused,true);
+  await h.audio.playReceptionAudio('entrySuccess');
+  h.audio.stopReceptionPrompt();
+  assert.equal(h.players[0].paused,false,'Stopping a reminder must not mute the scan success');
 });

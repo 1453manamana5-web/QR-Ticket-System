@@ -5,7 +5,7 @@ import {isBeforeEventStart,productionTicketStates} from '../../shared/src/recept
 import ReceptionGuide,{useReceptionGuide,receptionGuideTopics} from "./ReceptionGuide";
 import QrScanner from "./QrScanner";
 import {OfflineEventCollector,type OfflineEventData} from "../../shared/src/offlineTransfer";
-import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance,enableReceptionVoice} from "./receptionAudio";
+import {prepareReceptionAudio,playReceptionAudio,getReceptionAudioSettings,stopReceptionGuidance,stopReceptionPrompt,isReceptionAudioPlaying,enableReceptionVoice} from "./receptionAudio";
 import {syncPendingReceptionRecords} from "./syncQueue";
 import {getPendingSyncItems,getReceptionRecord,getTicket,loadLocalEvent,saveLocalEvent,getLocalPreparationToken,prepareLocalEventData,saveReceptionTransaction,clearLocalEvent,saveReceptionErrorLog,getPendingReceptionErrorLogs,markReceptionErrorLogSynced,type ReceptionErrorCategory} from "./localDb";
 import {getCurrentFirebaseEventAuthPayload,downloadCurrentFirebaseEventData,downloadEventData,getEventAuthPayloadByToken} from "./eventDownloader";
@@ -148,6 +148,34 @@ export default function App(){
   const modeSwipeMoved=useRef(false);
   const syncWorkRef=useRef<Promise<void>|null>(null);
   const syncRequestedRef=useRef(false);
+  const lastScanActivityRef=useRef(Date.now());
+
+  // Announce only when the visitor-facing QR camera has been idle for a minute.
+  // Reset on each new reception session or a switch between entry and exit.
+  useEffect(()=>{
+    if(screen==="reception")lastScanActivityRef.current=Date.now();
+  },[screen,mode]);
+  useEffect(()=>{
+    if(screen!=="reception")return;
+    const timer=window.setInterval(()=>{
+      if(!receptionAllowedRef.current||scanProcessingRef.current||busy||result||cameraFailed||
+        (typeof isReceptionAudioPlaying==="function"&&isReceptionAudioPlaying())||(typeof document!=="undefined"&&document.visibilityState==="hidden"))return;
+      const now=Date.now();
+      if(now-lastScanActivityRef.current<60000)return;
+      lastScanActivityRef.current=now;
+      void playReceptionAudio("scanPrompt");
+    },5000);
+    const onVisibilityChange=()=>{
+      if(document.visibilityState==="visible")lastScanActivityRef.current=Date.now();
+      else if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
+    };
+    if(typeof document!=="undefined")document.addEventListener("visibilitychange",onVisibilityChange);
+    return()=>{
+      window.clearInterval(timer);
+      if(typeof document!=="undefined")document.removeEventListener("visibilitychange",onVisibilityChange);
+      if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
+    };
+  },[screen,mode,busy,result,cameraFailed,remoteStopped,guide.open,guideSettingsOpen]);
 
   const revokeCurrentApproval=useCallback(()=>{
     eventSelectionOperationRef.current=null;
@@ -814,6 +842,8 @@ export default function App(){
     let ticketId=rawText.trim();
     let qrEventId:string|null=null;
     if(!ticketId)return;
+    lastScanActivityRef.current=Date.now();
+    if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
 
     // 現行のチケットQRは { type, eventId, ticketId, ticketNumber } のJSON。
     // 生文字列のまま検索するとチケットIDと一致せず、毎回「チケットを確認できません」になる。
