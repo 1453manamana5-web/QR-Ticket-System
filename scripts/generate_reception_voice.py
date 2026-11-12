@@ -5,6 +5,7 @@ Run on updates only; visitors' devices never call an online speech API.
 Requires edge-tts and ffmpeg. All existing chime WAV files remain unchanged.
 """
 import asyncio
+import sys
 import subprocess
 import tempfile
 from pathlib import Path
@@ -24,6 +25,7 @@ TRACKS = (
     ("exit_success_voice_d_v1.mp3", "ご来場ありがとうございました。", "qr_result_chime.wav"),
     ("error_retry_guidance_d_v1.mp3", "やり直してください。", None),
     ("error_retry_result_d_v1.mp3", "やり直してください。", "qr_gate_error_chime_v1.wav"),
+    ("qr_scan_prompt_voice_d_v1.mp3", "お手元のQRコードを、カメラにかざしてください。", None),
 )
 
 
@@ -32,10 +34,11 @@ def render(*args: str) -> None:
 
 
 async def main() -> None:
+    tracks = TRACKS[-1:] if "--only-reminder" in sys.argv[1:] else TRACKS
     with tempfile.TemporaryDirectory(prefix="reception-voice-") as temp:
         staging = Path(temp)
         recorded: dict[str, Path] = {}
-        for _, phrase, _ in TRACKS:
+        for _, phrase, _ in tracks:
             if phrase in recorded:
                 continue
             source = staging / f"speech-{len(recorded)}.mp3"
@@ -44,7 +47,7 @@ async def main() -> None:
                 raise RuntimeError(f"Invalid synthesis for: {phrase}")
             recorded[phrase] = source
 
-        for file, phrase, chime in TRACKS:
+        for file, phrase, chime in tracks:
             output = staging / file
             voice_file = recorded[phrase]
             if chime:
@@ -67,7 +70,7 @@ async def main() -> None:
                 raise RuntimeError(f"Invalid output: {file}")
 
         # Render all assets before replacing any of the originals.
-        for file, _, _ in TRACKS:
+        for file, _, _ in tracks:
             (staging / file).replace(SOUNDS / file)
         for file, phrase, chime in TRACKS:
             print(f"OK: {file} | {phrase} | chime={chime or 'none'}")
