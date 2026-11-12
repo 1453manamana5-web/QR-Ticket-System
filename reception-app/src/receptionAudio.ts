@@ -1,5 +1,5 @@
-type Sound = "detected" | "success" | "error" | "entryGuidance" | "entrySuccess" | "exitGuidance" | "exitSuccess" | "errorGuidance" | "errorResult";
-const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav",entryGuidance:"entry_osusumi_voice_d_v1.mp3",entrySuccess:"entry_success_voice_d_v1.mp3",exitGuidance:"exit_thank_you_voice_d_v1.mp3",exitSuccess:"exit_success_voice_d_v1.mp3",errorGuidance:"error_retry_guidance_d_v1.mp3",errorResult:"error_retry_result_d_v1.mp3"};
+type Sound = "detected" | "success" | "error" | "entryGuidance" | "entrySuccess" | "exitGuidance" | "exitSuccess" | "errorGuidance" | "errorResult" | "scanPrompt";
+const files:Record<Sound,string>={detected:"qr_scan_detected.wav",success:"qr_result_chime.wav",error:"qr_gate_error_chime_v1.wav",entryGuidance:"entry_osusumi_voice_d_v1.mp3",entrySuccess:"entry_success_voice_d_v1.mp3",exitGuidance:"exit_thank_you_voice_d_v1.mp3",exitSuccess:"exit_success_voice_d_v1.mp3",errorGuidance:"error_retry_guidance_d_v1.mp3",errorResult:"error_retry_result_d_v1.mp3",scanPrompt:"qr_scan_prompt_voice_d_v1.mp3"};
 const objectUrls=new Map<Sound,string>();
 let media:HTMLAudioElement|null=null;
 let activeKind:Sound|null=null;
@@ -22,7 +22,7 @@ function preloadSounds(){
     if(objectUrls.has(kind))return;
     try{
       let cache:Cache|undefined;
-      try{if(window.caches)cache=await window.caches.open("qr-reception-sounds-v3");}catch{/* Cache Storage may be unavailable */}
+      try{if(window.caches)cache=await window.caches.open("qr-reception-sounds-v4");}catch{/* Cache Storage may be unavailable */}
       let response=await cache?.match(path(kind));
       if(!response?.ok){response=await fetch(path(kind));if(!response.ok)throw Error(`Audio HTTP ${response.status}`);try{await cache?.put(path(kind),response.clone());}catch{/* Playback can still use the downloaded blob. */}}
       objectUrls.set(kind,URL.createObjectURL(await response.blob()));
@@ -68,13 +68,20 @@ export function enableReceptionVoice(){
     return true;
   }catch{return false;}
 }
+export function isReceptionAudioPlaying(){
+  return media!==null&&!media.paused&&!media.ended;
+}
+export function stopReceptionPrompt(){
+  if(activeKind!=="scanPrompt")return;
+  ++generation;media?.pause();if(media)media.currentTime=0;
+}
 export function stopReceptionGuidance(){
-  if(activeKind!=="entryGuidance"&&activeKind!=="entrySuccess"&&activeKind!=="exitGuidance"&&activeKind!=="exitSuccess"&&activeKind!=="errorGuidance"&&activeKind!=="errorResult")return;
+  if(activeKind!=="entryGuidance"&&activeKind!=="entrySuccess"&&activeKind!=="exitGuidance"&&activeKind!=="exitSuccess"&&activeKind!=="errorGuidance"&&activeKind!=="errorResult"&&activeKind!=="scanPrompt")return;
   ++generation;media?.pause();if(media)media.currentTime=0;
 }
 export async function playReceptionAudio(kind:Sound){
   const preferences=getReceptionAudioSettings();
-  const isVoice=kind==="entryGuidance"||kind==="entrySuccess"||kind==="exitGuidance"||kind==="exitSuccess"||kind==="errorGuidance"||kind==="errorResult";
+  const isVoice=kind==="entryGuidance"||kind==="entrySuccess"||kind==="exitGuidance"||kind==="exitSuccess"||kind==="errorGuidance"||kind==="errorResult"||kind==="scanPrompt";
   if(preferences.volume===0||(kind==="success"&&!preferences.successSound)||(isVoice&&!preferences.voiceGuidance))return "muted";
   const selected=kind==="error"&&preferences.voiceGuidance?"errorResult":!preferences.successSound?(kind==="entrySuccess"?"entryGuidance":kind==="exitSuccess"?"exitGuidance":kind):kind;
   const version=++generation;
