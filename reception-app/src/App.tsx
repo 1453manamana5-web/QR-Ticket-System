@@ -159,7 +159,7 @@ export default function App(){
     if(screen!=="reception")return;
     const timer=window.setInterval(()=>{
       if(!receptionAllowedRef.current||scanProcessingRef.current||busy||result||cameraFailed||
-        isReceptionAudioPlaying()||(typeof document!=="undefined"&&document.visibilityState==="hidden"))return;
+        (typeof isReceptionAudioPlaying==="function"&&isReceptionAudioPlaying())||(typeof document!=="undefined"&&document.visibilityState==="hidden"))return;
       const now=Date.now();
       if(now-lastScanActivityRef.current<60000)return;
       lastScanActivityRef.current=now;
@@ -167,13 +167,13 @@ export default function App(){
     },5000);
     const onVisibilityChange=()=>{
       if(document.visibilityState==="visible")lastScanActivityRef.current=Date.now();
-      else stopReceptionPrompt();
+      else if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
     };
     if(typeof document!=="undefined")document.addEventListener("visibilitychange",onVisibilityChange);
     return()=>{
       window.clearInterval(timer);
       if(typeof document!=="undefined")document.removeEventListener("visibilitychange",onVisibilityChange);
-      stopReceptionPrompt();
+      if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
     };
   },[screen,mode,busy,result,cameraFailed,remoteStopped,guide.open,guideSettingsOpen]);
 
@@ -843,7 +843,7 @@ export default function App(){
     let qrEventId:string|null=null;
     if(!ticketId)return;
     lastScanActivityRef.current=Date.now();
-    stopReceptionPrompt();
+    if(typeof stopReceptionPrompt==="function")stopReceptionPrompt();
 
     // 現行のチケットQRは { type, eventId, ticketId, ticketNumber } のJSON。
     // 生文字列のまま検索するとチケットIDと一致せず、毎回「チケットを確認できません」になる。
