@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - voice/mature-natural-20261111
+      - feature/idle-scan-voice-prompt-20261112
     paths:
       - scripts/generate_reception_voice.py
       - .github/workflows/generate-reception-voice.yml
@@ -14,7 +15,7 @@ permissions:
 
 jobs:
   render:
-    if: github.ref == 'refs/heads/voice/mature-natural-20261111'
+    if: github.ref == 'refs/heads/voice/mature-natural-20261111' || github.ref == 'refs/heads/feature/idle-scan-voice-prompt-20261112'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +31,12 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
       - name: Render announcement files
-        run: python scripts/generate_reception_voice.py
+        run: |
+          if [ "$GITHUB_REF_NAME" = "feature/idle-scan-voice-prompt-20261112" ]; then
+            python scripts/generate_reception_voice.py --only-reminder
+          else
+            python scripts/generate_reception_voice.py
+          fi
       - name: Check regenerated audio
         run: |
           for file in reception-app/public/sounds/*voice_d_v1.mp3 reception-app/public/sounds/error_retry_*_d_v1.mp3; do
