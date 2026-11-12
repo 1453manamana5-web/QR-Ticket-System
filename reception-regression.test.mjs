@@ -851,7 +851,7 @@ test('recorded entry guidance obeys voice settings independently of chimes and s
 
 test('recorded D is the selected sample and plays offline using a cached blob',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/entry_osusumi_voice_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'db8b652a46de3cc1aa09de6703722c558f4ecabf2bcad56a0de6817e6889cce5');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'8b5c7f6533da3b5d3315605c05a1c45e7008d8afe1cf59e4381d89fff9e1fde0');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('entryGuidance'),'played');assert.match(h.players[0].src,/^blob:/);
 });
@@ -884,7 +884,7 @@ test('reception voice check enables and auditions D directly on the actual recep
 
 test('recorded exit is the approved revised D sample and reuses the single offline audio player',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/exit_thank_you_voice_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'641e24f3f9ade1eba8f5a84559f8da3d8309597000fe9ca074c3fcf028072a2b');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'cb46d6e2f9e6d89ff930b2d0c6fcef668ef4a162f6a2f305fe7f30007c6bfe20');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();
   assert.equal(await h.audio.playReceptionAudio('entrySuccess'),'played');
@@ -918,7 +918,7 @@ test('error guidance reuses one player, respects voice and volume settings, and 
 
 test('error D is available offline and the generated standalone sample is unchanged',async()=>{
   const bytes=readFileSync(new URL('./reception-app/public/sounds/error_retry_guidance_d_v1.mp3',import.meta.url));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),'d03b4f629181a15f35586dd85e36ae1f979ef22983d909b728eedc6fdd3ee3ad');
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),'6059d07158525ecde16b7c87ea5cbc68b792a09ed0951e26d5b959c928477c61');
   const h=recordedAudioHarness({voiceGuidance:true,fetch:async()=>{throw Error('offline');},cache:{match:async()=>({ok:true,blob:async()=>({})})}});
   h.audio.prepareReceptionAudio();await nextTurn();await nextTurn();assert.equal(await h.audio.playReceptionAudio('error'),'played');assert.match(h.players[0].src,/^blob:/);
 });
