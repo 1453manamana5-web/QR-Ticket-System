@@ -1166,3 +1166,56 @@ test("obsolete communication permission failure cannot revoke a newer event appr
     assert.equal(h.renderer.root.findAll(node=>node.props["data-reception-phase"]==="preparing").length>0,true);
   }finally{await h.close();}
 });
+
+
+test('idle reminder waits one minute, respects active audio and stops outside reception',async()=>{
+  const h=await harness();
+  try{
+    await h.advancePrompt(120000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'No reminder on setup screens');
+    await h.click('受付を開始する');
+    await h.advancePrompt(59999);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not announce before a full idle minute');
+    h.setAudioPlaying(true);
+    await h.advancePrompt(1);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not interrupt another announcement');
+    h.setAudioPlaying(false);
+    await h.advancePrompt(1);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,1);
+    await h.advancePrompt(59000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,1,'Do not repeat too soon');
+    await h.advancePrompt(1000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,2);
+    await h.click('受付を停止');
+    await h.advancePrompt(180000);
+    assert.equal(h.audioRequests.filter(x=>x==='scanPrompt').length,2,'Stop reminders when reception stops');
+  }finally{await h.close();}
+});
+
+test('scanning a ticket resets idle reminder and the result suppresses playback',async()=>{
+  const h=await harness();
+  try{
+    await h.click('受付を開始する');
+    await h.advancePrompt(54000);
+    await h.scan('ticket-one');
+    await h.advancePrompt(10000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'Do not announce while showing a scan result');
+    await h.advancePrompt(120000);
+    assert.equal(h.audioRequests.includes('scanPrompt'),false,'A displayed result must suppress the reminder');
+  }finally{await h.close();}
+});
+
+test('idle reminder respects voice settings and never stops successful scan audio',async()=>{
+  const muted=recordedAudioHarness();
+  assert.equal(await muted.audio.playReceptionAudio('scanPrompt'),'muted');
+  const h=recordedAudioHarness({voiceGuidance:true,fetch:()=>new Promise(()=>{})});
+  h.audio.prepareReceptionAudio();
+  assert.equal(await h.audio.playReceptionAudio('scanPrompt'),'played');
+  assert.match(h.players[0].src,/qr_scan_prompt_voice_d_v1\.mp3$/);
+  assert.equal(h.audio.isReceptionAudioPlaying(),true);
+  h.audio.stopReceptionPrompt();
+  assert.equal(h.players[0].paused,true);
+  await h.audio.playReceptionAudio('entrySuccess');
+  h.audio.stopReceptionPrompt();
+  assert.equal(h.players[0].paused,false,'Stopping a reminder must not mute the scan success');
+});
