@@ -1,4 +1,4 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v11";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v12";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
 
@@ -9,7 +9,7 @@ async function cacheShell(cache, response) {
   const html = await response.clone().text();
   const paths = [...[...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]),
     "icons/reception-v1-192.png", "icons/reception-v1-512.png",
-    "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav", "sounds/entry_osusumi_voice_d_v1.mp3", "sounds/entry_success_voice_d_v1.mp3", "sounds/exit_thank_you_voice_d_v1.mp3", "sounds/exit_success_voice_d_v1.mp3", "sounds/error_retry_guidance_d_v1.mp3", "sounds/error_retry_result_d_v1.mp3"];
+    "sounds/qr_scan_detected.wav", "sounds/qr_result_chime.wav", "sounds/qr_gate_error_chime_v1.wav", "sounds/entry_osusumi_voice_d_v1.mp3", "sounds/entry_success_voice_d_v1.mp3", "sounds/exit_thank_you_voice_d_v1.mp3", "sounds/exit_success_voice_d_v1.mp3", "sounds/error_retry_guidance_d_v1.mp3", "sounds/error_retry_result_d_v1.mp3", "sounds/qr_scan_prompt_voice_d_v1.mp3"];
   await Promise.all(paths.filter(path => path && !path.startsWith("data:")).map(async path => {
     const url = new URL(path, indexUrl);
     if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
