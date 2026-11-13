@@ -1728,6 +1728,78 @@ function TicketDesigner({
         </div>
       )}
 
+      {printStep!=="closed"&&(
+        <div className="ticket-print-flow-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setPrintStep("closed");}}>
+          <section className="ticket-print-flow" role="dialog" aria-modal="true" aria-labelledby="ticket-print-flow-title" onKeyDown={event=>{if(event.key==="Escape"){event.stopPropagation();setPrintStep("closed");}}}>
+            <header className="ticket-print-flow-header">
+              <div>
+                <small>STEP {printStep==="choose"?"1":"2"} / 2　・　チケット印刷</small>
+                <h2 id="ticket-print-flow-title">{printStep==="choose"?"印刷する種類を選択":"印刷する範囲を指定"}</h2>
+                <p>{printStep==="choose"?"印刷の種類を選んでから、対象のチケット番号を指定します。":printKind==="normal"?"開始番号と終了番号を確認してから印刷してください。":"予備の連番範囲を指定し、印刷後に紙が出たことを確認してください。"}</p>
+              </div>
+              <button type="button" className="ticket-print-flow-close" aria-label="印刷設定を閉じる" onClick={()=>setPrintStep("closed")}>×</button>
+            </header>
+            {printStep==="choose"?(
+              <>
+                <div className="ticket-print-kind-list" role="group" aria-label="印刷の種類">
+                  <button type="button" className={printKind==="normal"?"selected":""} aria-pressed={printKind==="normal"} onClick={()=>setPrintKind("normal")}>
+                    <span className="ticket-print-kind-icon">▤</span><strong>普通の印刷</strong>
+                    <small>通常チケットだけを印刷します。予備チケットは除外します。</small>
+                    <em>{regularPrintTickets.length}枚</em>
+                  </button>
+                  <button type="button" className={printKind==="reserve"?"selected":""} aria-pressed={printKind==="reserve"} onClick={()=>setPrintKind("reserve")}>
+                    <span className="ticket-print-kind-icon">▦</span><strong>予備チケットを印刷</strong>
+                    <small>予備専用の連番から印刷します。紙の確認後に使用数へ反映されます。</small>
+                    <em>{printableTickets.filter(ticket=>ticket.reserve).length}枚を予備として発行済み</em>
+                  </button>
+                </div>
+                <footer className="ticket-print-flow-actions">
+                  <button type="button" className="ticket-print-flow-secondary" onClick={()=>setPrintStep("closed")}>キャンセル</button>
+                  <button type="button" className="ticket-print-flow-primary" disabled={printKind==="normal"&&(!regularPrintTickets.length||!reserveReady)} onClick={()=>{if(printKind==="normal")openPrintRange();else setPrintStep("range");}}>次へ：印刷範囲を指定</button>
+                </footer>
+              </>
+            ):(
+              <>
+                <div className="ticket-print-flow-back"><button type="button" onClick={()=>setPrintStep("choose")}>‹ 印刷の種類を選び直す</button><span>{printKind==="normal"?"普通の印刷":"予備チケットを印刷"}</span></div>
+                {printKind==="normal"?(
+                  <>
+                    {regularPrintTickets.length===0?<p role="alert">普通の印刷に使用できるチケットがありません。</p>:(
+                      <div className="ticket-print-flow-range">
+                        <div className="ticket-print-flow-fields">
+                          <label>開始番号
+                            <select aria-label="印刷の開始番号" value={safeRangeStart} onChange={event=>{const index=Number(event.target.value);setPrintRangeStart(index);if(printRangeEnd<index)setPrintRangeEnd(index);}}>
+                              {regularPrintTickets.map((ticket,index)=><option key={ticket.id} value={index}>{ticket.qrNumber}</option>)}
+                            </select>
+                          </label>
+                          <span aria-hidden="true">〜</span>
+                          <label>終了番号
+                            <select aria-label="印刷の終了番号" value={safeRangeEnd} onChange={event=>setPrintRangeEnd(Number(event.target.value))}>
+                              {regularPrintTickets.map((ticket,index)=><option key={ticket.id} value={index} disabled={index<safeRangeStart}>{ticket.qrNumber}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="ticket-print-flow-summary"><span>選択した範囲</span><strong>{wizardSelectedTickets.length}枚</strong><small>A4縦／横{printColumns}枚／チケット間隔 0 mm</small></div>
+                        {printFitError&&<p role="alert" className="ticket-print-flow-error">{printFitError}</p>}
+                        {reserveNotice&&<p role="alert" className="ticket-print-flow-error">{reserveNotice}</p>}
+                        <p className="ticket-print-flow-note">印刷ボタンを押すまでプリンターは起動しません。プレビューで番号と枚数を確認してから進んでください。</p>
+                      </div>
+                    )}
+                    <footer className="ticket-print-flow-actions">
+                      <button type="button" className="ticket-print-flow-secondary" onClick={()=>setPrintStep("choose")}>戻る</button>
+                      <button type="button" className="ticket-print-flow-primary" disabled={!reserveReady||Boolean(printFitError)||sharing||wizardSelectedTickets.length===0} onClick={printRegularTickets}>この範囲を印刷する（{wizardSelectedTickets.length}枚）</button>
+                    </footer>
+                  </>
+                ):eventId?(
+                  <div className="ticket-print-flow-reserve">
+                    <ReserveConfiguration wizard practice={practice} store={reserveStore??undefined} eventId={eventId} tickets={tickets} build={prepareReserve} onSaved={ids=>{setReservedIds(ids);setReserveReady(true);setReserveNotice("");}}/>
+                  </div>
+                ):<p role="alert">先にイベントを選択してください。</p>}
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
       <div
         className="ticket-print-sheet"
         ref={printSheetRef}
