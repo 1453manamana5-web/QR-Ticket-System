@@ -968,6 +968,7 @@ function TicketDesigner({
           window.addEventListener('afterprint',()=>{copy.remove();document.body.classList.remove('ticket-print-copy-active');},{once:true});
           window.focus();window.print();
         });
+        setPrintStep("closed");
         return;
       }
 
@@ -1008,6 +1009,8 @@ function TicketDesigner({
       if (printWindow.document.readyState === "complete") {
         window.setTimeout(startPrint, 300);
       }
+      // After the explicit final action, restore the design workspace.
+      setPrintStep("closed");
     } catch (error) {
       console.error("印刷画面を開けませんでした。", error);
       alert("印刷画面を開けませんでした。ポップアップを許可して、もう一度お試しください。");
