@@ -29,14 +29,57 @@ async function open(width,query=''){
  const context=await browser.newContext({viewport:{width,height:1000},serviceWorkers:'block'});context.setDefaultTimeout(10000);
  await context.addInitScript(()=>{window.print=()=>{};});const page=await context.newPage();await page.goto(origin+query);await page.waitForSelector('.ticket-design-number');return {context,page};
 }
+async function printNormalTickets(page){
+ await page.getByRole('button',{name:'印刷',exact:true}).click();
+ await page.getByRole('button',{name:'次へ：印刷範囲を指定'}).click();
+ await page.getByRole('button',{name:/この範囲を印刷する/}).click();
+}
 async function metrics(locator){return locator.evaluate(el=>{const range=document.createRange();range.selectNodeContents(el.firstChild);const s=getComputedStyle(el);return {font:s.fontSize,family:s.fontFamily,weight:s.fontWeight,width:range.getBoundingClientRect().width,card:el.parentElement.getBoundingClientRect().width};});}
+
+test('print opens selection first; only the chosen normal ticket range is sent to print',async()=>{
+ const {context,page}=await open(820,'?count=6');
+ try{
+  const popups=[];
+  page.on('popup',popup=>popups.push(popup));
+  await page.getByRole('button',{name:'印刷',exact:true}).click();
+  assert.equal(popups.length,0,'Opening print must not launch a print dialog');
+  assert.equal(await page.locator('.ticket-print-kind-list button').count(),2);
+  await page.getByRole('button',{name:'次へ：印刷範囲を指定'}).click();
+  assert.equal(popups.length,0,'Choosing the type must not launch a print dialog');
+  await page.getByLabel('印刷の開始番号').selectOption('1');
+  await page.getByLabel('印刷の終了番号').selectOption('3');
+  assert.match(await page.locator('.ticket-print-flow-summary').innerText(),/3枚/);
+  const pending=page.waitForEvent('popup');
+  await page.getByRole('button',{name:/この範囲を印刷する/}).click();
+  const popup=await pending;
+  await popup.locator('.ticket-print-sheet[data-artwork-ready="true"]').waitFor();
+  const numbers=await popup.locator('.ticket-print-card .ticket-design-number').allTextContents();
+  assert.deepEqual(numbers,['002','003','004']);
+  await popup.close();
+ }finally{await context.close();}
+});
+
+test('reserve selection opens the safe reserve workflow without printing anything',async()=>{
+ const {context,page}=await open(820,'?count=6');
+ try{
+  const popups=[];
+  page.on('popup',popup=>popups.push(popup));
+  await page.getByRole('button',{name:'印刷',exact:true}).click();
+  await page.getByRole('button',{name:/^予備チケットを印刷/}).click();
+  await page.getByRole('button',{name:'次へ：印刷範囲を指定'}).click();
+  assert.equal(popups.length,0);
+  assert.equal(await page.locator('.ticket-print-flow-reserve').count(),1);
+  assert.ok((await page.locator('.ticket-print-flow-reserve').innerText()).includes('予備の指定方法'));
+ }finally{await context.close();}
+});
+
 test('number glyph proportions match between the editor, actual size and the real print popup at desktop and iPad widths',async()=>{
  for(const width of [1440,820]){
   const {context,page}=await open(width);
   await page.locator('.studio-dock').getByRole('button',{name:/番号/}).click();const size=page.getByLabel('選択パーツのサイズ',{exact:true});await size.focus();await size.press('Home');for(let i=0;i<38;i++)await size.press('ArrowRight');assert.equal(await size.inputValue(),'48');
   const editor=await metrics(page.locator('.ticket-design-card > .ticket-design-number'));
   if(process.env.TICKET_SCREENSHOT_DIR)await page.locator('.ticket-design-card').screenshot({path:process.env.TICKET_SCREENSHOT_DIR+'/ticket-editor-'+width+'.png'});
-  const pending=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await pending;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
+  const pending=page.waitForEvent('popup');await printNormalTickets(page);const popup=await pending;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
   await popup.evaluate(()=>document.fonts.ready);
   const printed=await metrics(popup.locator('.ticket-design-number').first());
   const usedFonts=[];
@@ -70,7 +113,7 @@ test('tickets meet edge to edge and move intact to the next A4 sheet, including 
   design=JSON.stringify({title:'CUT-CHECK',cardRatio:'custom',customWidth:width,customHeight:height,printWidthMm:width,printHeightMm:height,printGapMm:4,cardsPerRow:requested,numberSize:24,textReferenceWidth:400});
   const {context,page}=await open(1440,'?count='+count);
   try{
-   const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
+   const ready=page.waitForEvent('popup');await printNormalTickets(page);const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
    const rows=await popup.locator('.ticket-print-row').evaluateAll(rows=>rows.map(row=>({gap:getComputedStyle(row).gap,margin:getComputedStyle(row).marginBottom,cards:[...row.children].map(card=>{const r=card.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})})));
    assert.equal(rows[0].cards.length,columns);
    for(let i=0;i<rows.length;i++){
@@ -92,7 +135,7 @@ test('old offline reserve templates also print without gaps and fit within A4',a
  design=JSON.stringify({title:'RESERVE',printWidthMm:90,cardsPerRow:4,numberSize:24,textReferenceWidth:400});
  const {context,page}=await open(1440,'?count=12');
  try{
-  const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const original=await ready;await original.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');
+  const ready=page.waitForEvent('popup');await printNormalTickets(page);const original=await ready;await original.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');
   const packet=await original.evaluate(()=>({eventId:'reserve',eventName:'RESERVE',preparedAt:new Date().toISOString(),css:document.querySelector('style').textContent,template:document.querySelector('.ticket-print-card').outerHTML,sheetStyle:document.querySelector('.ticket-print-sheet').getAttribute('style')+';--ticket-print-gap:4mm',columns:4,confirmed:[],pending:{id:'batch',ids:Array.from({length:12},(_,i)=>'T'+i)},tickets:Array.from({length:12},(_,i)=>({id:'T'+i,number:String(i+1).padStart(3,'0'),svg:document.querySelector('.ticket-design-qr').innerHTML}))}));
   const pending=page.waitForEvent('popup');await page.evaluate(packet=>window.reserveProbe(packet),packet);const popup=await pending;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
   assert.equal(await popup.locator('.ticket-print-row').count(),6);assert.equal(await popup.locator('.ticket-print-row').first().locator('.ticket-print-card').count(),2);
@@ -108,7 +151,7 @@ test('the visible background edges meet when the saved card ratio would add whit
  design=JSON.stringify({backgroundImage:'data:image/svg+xml;base64,'+Buffer.from(svg).toString('base64'),title:'FULL ART',titleX:30,titleY:50,titleSize:12,numberSize:18,numberX:30,numberY:60,qrX:76,qrY:50,qrSize:16,textReferenceWidth:400,printWidthMm:90,cardRatio:'16:9',cardsPerRow:2});
  const {context,page}=await open(1440,'?count=23');
  try{
-  const ready=page.waitForEvent('popup');await page.getByRole('button',{name:'印刷',exact:true}).click();const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
+  const ready=page.waitForEvent('popup');await printNormalTickets(page);const popup=await ready;await popup.waitForSelector('.ticket-print-sheet[data-artwork-ready="true"]');await popup.emulateMedia({media:'print'});
   const geometry=await popup.locator('.ticket-print-card').evaluateAll(cards=>cards.map(card=>{
    const rect=card.getBoundingClientRect(),canvas=card.querySelector('.ticket-print-artwork').getBoundingClientRect();
    const top=canvas.top+(canvas.height-canvas.width/4)/2,bottom=top+canvas.width/4;
@@ -136,7 +179,7 @@ test('packing preserves layers outside the background and also works when popups
  const {context,page}=await open(1440,'?count=4');
  try{
   await page.evaluate(()=>{window.open=()=>null;window.print=()=>{window.fallbackPrints=(window.fallbackPrints||0)+1;};});
-  await page.getByRole('button',{name:'印刷',exact:true}).click();await page.waitForFunction(()=>window.fallbackPrints===1);await page.emulateMedia({media:'print'});
+  await printNormalTickets(page);await page.waitForFunction(()=>window.fallbackPrints===1);await page.emulateMedia({media:'print'});
   const geometry=await page.locator('[data-print-copy] .ticket-print-card').evaluateAll(cards=>cards.map(card=>{
    const rect=card.getBoundingClientRect();return {top:rect.top,bottom:rect.bottom,layers:[...card.querySelectorAll('.ticket-design-number,.ticket-design-title,.ticket-design-qr')].map(el=>{const r=el.getBoundingClientRect();return {top:r.top,bottom:r.bottom};})};
   }));
