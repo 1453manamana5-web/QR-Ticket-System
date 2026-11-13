@@ -65,7 +65,7 @@ test('reserve selection opens the safe reserve workflow without printing anythin
   const popups=[];
   page.on('popup',popup=>popups.push(popup));
   await page.getByRole('button',{name:'印刷',exact:true}).click();
-  await page.getByRole('button',{name:/^予備チケットを印刷/}).click();
+  await page.getByRole('button',{name:/予備チケットを印刷/}).click();
   await page.getByRole('button',{name:'次へ：印刷範囲を指定'}).click();
   assert.equal(popups.length,0);
   assert.equal(await page.locator('.ticket-print-flow-reserve').count(),1);
