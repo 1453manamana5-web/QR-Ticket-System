@@ -416,6 +416,10 @@ function TicketDesigner({
   const [reservedIds,setReservedIds]=useState<string[]>([]);
   const [reserveReady,setReserveReady]=useState(!eventId);
   const [reserveNotice,setReserveNotice]=useState("");
+  const regularPrintTickets=useMemo(
+    ()=>printableTickets.filter(ticket=>!ticket.reserve&&!reservedIds.includes(ticket.id)),
+    [printableTickets,reservedIds]
+  );
   useEffect(()=>{let active=true;if(eventId)void (reserveStore?reserveStore.loadReservePackage(eventId):loadReservePackage(eventId)).then(packet=>{if(active){setReservedIds(packet?.tickets.map(t=>t.id)??[]);setReserveReady(true);}}).catch(()=>{if(active)setReserveNotice("予備の印刷記録を確認できません。予備設定を確認してから印刷してください。");});return()=>{active=false;};},[eventId]);
   const detectionId = useRef(0);
   const imageReadVersion=useRef(0);
@@ -524,6 +528,11 @@ function TicketDesigner({
   const dragTarget = useRef<"qr" | "number" | null>(null);
   const dragStart = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
+  const [printStep,setPrintStep]=useState<"closed"|"choose"|"range">("closed");
+  const [printKind,setPrintKind]=useState<"normal"|"reserve">("normal");
+  const [printRangeStart,setPrintRangeStart]=useState(0);
+  const [printRangeEnd,setPrintRangeEnd]=useState(0);
+
   const [
     startIndex,
     setStartIndex,
@@ -629,7 +638,7 @@ function TicketDesigner({
   const printColumns=Math.max(1,Math.min(Math.round(settings.cardsPerRow),4,Math.floor(194/safePrintWidth)));
   const printFitError=safePrintWidth>194||printHeightMm>281?"A4の印刷範囲に収まりません。幅194mm・高さ281mm以内にしてください。":"";
 
-  const selectedTickets =
+  const legacySelectedTickets =
     useMemo(() => {
       if (
         printableTickets.length === 0
@@ -665,6 +674,22 @@ function TicketDesigner({
       startIndex,
       endIndex,
     ]);
+
+  const safeRangeStart=Math.min(Math.max(0,printRangeStart),Math.max(0,regularPrintTickets.length-1));
+  const safeRangeEnd=Math.min(Math.max(safeRangeStart,printRangeEnd),Math.max(0,regularPrintTickets.length-1));
+  const wizardSelectedTickets=regularPrintTickets.slice(safeRangeStart,safeRangeEnd+1);
+  // The print dialog controls the final list. The old inventory selection remains
+  // independent for editing the preview and does not launch print by itself.
+  const selectedTickets=printStep==="range"&&printKind==="normal"
+    ? wizardSelectedTickets
+    : legacySelectedTickets;
+  const openPrintRange=()=>{
+    const index=regularPrintTickets.findIndex(ticket=>ticket.qrNumber===initialTicketNumber);
+    const first=index>=0?index:0;
+    setPrintRangeStart(first);
+    setPrintRangeEnd(index>=0?index:Math.max(0,regularPrintTickets.length-1));
+    setPrintStep("range");
+  };
 
   const previewTicket =
     selectedTickets[0] ??
@@ -907,7 +932,7 @@ function TicketDesigner({
       sheetStyle:Object.entries(printSheetStyle).map(([key,value])=>`${key}:${value}`).join(';'),columns:printColumns,tickets:entries,confirmed:[],pending:null};
   };
 
-  const printTickets = () => {
+  const printRegularTickets = () => {
     if(sharing)return;
     if(printFitError){alert(printFitError);return;}
     if(practice){alert("練習：印刷する操作を確認しました。本番では印刷プレビューで枚数と用紙を確認してください。");return;}
@@ -1102,7 +1127,7 @@ function TicketDesigner({
           <button type="button" disabled={!redo.current.length} onClick={()=>restore(redo,undo)} aria-label="やり直す">↷</button>
           <button type="button" onClick={()=>setShowActualSize(true)}>実寸確認</button>
           <button type="button" className="studio-primary" onClick={saveDesign} disabled={sharing}>{sharing?"共有データ確認中…":"保存"}</button>
-          <button type="button" onClick={printTickets} disabled={sharing||Boolean(printFitError)}>印刷</button><button type="button" disabled={!eventId||sharing} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備印刷</button>
+          <button type="button" onClick={()=>{setPrintKind("normal");setPrintStep("choose");}} disabled={sharing}>印刷</button><button type="button" disabled={!eventId||sharing} aria-expanded={panels.includes("reserve")} onClick={()=>togglePanel("reserve")}>予備の準備</button>
           <button type="button" onClick={onClose} aria-label="デザイン画面を閉じる">×</button></nav>
         </header>
         <main className="studio-workspace">
