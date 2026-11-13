@@ -103,7 +103,7 @@ test('print title treats event names as text and prints only once',async()=>{
   let renderer;await act(async()=>{renderer=create(React.createElement(exports.default,{eventName:name,tickets:[{id:'1',qrNumber:'1',valid:true,status:'unused'}],qrValue:()=>'',onClose(){}}));});
   const click=async text=>{const button=renderer.root.findAllByType('button').find(n=>n.children.join('')===text);assert.ok(button,text);await act(async()=>button.props.onClick());};
   try{
-    await click('画像を使わず新規作成');await click('印刷');
+    await click('画像を使わず新規作成');await click('印刷');assert.equal(prints,0,'種類の選択だけで印刷してはいけません');await click('次へ：印刷範囲を指定');assert.equal(prints,0,'範囲指定だけで印刷してはいけません');await click('この範囲を印刷する（1枚）');
     assert.equal(printDocument.title,name+' - 印刷');assert.equal(html.includes('<script>'),false);assert.equal(html.includes(name),false);
     load();assert.equal(prints,1);
   }finally{await act(async()=>renderer.unmount());}

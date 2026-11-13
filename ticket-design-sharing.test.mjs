@@ -60,7 +60,7 @@ test('printing selects the live editor sheet and carries the current number size
  const mod=designerModule(storage,{globals:{document:{querySelector:()=>{throw Error('wrong stale global sheet');}},window:{confirm:()=>true,open:()=>({document:doc,closed:false,focus(){},print(){},addEventListener(){}}),setTimeout:fn=>fn()}}});
  await act(async()=>{r=create(React.createElement(mod.default,{eventId:'print',eventName:'E',tickets:ticketList.map(t=>({...t,reserve:false})),qrValue:t=>t.id,onClose(){}}),{createNodeMock:n=>n.props.className==='ticket-print-sheet'?sheet:null});});
  await act(async()=>button(r,'＃番号').props.onClick());
- await act(async()=>r.root.findByProps({'aria-label':'選択パーツのサイズ'}).props.onChange({target:{value:'48'}}));await act(async()=>button(r,'印刷').props.onClick());assert.equal(printed.font,'12mm');await act(async()=>r.unmount());
+ await act(async()=>r.root.findByProps({'aria-label':'選択パーツのサイズ'}).props.onChange({target:{value:'48'}}));await act(async()=>button(r,'印刷').props.onClick());assert.equal(printed,undefined,'the print kind dialog must not open the printer');await act(async()=>button(r,'次へ：印刷範囲を指定').props.onClick());assert.equal(printed,undefined,'the range step must not open the printer');await act(async()=>button(r,'この範囲を印刷する（3枚）').props.onClick());assert.equal(printed.font,'12mm');await act(async()=>r.unmount());
 });
 
 test('reserve printing refreshes its template from the current design and preserves a pending batch',async()=>{

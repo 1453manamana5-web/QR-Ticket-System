@@ -2814,3 +2814,275 @@
 @media print {
   body.ticket-print-copy-active > :not([data-print-copy]) { display:none !important; }
 }
+
+
+/* Three-step print interaction: open → choose kind → pick number range → print.
+   Kept separate from the floating design inspectors so iPad users can finish
+   the operation without accidental printing. */
+@media screen {
+  .ticket-print-flow-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 8500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left));
+    box-sizing: border-box;
+    background: rgba(21, 33, 45, .50);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .ticket-print-flow {
+    width: min(710px, 100%);
+    max-height: min(88dvh, 850px);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: clamp(18px, 3vw, 30px);
+    box-sizing: border-box;
+    border: 1px solid #dbe3ed;
+    border-radius: 23px;
+    background: #fff;
+    color: #243449;
+    box-shadow: 0 20px 70px rgba(8, 23, 42, .3);
+    -webkit-overflow-scrolling: touch;
+  }
+  .ticket-print-flow-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    margin-bottom: 23px;
+  }
+  .ticket-print-flow-header small {
+    font-weight: 750;
+    font-size: 12px;
+    letter-spacing: .055em;
+    color: #4274a8;
+  }
+  .ticket-print-flow-header h2 {
+    margin: 9px 0 8px;
+    font-size: clamp(23px, 2.8vw, 30px);
+    letter-spacing: -.025em;
+    color: #1b2e42;
+  }
+  .ticket-print-flow-header p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #586a7b;
+  }
+  .ticket-studio .ticket-print-flow-close {
+    flex: 0 0 42px;
+    width: 42px;
+    min-height: 42px;
+    border-radius: 12px;
+    border-color: #dce3ea;
+    background: #f4f6f9;
+    font-size: 25px;
+    line-height: 1;
+  }
+  .ticket-print-kind-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .ticket-studio .ticket-print-kind-list > button {
+    position: relative;
+    min-height: 176px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 19px;
+    border: 2px solid #d9e1eb;
+    border-radius: 17px;
+    background: #f8fafc;
+    text-align: left;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .ticket-studio .ticket-print-kind-list > button.selected {
+    border-color: #2378dc;
+    background: #eff6ff;
+    box-shadow: inset 0 0 0 1px #2378dc;
+  }
+  .ticket-studio .ticket-print-kind-list > button.selected::after {
+    content: "✓";
+    position: absolute;
+    right: 15px;
+    top: 15px;
+    display: grid;
+    place-items: center;
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background: #2378dc;
+    color: white;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .ticket-print-kind-icon {
+    font-size: 27px;
+    color: #2378dc;
+    line-height: 1;
+  }
+  .ticket-print-kind-list strong { font-size: 19px; font-weight: 800; }
+  .ticket-print-kind-list small { font-size: 13px; line-height: 1.55; color: #627387; }
+  .ticket-print-kind-list em { margin-top: auto; font-size: 12px; color: #486581; font-weight: 750; font-style: normal; }
+  .ticket-print-flow-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 22px;
+    border-top: 1px solid #e8edf2;
+    padding-top: 19px;
+  }
+  .ticket-studio .ticket-print-flow-actions button {
+    min-height: 48px;
+    padding: 10px 20px;
+    font-size: 15px;
+    font-weight: 750;
+  }
+  .ticket-studio .ticket-print-flow-primary {
+    color: #fff;
+    background: #2075db;
+    border-color: #2075db;
+  }
+  .ticket-studio .ticket-print-flow-secondary {
+    color: #364d64;
+    background: #f3f5f7;
+    border-color: #dce3eb;
+  }
+  .ticket-print-flow-back {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    color: #536a82;
+  }
+  .ticket-studio .ticket-print-flow-back button { border: 0; background: transparent; color: #236bc6; font-weight: 750; }
+  .ticket-print-flow-back span { font-weight: 750; }
+  .ticket-print-flow-range {
+    padding: 18px;
+    border: 1px solid #e0e8f0;
+    border-radius: 16px;
+    background: #f8fafc;
+  }
+  .ticket-print-flow-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+    align-items: end;
+    gap: 12px;
+  }
+  .ticket-print-flow-fields > label,
+  .ticket-print-flow-reserve .reserve-print-range-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 750;
+    color: #43566e;
+  }
+  .ticket-print-flow-fields select,
+  .ticket-print-flow-reserve .reserve-print-range-fields select {
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+    padding: 10px 12px;
+    border: 1px solid #cfd9e4;
+    border-radius: 10px;
+    color: #20364f;
+    background: #fff;
+    font-size: 17px;
+    font-weight: 750;
+  }
+  .ticket-print-flow-fields > span {
+    margin-bottom: 13px;
+    text-align: center;
+    color: #8394a7;
+    font-size: 21px;
+  }
+  .ticket-print-flow-summary {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+    border-top: 1px solid #e0e8f0;
+    padding-top: 17px;
+    color: #486178;
+    font-size: 14px;
+  }
+  .ticket-print-flow-summary strong {
+    font-size: 29px;
+    line-height: 1;
+    color: #1e66bf;
+  }
+  .ticket-print-flow-summary small { margin-left: auto; font-size: 12px; color: #637386; }
+  .ticket-print-flow-note { margin: 15px 0 0; font-size: 12px; line-height: 1.6; color: #617083; }
+  .ticket-print-flow-error { color: #b03939; font-weight: 700; }
+  .ticket-print-flow-reserve {
+    padding: 6px 2px 2px;
+  }
+  .ticket-print-flow-reserve .reserve-print-controls {
+    display: grid;
+    gap: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .ticket-print-flow-reserve .reserve-print-controls > p { margin: 0; }
+  .ticket-print-flow-reserve .reserve-print-controls > label,
+  .ticket-print-flow-reserve .reserve-print-range-fields {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+  .ticket-print-flow-reserve .reserve-print-range-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px;
+    border: 1px solid #dfe7ef;
+    border-radius: 14px;
+    background: #f8fafc;
+  }
+  .ticket-print-flow-reserve .reserve-print-range-fields output {
+    min-height: 46px;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #dfe5ee;
+    border-radius: 10px;
+    background: #edf2f7;
+    color: #233953;
+    font-size: 17px;
+    font-weight: 800;
+  }
+  .ticket-print-flow-reserve .reserve-print-range-fields p { grid-column: 1 / -1; margin: 0; }
+  .ticket-print-flow-reserve .reserve-print-controls button {
+    min-height: 46px;
+    border: 1px solid #cbd8e8;
+    background: #f4f7fb;
+    color: #23405d;
+    font-size: 14px;
+    font-weight: 750;
+  }
+  .ticket-print-flow-reserve .reserve-print-controls button:enabled:hover { background: #e9f2ff; }
+  .ticket-print-flow-reserve .reserve-print-controls a { color: #1e67bc; }
+  .ticket-print-flow :is(button, input, select):focus-visible { outline: 3px solid #8bb9ff; outline-offset: 2px; }
+}
+@media screen and (max-width: 580px) {
+  .ticket-print-flow-backdrop { padding: 7px; }
+  .ticket-print-flow { padding: 16px; border-radius: 15px; max-height: 96dvh; }
+  .ticket-print-kind-list { grid-template-columns: minmax(0, 1fr); }
+  .ticket-studio .ticket-print-kind-list > button { min-height: 120px; }
+  .ticket-print-flow-fields, .ticket-print-flow-reserve .reserve-print-range-fields { grid-template-columns: minmax(0, 1fr); }
+  .ticket-print-flow-fields > span { display: none; }
+  .ticket-print-flow-reserve .reserve-print-range-fields p { grid-column: auto; }
+}
+@media print {
+  .ticket-print-flow-backdrop { display: none !important; }
+}
