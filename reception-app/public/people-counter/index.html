@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=2">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 01</div>
+      <div class="trial-tag">PROTOTYPE 02</div>
     </header>
     <main>
       <div class="intro">
@@ -43,6 +43,7 @@
             <div class="camera-actions">
               <button type="button" id="startButton" class="button primary">計測を開始</button>
               <button type="button" id="stopButton" class="button secondary" disabled>計測を停止</button>
+              <span id="tracking" class="tracking" role="status">検出待ち</span>
               <span id="fps" class="fps">検出速度 —</span>
             </div>
             <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
@@ -50,7 +51,13 @@
 
           <div class="card config-card">
             <div class="section-head"><h2>計測ラインの調整</h2><span class="section-note">設定は端末に保存</span></div>
-            <label for="movement">映像内の入場方向</label>
+            <label for="viewMode">カメラの設置</label>
+            <select id="viewMode" aria-describedby="viewHint">
+              <option value="side">真横・横向きの通過（試験）</option>
+              <option value="standard">斜め上からの通過（標準）</option>
+            </select>
+            <p id="viewHint" class="hint"></p>
+            <label class="direction-label" for="movement">映像内の入場方向</label>
             <select id="movement">
               <option value="x+">左 → 右</option>
               <option value="x-">右 → 左</option>
@@ -61,7 +68,7 @@
             <input type="range" id="firstLine" min="20" max="48" value="40" step="1">
             <div class="slider-row"><label for="secondLine">ライン B：入場確定</label><span id="secondValue">60%</span></div>
             <input type="range" id="secondLine" min="52" max="80" value="60" step="1">
-            <p class="hint">2本のラインをA→Bの順に越えたときだけ+1。人の動きが映像の横方向なら左右、奥行き方向なら上下を選びます。位置を変更すると追跡をリセットします。</p>
+            <p class="hint">黄色い追跡点が2本のラインをA→Bの順に越えたときだけ+1。人の動きが映像の横方向なら左右、奥行き方向なら上下を選びます。設置・方向・位置を変更すると追跡をリセットします。</p>
           </div>
         </section>
 
@@ -91,6 +98,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=2"></script>
 </body>
 </html>

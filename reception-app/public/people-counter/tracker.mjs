@@ -1,96 +1,93 @@
-/**
- * Two-line people counter. Coordinates are normalized [0,1] inside the video.
- * A single moving detection must cross A and then B in the selected direction.
- * No face recognition, persistent person IDs, or video recording.
- */
+/** Two-line, short-lived tracking. No face recognition or persistent identity. */
 export class LineTracker {
   constructor(onCount = () => {}) {
     this.onCount = onCount;
-    this.configure({ axis: "x", direction: 1, first: 0.40, second: 0.60 });
+    this.configure();
   }
 
-  configure({ axis = "x", direction = 1, first = 0.40, second = 0.60 } = {}) {
-    if (!["x", "y"].includes(axis) || ![1, -1].includes(direction) ||
-      first < 0.10 || second > 0.90 || second - first < 0.10) {
-      throw new Error("計測ラインの設定が不正です。");
+  configure({ axis = 'x', direction = 1, first = 0.40, second = 0.60,
+    minHits = 2, minMeanScore = 0.45 } = {}) {
+    if (!['x', 'y'].includes(axis) || ![1, -1].includes(direction) ||
+      ![first, second, minHits, minMeanScore].every(Number.isFinite) ||
+      first < 0.10 || second > 0.90 || second - first < 0.10 ||
+      minHits < 2 || minMeanScore < 0 || minMeanScore > 1) {
+      throw new Error('計測ラインの設定が不正です。');
     }
-    this.axis = axis;
-    this.direction = direction;
-    this.first = first;
-    this.second = second;
+    Object.assign(this, { axis, direction, first, second, minHits, minMeanScore });
     this.reset();
   }
 
-  reset() {
-    this.tracks = [];
-    this.nextId = 1;
-  }
+  reset() { this.tracks = []; this.nextId = 1; }
 
   position(point) {
-    const value = this.axis === "x" ? point.x : point.y;
+    const value = point[this.axis];
     return this.direction === 1 ? value : 1 - value;
   }
 
-  // points: [{x, y, w?, h?}] all normalized to 0..1.
   update(points, timeMs) {
     const now = Number.isFinite(timeMs) ? timeMs : Date.now();
-    const recent = this.tracks.filter(track => now - track.lastSeen <= 1400);
+    points = points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+    // After a long interruption, do not join a new visitor to an old track.
+    const recent = this.tracks.filter(t => now >= t.lastSeen && now - t.lastSeen <= 1000);
     const candidates = [];
     recent.forEach((track, ti) => {
+      const dt = now - track.lastSeen;
+      const horizon = Math.min(dt, 450);
+      const predicted = { x: track.x + track.vx * horizon, y: track.y + track.vy * horizon };
       points.forEach((point, pi) => {
-        const dx = track.x - point.x;
-        const dy = track.y - point.y;
-        const distance = Math.hypot(dx, dy);
-        const allowance = 0.13 + Math.min(0.12, Math.max(0, now - track.lastSeen) / 5000);
-        if (distance <= allowance) candidates.push({ ti, pi, distance });
+        const predictedDistance = Math.hypot(predicted.x - point.x, predicted.y - point.y);
+        const rawDistance = Math.hypot(track.x - point.x, track.y - point.y);
+        if (track.counted && this.position(point) < this.first - 0.035) return;
+        const along = Math.abs(point[this.axis] - track[this.axis]);
+        const across = Math.abs(point[this.axis === 'x' ? 'y' : 'x'] - track[this.axis === 'x' ? 'y' : 'x']);
+        // A wider gate only along the selected walking direction. Keep separate
+        // lanes and similarly-sized neighbouring people from stealing a track.
+        const allowance = Math.min(0.42, 0.22 + dt / 1800);
+        const crossAllowance = Math.min(0.18, 0.09 + dt / 10000);
+        const sizeRatio = track.w && point.w ? Math.max(track.w / point.w, point.w / track.w) : 1;
+        if (across > crossAllowance || sizeRatio > 3 ||
+          (predictedDistance > allowance && along > allowance) || rawDistance > 0.55) return;
+        candidates.push({ ti, pi, distance: predictedDistance * 0.8 + rawDistance * 0.2 + Math.log(sizeRatio) * 0.025 });
       });
     });
     candidates.sort((a, b) => a.distance - b.distance);
-    const claimedTracks = new Set();
-    const claimedPoints = new Set();
+    const claimedTracks = new Set(), claimedPoints = new Set();
     for (const candidate of candidates) {
       if (claimedTracks.has(candidate.ti) || claimedPoints.has(candidate.pi)) continue;
-      claimedTracks.add(candidate.ti);
-      claimedPoints.add(candidate.pi);
-      const track = recent[candidate.ti];
-      const point = points[candidate.pi];
-      const previous = this.position(track);
-      const current = this.position(point);
+      claimedTracks.add(candidate.ti); claimedPoints.add(candidate.pi);
+      const track = recent[candidate.ti], point = points[candidate.pi];
+      const previous = this.position(track), current = this.position(point);
+      const dt = Math.max(1, now - track.lastSeen);
+      track.hits++;
+      track.scoreSum += point.score ?? 1;
       if (!track.counted) {
-        if (previous < this.first && current >= this.first) {
-          track.armedAt = now;
+        if (previous < this.first && current >= this.first) track.armedAt = now;
+        if (current < this.first - 0.035) { track.armedAt = null; track.pending = false; }
+        if (track.armedAt !== null && now - track.armedAt > 12000) {
+          track.armedAt = null; track.pending = false;
         }
-        if (current < this.first - 0.035) track.armedAt = null;
-        if (track.armedAt !== null && now - track.armedAt <= 12000 &&
-            previous < this.second && current >= this.second) {
-          track.counted = true;
-          track.armedAt = null;
+        if (track.armedAt !== null && previous < this.second && current >= this.second) track.pending = true;
+        // A fast crossing may reach B on its second observation. Confirm on a
+        // subsequent frame without losing the completed crossing or counting twice.
+        if (track.pending && current >= this.second && track.hits >= this.minHits &&
+          track.scoreSum / track.hits >= this.minMeanScore) {
+          track.counted = true; track.armedAt = null; track.pending = false;
           this.onCount({ trackId: track.id, at: now });
         }
-        if (track.armedAt !== null && now - track.armedAt > 12000) {
-          track.armedAt = null;
-        }
       }
-      track.x = point.x;
-      track.y = point.y;
-      track.lastSeen = now;
-      track.w = point.w || 0;
-      track.h = point.h || 0;
+      track.vx = track.vx * 0.35 + ((point.x - track.x) / dt) * 0.65;
+      track.vy = track.vy * 0.35 + ((point.y - track.y) / dt) * 0.65;
+      Object.assign(track, { x: point.x, y: point.y, w: point.w || 0, h: point.h || 0, lastSeen: now });
     }
-    points.forEach((point, index) => {
-      if (claimedPoints.has(index)) return;
-      recent.push({
-        id: this.nextId++, x: point.x, y: point.y,
-        w: point.w || 0, h: point.h || 0,
-        lastSeen: now, counted: false, armedAt: null,
-      });
+    points.forEach((point, pi) => {
+      if (claimedPoints.has(pi)) return;
+      recent.push({ id: this.nextId++, x: point.x, y: point.y, w: point.w || 0, h: point.h || 0,
+        vx: 0, vy: 0, hits: 1, scoreSum: point.score ?? 1, lastSeen: now,
+        counted: false, armedAt: null, pending: false });
     });
     this.tracks = recent;
-    return this.tracks;
+    return recent;
   }
 
-  // Normalized visual position of a line, accounting for a reversed direction.
-  lineAt(value) {
-    return this.direction === 1 ? value : 1 - value;
-  }
+  lineAt(value) { return this.direction === 1 ? value : 1 - value; }
 }

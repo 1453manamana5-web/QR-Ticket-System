@@ -1,4 +1,5 @@
-import { LineTracker } from "./tracker.mjs";
+import { LineTracker } from "./tracker.mjs?v=2";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=2";
 
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
 const SDK_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
@@ -9,7 +10,7 @@ const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
 const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
 const startButton = $("startButton"), stopButton = $("stopButton");
-const defaults = { movement: "x+", first: 40, second: 60 };
+const defaults = { movement: "x+", first: 40, second: 60, profile: "side" };
 
 let db = null;
 let session = "";
@@ -20,6 +21,7 @@ let stream = null;
 let running = false;
 let raf = 0;
 let lastSample = 0;
+let lastVideoTime = -1;
 let recentTimes = [];
 let eventQueue = Promise.resolve();
 let settings = { ...defaults };
@@ -128,10 +130,16 @@ function configureTracker() {
     direction: sign === "+" ? 1 : -1,
     first: settings.first / 100,
     second: settings.second / 100,
+    minHits: PROFILES[settings.profile].minHits,
+    minMeanScore: PROFILES[settings.profile].minMeanScore,
   });
   $("firstValue").textContent = settings.first + "%";
   $("secondValue").textContent = settings.second + "%";
   $("movement").value = settings.movement;
+  $("viewMode").value = settings.profile;
+  $("viewHint").textContent = settings.profile === "side"
+    ? "真横では頭から腰がなるべく映る距離に固定し、左右へ歩いてください。黄色い点がA→Bを越える位置に調整します。弱い検出は3回以上確認してから採用します。重なった人や画面外の人は数えられない場合があります。"
+    : "斜め上から撮る場合の標準設定です。黄色い点がA→Bを越える位置に調整してください。";
   $("firstLine").value = String(settings.first);
   $("secondLine").value = String(settings.second);
   drawOverlay([]);
@@ -174,7 +182,10 @@ function drawOverlay(detections) {
     ctx.strokeRect(d.box.originX, d.box.originY, d.box.width, d.box.height);
     ctx.fillStyle = "#f9dc72";
     ctx.font = "bold " + Math.max(13, w / 57) + "px sans-serif";
-    ctx.fillText("person", d.box.originX + 3, Math.max(15, d.box.originY - 6));
+    ctx.fillText("人物 " + Math.round(d.score * 100) + "%", d.box.originX + 3, Math.max(15, d.box.originY - 6));
+    ctx.beginPath();
+    ctx.arc(d.x * w, d.y * h, Math.max(4, w / 160), 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 function stopCamera() {
@@ -190,6 +201,7 @@ function stopCamera() {
   stopButton.disabled = true;
   startButton.disabled = false;
   $("fps").textContent = "検出速度 —";
+  $("tracking").textContent = "検出待ち";
   recentTimes = [];
   tracker.reset();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -197,21 +209,18 @@ function stopCamera() {
 function tick(now) {
   if (!running) return;
   raf = requestAnimationFrame(tick);
-  if (document.hidden || video.readyState < 2 || now - lastSample < 170) return;
+  if (document.hidden || video.readyState < 2 ||
+    now - lastSample < PROFILES[settings.profile].sampleMs || video.currentTime === lastVideoTime) return;
   lastSample = now;
+  lastVideoTime = video.currentTime;
   try {
     const result = detector.detectForVideo(video, now);
-    const good = (result.detections || []).filter(d =>
-      d.boundingBox && d.categories?.some(category => category.categoryName?.toLowerCase() === "person" && category.score >= 0.45)
-    ).map(d => ({ box: d.boundingBox }));
-    const width = video.videoWidth, height = video.videoHeight;
-    const points = good.map(d => ({
-      x: Math.min(1, Math.max(0, (d.box.originX + d.box.width / 2) / width)),
-      y: Math.min(1, Math.max(0, (d.box.originY + d.box.height / 2) / height)),
-      w: d.box.width / width, h: d.box.height / height,
-    }));
-    tracker.update(points, now);
+    const good = peopleFromResult(result, video.videoWidth, video.videoHeight, settings.profile);
+    const tracks = tracker.update(good, now);
     drawOverlay(good);
+    const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits &&
+      t.scoreSum / t.hits >= tracker.minMeanScore).length;
+    $("tracking").textContent = good.length ? "人物 " + good.length + "人 · 追跡確認 " + confirmed + "人" : "人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
     $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " 回/秒";
@@ -227,7 +236,7 @@ async function loadDetector() {
   const vision = await FilesetResolver.forVisionTasks(WASM_URL);
   const options = {
     baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-    runningMode: "VIDEO", scoreThreshold: 0.45, maxResults: 10,
+    runningMode: "VIDEO", scoreThreshold: 0.30, categoryAllowlist: ["person"], maxResults: 10,
   };
   try {
     detector = await ObjectDetector.createFromOptions(vision, options);
@@ -245,7 +254,7 @@ async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("HTTPS接続のSafariから開いてください。");
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24 } },
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 }, frameRate: { ideal: 24 } },
     });
     video.srcObject = stream;
     await video.play();
@@ -260,6 +269,7 @@ async function startCamera() {
     tracker.reset();
     running = true;
     lastSample = 0;
+    lastVideoTime = -1;
     recentTimes = [];
     stopButton.disabled = false;
     status("自動計測中", "good");
@@ -274,6 +284,7 @@ async function startCamera() {
 function updateSettings() {
   settings = {
     movement: $("movement").value,
+    profile: $("viewMode").value,
     first: Number($("firstLine").value),
     second: Number($("secondLine").value),
   };
@@ -320,7 +331,7 @@ async function initialize() {
     if (saved && ["x+", "x-", "y+", "y-"].includes(saved.movement) &&
       Number.isFinite(saved.first) && Number.isFinite(saved.second) &&
       saved.first >= 20 && saved.first <= 48 && saved.second >= 52 && saved.second <= 80) {
-      settings = saved;
+      settings = { ...defaults, ...saved, profile: Object.hasOwn(PROFILES, saved.profile) ? saved.profile : defaults.profile };
     }
   } catch { /* corrupt settings: defaults */ }
   configureTracker();
@@ -344,7 +355,7 @@ $("addButton").addEventListener("click", () => record(1, "manual"));
 $("minusButton").addEventListener("click", () => record(-1, "manual"));
 $("exportButton").addEventListener("click", () => void exportCSV());
 $("resetButton").addEventListener("click", () => void newSession());
-for (const id of ["movement", "firstLine", "secondLine"]) {
+for (const id of ["viewMode", "movement", "firstLine", "secondLine"]) {
   $(id).addEventListener("input", updateSettings);
 }
 document.addEventListener("visibilitychange", () => {
