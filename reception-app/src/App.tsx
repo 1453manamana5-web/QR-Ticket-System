@@ -128,6 +128,17 @@ export default function App(){
   const remoteStopped=workflow.remoteStopped;
   const setRemoteStopped=useCallback((value:boolean)=>transition({type:"remote-stop",value}),[transition]);
   const [scannerKey,setScannerKey]=useState(0);
+  const [cameraFacing,setCameraFacing]=useState<"user"|"environment">(()=>{
+    try{return localStorage.getItem("qr-ticket-camera-facing")==="environment"?"environment":"user";}catch{return "user";}
+  });
+  const switchCameraFacing=()=>{
+    if(scanProcessingRef.current)return;
+    const next=cameraFacing==="user"?"environment":"user";
+    try{localStorage.setItem("qr-ticket-camera-facing",next);}catch{}
+    setCameraFacing(next);
+    setCameraFailed(false);
+    setResult(null);
+  };
   const [cameraFailed,setCameraFailed]=useState(false);
   const [online,setOnline]=useState(()=>navigator.onLine);
   const [pendingSyncCount,setPendingSyncCount]=useState(0);
@@ -1182,7 +1193,8 @@ export default function App(){
           </div>
           <div className="entry-scanner-wrapper">
             {offlineProgress.total>0&&<p role="status">オフラインQR：{offlineProgress.received} / {offlineProgress.total}枚を受信。全て揃うまで次のQRを読み取ってください。</p>}
-            <div className="camera-qr-scanner"><QrScanner readerId="event-auth-reader" onResult={handleAuthScan} onError={setError}/></div>
+            <div className="camera-qr-scanner"><QrScanner readerId="event-auth-reader" cameraFacing={cameraFacing} onResult={handleAuthScan} onError={setError}/></div>
+            <div className="reception-camera-controls"><button type="button" className="secondary" onClick={switchCameraFacing}>{cameraFacing==="user"?"背面カメラに切替":"前面カメラに切替"}</button><span>ピントが合わない場合は、QRコードを少し離してください</span></div>
           </div>
         </div>
         <div className="entry-scan-instruction">
@@ -1355,13 +1367,14 @@ export default function App(){
                   <strong>QRコード読み取り</strong>
                 </span>
               </div>
-              <button type="button" className="secondary" aria-busy={busy} disabled={busy} onClick={()=>{if(scanProcessingRef.current)return;receptionAllowedRef.current=false;setResult(null);setScreen("ready");void syncPendingRecords();}}>受付を停止</button>
+              <div className="reception-camera-header-actions"><button type="button" className="secondary" disabled={busy||remoteStopped} onClick={switchCameraFacing}>{cameraFacing==="user"?"背面カメラに切替":"前面カメラに切替"}</button><button type="button" className="secondary" aria-busy={busy} disabled={busy} onClick={()=>{if(scanProcessingRef.current)return;receptionAllowedRef.current=false;setResult(null);setScreen("ready");void syncPendingRecords();}}>受付を停止</button></div>
             </div>
             <div className="entry-scanner-wrapper">
               <div className="camera-qr-scanner">
                 {remoteStopped ? <div className="reception-start-content"><div className="entry-result-icon">×</div><h2>受付停止中</h2><p className="entry-result-primary">管理画面から受付停止の指示を受けています</p><p className="entry-result-secondary">管理画面から入口・出口受付へ戻すと再開します</p></div> : <QrScanner
                   key={scannerKey}
                   readerId="ticket-reader"
+                  cameraFacing={cameraFacing}
                   onResult={handleTicketScan}
                   onError={message=>{
                     setCameraFailed(true);
@@ -1378,7 +1391,7 @@ export default function App(){
             <span className="entry-scan-instruction-number">1</span>
             <span className="entry-scan-instruction-copy">
               <strong>QRコードをカメラに向けてください</strong>
-              <small>読み取り枠に入ると自動で受付します</small>
+              <small>読み取り枠に入ると自動で受付します。ぼやける場合はQRを少し離すかカメラを切り替えてください</small>
             </span>
           </div>
       </section>
