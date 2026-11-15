@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0e243c">
+  <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
+  <title>自動人数計測 | 試作アプリ</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">◎</span><div>
+        <div class="brand-title">自動人数計測</div>
+        <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
+      </div></div>
+      <div class="trial-tag">PROTOTYPE 01</div>
+    </header>
+    <main>
+      <div class="intro">
+        <div><h1>通過するだけで、人数を記録。</h1>
+        <p>チケットを使わずに、iPadの背面カメラで入口の通過を検出します。</p></div>
+        <span class="privacy-pill">映像は保存しません</span>
+      </div>
+
+      <div class="layout">
+        <section class="main-column">
+          <div class="card capture-card">
+            <div class="section-head">
+              <h2>カメラ映像</h2>
+              <span id="status" class="state" role="status" aria-live="polite">待機中</span>
+            </div>
+            <div id="cameraFrame" class="camera-frame">
+              <video id="video" autoplay playsinline muted aria-label="入口カメラ"></video>
+              <canvas id="overlay" aria-hidden="true"></canvas>
+              <div id="placeholder" class="placeholder">
+                <div class="placeholder-symbol" aria-hidden="true">▣</div>
+                <strong>カメラが停止しています</strong>
+                <span>下の「計測を開始」を押してください</span>
+              </div>
+            </div>
+            <div class="camera-actions">
+              <button type="button" id="startButton" class="button primary">計測を開始</button>
+              <button type="button" id="stopButton" class="button secondary" disabled>計測を停止</button>
+              <span id="fps" class="fps">検出速度 —</span>
+            </div>
+            <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
+          </div>
+
+          <div class="card config-card">
+            <div class="section-head"><h2>計測ラインの調整</h2><span class="section-note">設定は端末に保存</span></div>
+            <label for="movement">映像内の入場方向</label>
+            <select id="movement">
+              <option value="x+">左 → 右</option>
+              <option value="x-">右 → 左</option>
+              <option value="y+">上 → 下</option>
+              <option value="y-">下 → 上</option>
+            </select>
+            <div class="slider-row"><label for="firstLine">ライン A：通過開始</label><span id="firstValue">40%</span></div>
+            <input type="range" id="firstLine" min="20" max="48" value="40" step="1">
+            <div class="slider-row"><label for="secondLine">ライン B：入場確定</label><span id="secondValue">60%</span></div>
+            <input type="range" id="secondLine" min="52" max="80" value="60" step="1">
+            <p class="hint">2本のラインをA→Bの順に越えたときだけ+1。人の動きが映像の横方向なら左右、奥行き方向なら上下を選びます。位置を変更すると追跡をリセットします。</p>
+          </div>
+        </section>
+
+        <aside class="side-column">
+          <div class="card count-card">
+            <div class="section-head"><h2>試験中の来場者数</h2><span class="local-pill">この端末のみ</span></div>
+            <div class="count-number"><span id="total">0</span><small>人</small></div>
+            <div class="count-foot"><span>最新の記録</span><strong id="latest">まだありません</strong></div>
+            <div class="manual-controls">
+              <button id="addButton" class="button add" type="button">＋1 訂正</button>
+              <button id="minusButton" class="button subtract" type="button">－1 訂正</button>
+            </div>
+            <p class="hint">人数がずれたときだけ修正してください。スタッフの通過分もここで訂正します。</p>
+          </div>
+
+          <div class="card log-card">
+            <div class="section-head"><h2>最近の記録</h2><button type="button" class="text-button" id="exportButton">CSV出力</button></div>
+            <ul id="history" class="history"><li class="empty">まだ記録がありません</li></ul>
+            <button type="button" id="resetButton" class="button outline full">新しい試験を開始（0人に戻す）</button>
+          </div>
+          <div class="notice">
+            <strong>試験用・本番集計には未接続</strong>
+            <p>人数と時刻はこのiPadにだけ保存。Firebaseへの送信・写真や動画の保存・顔認識は行いません。アプリを閉じても記録は残りますが、Safariのデータ削除で消える可能性があります。</p>
+          </div>
+        </aside>
+      </div>
+      <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
+    </main>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
