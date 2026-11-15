@@ -1,79 +1,66 @@
-// A second, independent pose check for person detections. All coordinates are
-// transient normalized image positions; no identity or landmarks are stored.
-const MIN_VISIBILITY = 0.6;
-const SIDES = [
-  { shoulder: 11, hip: 23, heads: [0, 1, 2, 3, 7] },
-  { shoulder: 12, hip: 24, heads: [0, 4, 5, 6, 8] },
-];
-function visible(point) {
-  return point && [point.x, point.y, point.visibility].every(Number.isFinite) &&
-    point.visibility >= MIN_VISIBILITY &&
-    (!Number.isFinite(point.presence) || point.presence >= 0.6) &&
-    point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
-}
-function inside(point, detection, width, height) {
-  const b = detection.box;
-  const mx = Math.min(width * 0.02, b.width * 0.1);
-  const my = Math.min(height * 0.02, b.height * 0.1);
-  return point.x * width >= b.originX - mx && point.x * width <= b.originX + b.width + mx &&
-    point.y * height >= b.originY - my && point.y * height <= b.originY + b.height + my;
-}
-function torsoForDetection(landmarks, detection, width, height) {
-  const sides = [];
-  for (const side of SIDES) {
-    const shoulder = landmarks[side.shoulder], hip = landmarks[side.hip];
-    if (!visible(shoulder) || !visible(hip)) continue;
-    const head = side.heads.map(i => landmarks[i]).find(p => visible(p) &&
-      inside(p, detection, width, height) && p.y < shoulder.y - 0.015);
-    if (!head || !inside(shoulder, detection, width, height) || !inside(hip, detection, width, height)) continue;
-    // Require a visible head above an upright trunk. Do not accept an inferred
-    // off-screen hip, a bent arm mistaken for a trunk, or a horizontal object.
-    const trunkY = (hip.y - shoulder.y) * height;
-    const trunkX = Math.abs(hip.x - shoulder.x) * width;
-    const headY = (shoulder.y - head.y) * height;
-    if (trunkY < Math.max(20, height * 0.08) || trunkX > trunkY * 1.5 ||
-      headY < 8 || headY > trunkY * 1.7 || Math.abs(head.x - shoulder.x) * width > trunkY) continue;
-    sides.push({ shoulder, hip, head });
+// BodyPix part IDs 12/13 represent the front/back of the torso. Heads, arms,
+// hands and legs never contribute evidence. Masks are transient, never stored.
+const isTorso = value => value === 12 || value === 13;
+
+function torsoRegions(parts) {
+  const { width, height, data } = parts || {};
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
+    !data || data.length !== width * height) return [];
+  const visited = new Uint8Array(data.length), queue = new Int32Array(data.length), regions = [];
+  for (let i = 0; i < data.length; i++) {
+    if (visited[i] || !isTorso(data[i])) continue;
+    let read = 0, end = 1, sumX = 0, sumY = 0;
+    let left = width, right = 0, top = height, bottom = 0;
+    queue[0] = i; visited[i] = 1;
+    while (read < end) {
+      const at = queue[read++], x = at % width, y = Math.floor(at / width);
+      sumX += x; sumY += y;
+      left = Math.min(left, x); right = Math.max(right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
+      const visit = next => {
+        if (!visited[next] && isTorso(data[next])) { visited[next] = 1; queue[end++] = next; }
+      };
+      if (x > 0) visit(at - 1);
+      if (x + 1 < width) visit(at + 1);
+      if (y > 0) visit(at - width);
+      if (y + 1 < height) visit(at + width);
+    }
+    const rw = right - left + 1, rh = bottom - top + 1;
+    // A substantial, connected upright area; a few mislabelled arm pixels
+    // cannot establish a visitor. No head or full-body landmarks are required.
+    if (end < Math.max(16, width * height * 0.0007) || rw < 3 ||
+      rh < Math.max(6, height * 0.06) || rh < rw * 0.65 || end / (rw * rh) < 0.2) continue;
+    regions.push({ left: left / width, top: top / height, width: rw / width, height: rh / height,
+      x: (sumX / end + 0.5) / width, y: (sumY / end + 0.5) / height,
+      pixels: end, pixelArea: width * height });
   }
-  if (!sides.length) return null;
-  const average = name => ({
-    x: sides.reduce((sum, side) => sum + side[name].x, 0) / sides.length,
-    y: sides.reduce((sum, side) => sum + side[name].y, 0) / sides.length,
-  });
-  const shoulder = average('shoulder'), hip = average('hip'), head = average('head');
-  return { head, shoulder, hip,
-    x: shoulder.x * 0.65 + hip.x * 0.35,
-    y: shoulder.y * 0.65 + hip.y * 0.35 };
+  return regions;
 }
 
-export function verifyBodies(detections, poseResult, width, height) {
-  const poses = Array.isArray(poseResult?.landmarks) ? poseResult.landmarks : [];
-  const candidates = [];
-  if (width > 0 && height > 0) {
-    detections.forEach((detection, di) => poses.forEach((landmarks, pi) => {
-      if (!Array.isArray(landmarks)) return;
-      // An isolated horizontal arm can also hallucinate a short, visible pose.
-      // Reject extremely wide boxes before accepting that pose as a visitor.
-      if (detection.box.height < detection.box.width * 0.65) return;
-      const body = torsoForDetection(landmarks, detection, width, height);
-      if (!body) return;
-      // Prefer a detection centred on this trunk; an extra arm-only box must
-      // never reuse the same body's confirmation as a second visitor.
-      const distance = Math.hypot((body.x - detection.x) * width, (body.y - detection.y) * height);
-      candidates.push({ di, pi, body, distance });
-    }));
-  }
+export function verifyBodies(detections, parts, width, height) {
+  const regions = torsoRegions(parts), candidates = [];
+  if (width > 0 && height > 0) detections.forEach((d, di) => {
+    const b = d.box;
+    if (!b || b.width <= 0 || b.height < b.width * 0.65) return;
+    const dl = b.originX / width, dt = b.originY / height;
+    const dw = b.width / width, dh = b.height / height;
+    regions.forEach((body, ri) => {
+      const overlapW = Math.max(0, Math.min(dl + dw, body.left + body.width) - Math.max(dl, body.left));
+      const overlapH = Math.max(0, Math.min(dt + dh, body.top + body.height) - Math.max(dt, body.top));
+      if (overlapW * overlapH < body.width * body.height * 0.65 ||
+        body.pixels / body.pixelArea < dw * dh * 0.03) return;
+      candidates.push({ di, ri, body, distance: Math.hypot(body.x - d.x, body.y - d.y) });
+    });
+  });
   candidates.sort((a, b) => a.distance - b.distance);
-  const usedDetections = new Set(), usedPoses = new Set(), matches = new Map();
-  for (const candidate of candidates) {
-    if (usedDetections.has(candidate.di) || usedPoses.has(candidate.pi)) continue;
-    usedDetections.add(candidate.di); usedPoses.add(candidate.pi);
-    matches.set(candidate.di, candidate.body);
+  const usedDetections = new Set(), usedRegions = new Set(), matches = new Map();
+  for (const c of candidates) {
+    if (usedDetections.has(c.di) || usedRegions.has(c.ri)) continue;
+    usedDetections.add(c.di); usedRegions.add(c.ri); matches.set(c.di, c.body);
   }
-  const annotated = detections.map((detection, index) => {
-    const body = matches.get(index);
-    return body ? { ...detection, x: body.x, y: body.y, body, bodyVerified: true }
-      : { ...detection, bodyVerified: false };
+  const annotated = detections.map((d, i) => {
+    const body = matches.get(i);
+    return body ? { ...d, x: body.x, y: body.y, body, bodyVerified: true } : { ...d, bodyVerified: false };
   });
   return { annotated, accepted: annotated.filter(d => d.bodyVerified) };
 }

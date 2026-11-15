@@ -1,8 +1,8 @@
-import { LineTracker } from "./tracker.mjs?v=3";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=3";
+import { LineTracker } from "./tracker.mjs?v=4";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=4";
 
-import { verifyBodies } from "./body-check.mjs?v=3";
-import { createVisionPipeline } from "./vision.mjs?v=3";
+import { verifyBodies } from "./body-check.mjs?v=4";
+import { createVisionPipeline } from "./vision.mjs?v=4";
 
 const DB_NAME = "koken-people-counter-prototype-v1";
 const SESSION_KEY = "koken-counter-session-v1";
@@ -20,6 +20,8 @@ let events = [];
 let counter = 0;
 let detector = null;
 let detectorLoading = null;
+let inferencePending = null;
+let trackingEpoch = 0;
 let startAttempt = 0;
 let stream = null;
 let running = false;
@@ -127,7 +129,9 @@ function record(delta, type) {
     renderRecords();
   }).catch(error => message("記録エラー: " + error.message, true));
 }
+function resetTracking() { trackingEpoch++; tracker.reset(); }
 function configureTracker() {
+  trackingEpoch++;
   const [axis, sign] = settings.movement.split("");
   tracker.configure({
     axis,
@@ -142,8 +146,8 @@ function configureTracker() {
   $("movement").value = settings.movement;
   $("viewMode").value = settings.profile;
   $("viewHint").textContent = settings.profile === "side"
-    ? "真横でも頭・肩・腰が映る距離に固定し、左右へ歩いてください。見えている側の胴体を確認し、黄色い点がA→Bを越えると加算します。灰色の候補は数えません。重なりや体の見切れで数え漏れる場合があります。"
-    : "斜め上から撮る場合の標準設定です。頭・肩・腰が映るように設置してください。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
+    ? "真横では肩〜腰の胴体が映る距離に固定し、左右へ歩いてください。頭や足は必須ではありません。見えている側の胴体を確認し、黄色い点がA→Bを越えると加算します。灰色の候補は数えません。重なりや体の見切れで数え漏れる場合があります。"
+    : "斜め上から撮る場合の標準設定です。肩〜腰の胴体が映るように設置してください。頭や足は必須ではありません。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
   $("firstLine").value = String(settings.first);
   $("secondLine").value = String(settings.second);
   drawOverlay([]);
@@ -153,6 +157,7 @@ const tracker = new LineTracker(() => record(1, "auto"));
 function drawOverlay(detections) {
   if (!canvas.width || !canvas.height) return;
   const w = canvas.width, h = canvas.height;
+  const sx = w / analysisFrame.width, sy = h / analysisFrame.height;
   ctx.clearRect(0, 0, w, h);
   const lines = [
     { at: tracker.lineAt(tracker.first), name: "A", color: "#3b82f6" },
@@ -184,16 +189,15 @@ function drawOverlay(detections) {
     const color = d.bodyVerified ? "#f9dc72" : "#a8b4c0";
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(2, w / 330);
-    ctx.strokeRect(d.box.originX, d.box.originY, d.box.width, d.box.height);
+    ctx.strokeRect(d.box.originX * sx, d.box.originY * sy, d.box.width * sx, d.box.height * sy);
     ctx.fillStyle = color;
     ctx.font = "bold " + Math.max(13, w / 57) + "px sans-serif";
-    ctx.fillText(d.bodyVerified ? "人物・胴体確認" : "候補・人数に含めません", d.box.originX + 3, Math.max(15, d.box.originY - 6));
+    ctx.fillText(d.bodyVerified ? "人物・胴体確認" : "候補・人数に含めません", d.box.originX * sx + 3, Math.max(15, d.box.originY * sy - 6));
     if (d.bodyVerified) {
-      ctx.beginPath();
-      ctx.moveTo(d.body.head.x * w, d.body.head.y * h);
-      ctx.lineTo(d.body.shoulder.x * w, d.body.shoulder.y * h);
-      ctx.lineTo(d.body.hip.x * w, d.body.hip.y * h);
-      ctx.stroke();
+      ctx.fillStyle = "rgba(249, 220, 114, 0.18)";
+      ctx.fillRect(d.body.left * w, d.body.top * h, d.body.width * w, d.body.height * h);
+      ctx.strokeRect(d.body.left * w, d.body.top * h, d.body.width * w, d.body.height * h);
+      ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(d.x * w, d.y * h, Math.max(4, w / 160), 0, Math.PI * 2);
       ctx.fill();
@@ -216,36 +220,46 @@ function stopCamera() {
   $("fps").textContent = "検出速度 —";
   $("tracking").textContent = "検出待ち";
   recentTimes = [];
-  tracker.reset();
+  resetTracking();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
-function tick(now) {
+async function tick(now) {
   if (!running) return;
-  raf = requestAnimationFrame(tick);
+  raf = 0;
+  const attempt = startAttempt, epoch = trackingEpoch;
   if (document.hidden || video.readyState < 2 ||
-    now - lastSample < PROFILES[settings.profile].sampleMs || video.currentTime === lastVideoTime) return;
+    now - lastSample < PROFILES[settings.profile].sampleMs || video.currentTime === lastVideoTime) {
+    raf = requestAnimationFrame(tick); return;
+  }
   lastSample = now;
   lastVideoTime = video.currentTime;
   try {
-    // Snapshot once so both models inspect the exact same image.
     analysisCtx.drawImage(video, 0, 0, analysisFrame.width, analysisFrame.height);
-    const result = detector.detectForVideo(analysisFrame, now);
+    const work = detector.detectForVideo(analysisFrame, now);
+    inferencePending = work;
+    let result;
+    try { result = await work; }
+    finally { if (inferencePending === work) inferencePending = null; }
+    if (!running || attempt !== startAttempt || epoch !== trackingEpoch || document.hidden) return;
     const candidates = peopleFromResult(result.objects, analysisFrame.width, analysisFrame.height, settings.profile);
-    const { annotated, accepted } = verifyBodies(candidates, result.poses, analysisFrame.width, analysisFrame.height);
+    const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height);
     const tracks = tracker.update(accepted, now);
     drawOverlay(annotated);
     const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
     $("tracking").textContent = candidates.length
       ? "胴体確認 " + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
-      : "頭・肩・腰が映る人物を探しています";
+      : "肩〜腰の胴体が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
     $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " 回/秒";
   } catch (error) {
+    if (!running || attempt !== startAttempt) return;
     stopCamera();
     status("計測エラー", "bad");
     message("映像解析が停止しました: " + error.message, true);
+  } finally {
+    if (running && attempt === startAttempt) raf = requestAnimationFrame(tick);
   }
 }
 async function loadDetector() {
@@ -261,6 +275,8 @@ async function startCamera() {
   status("カメラを準備中", "loading");
   message("iPadのカメラを確認しています…");
   try {
+    if (inferencePending) await inferencePending.catch(() => {});
+    if (attempt !== startAttempt) return;
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("HTTPS接続のSafariから開いてください。");
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -275,22 +291,22 @@ async function startCamera() {
     $("cameraFrame").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    analysisFrame.width = video.videoWidth;
-    analysisFrame.height = video.videoHeight;
+    analysisFrame.width = Math.min(640, video.videoWidth);
+    analysisFrame.height = Math.max(1, Math.round(video.videoHeight * analysisFrame.width / video.videoWidth));
     video.style.display = "block";
     $("placeholder").hidden = true;
     status("AIモデル読込中", "loading");
     message("初回はネットワークからAIモデルを読み込みます。映像自体は送信しません。");
     await loadDetector();
     if (attempt !== startAttempt) return;
-    tracker.reset();
+    resetTracking();
     running = true;
     lastSample = 0;
     lastVideoTime = -1;
     recentTimes = [];
     stopButton.disabled = false;
     status("自動計測中", "good");
-    message("黄色は頭・胴体を確認した人物です。灰色の候補は数えません。黄色い点がA→Bを通過すると+1。");
+    message("黄色は肩〜腰の胴体を確認した人物です。灰色の候補は数えません。黄色い点がA→Bを通過すると+1。");
     raf = requestAnimationFrame(tick);
   } catch (error) {
     if (attempt !== startAttempt) return;
@@ -340,7 +356,7 @@ async function newSession() {
   localSet(SESSION_KEY, session);
   events = [];
   renderRecords();
-  tracker.reset();
+  resetTracking();
   message("新しい試験を開始しました。旧記録は端末内に残りますが、この画面では集計されません。");
 }
 async function initialize() {
@@ -377,7 +393,7 @@ for (const id of ["viewMode", "movement", "firstLine", "secondLine"]) {
   $(id).addEventListener("input", updateSettings);
 }
 document.addEventListener("visibilitychange", () => {
-  if (running && document.hidden) tracker.reset();
+  if (running && document.hidden) resetTracking();
 });
 window.addEventListener("pagehide", stopCamera);
 void initialize();
