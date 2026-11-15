@@ -163,6 +163,35 @@ test('a transient ticket read failure displays offline reception while preservin
   }finally{await h.close();}
 });
 
+test('exit stores an accepted receipt when the entry has not reached Firestore yet',async()=>{
+  const h=await harness({latestTicket:async()=>makeTicket()});
+  try{
+    await h.click('受付を開始する');
+    await h.control('出口受付');
+    const scan=await h.beginScan('ticket-one');
+    await act(async()=>scan.operation);await h.flush();
+    assert.equal(h.writes.length,1,'exit should be persisted even when the server still says unused');
+    assert.equal(h.writes[0][1].type,'exit');
+    assert.equal(h.writes[0][0].currentStatus,'exited');
+    assert.match(h.text(),/退出OK/);
+    assert.match(h.text(),/入場記録の同期待ち/);
+  }finally{await h.close();}
+});
+
+test('deferred exit does not bypass disabled exit reception settings',async()=>{
+  const event=makeEvent();
+  event.settings.exitEnabled=false;
+  const h=await harness({event,latestTicket:async()=>makeTicket()});
+  try{
+    await h.click('受付を開始する');
+    await h.control('出口受付');
+    const scan=await h.beginScan('ticket-one');
+    await act(async()=>scan.operation);await h.flush();
+    assert.equal(h.writes.length,0);
+    assert.match(h.text(),/受付できません/);
+  }finally{await h.close();}
+});
+
 test('approval does not send an unscoped startup heartbeat that can trail event mode reports',async()=>{
   const h=await harness();
   try{
