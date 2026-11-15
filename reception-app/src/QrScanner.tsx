@@ -1,5 +1,6 @@
 import {useEffect,useRef} from "react";
 import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
+import jsQR from "jsqr";
 
 type Props={
   readerId:string;
@@ -13,6 +14,7 @@ type ExtendedVideoConstraints=MediaTrackConstraints&{
   advanced?:Array<MediaTrackConstraintSet&{
     focusMode?:string|string[];
     exposureMode?:string|string[];
+    whiteBalanceMode?:string|string[];
   }>;
 };
 
@@ -57,6 +59,11 @@ async function applyFastCameraSettings(scanner:Html5Qrcode){
   }catch(basicError){
     console.warn("端末標準のカメラ画質設定を使用します",basicError);
   }
+  // Safari may ignore unsupported constraints; request only supported controls.
+  try{
+    const exposureConstraints:ExtendedVideoConstraints={advanced:[{exposureMode:"continuous",whiteBalanceMode:"continuous"}]};
+    await scanner.applyVideoConstraints(exposureConstraints);
+  }catch{console.info("自動露出・ホワイトバランスは端末標準設定を使用します");}
   try{
     const focusConstraints:ExtendedVideoConstraints={advanced:[{focusMode:"continuous"}]};
     await scanner.applyVideoConstraints(focusConstraints);
@@ -80,8 +87,13 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
     let lastDecodedText="";
     let lastDecodedAt=0;
     let lastHandledSeenAt=0;
+    let fallbackTimer:number|undefined;
+    const fallbackCanvas=document.createElement("canvas");
+    const fallbackContext=fallbackCanvas.getContext("2d",{willReadFrequently:true});
+    let fallbackBusy=false;
 
     const stopCamera=async()=>{
+      if(fallbackTimer!==undefined){window.clearInterval(fallbackTimer);fallbackTimer=undefined;}
       const current=scanner;
       scanner=null;
       if(current){
@@ -90,6 +102,44 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
       }
       // Limit fallback cleanup to this reader; never stop another app's video.
       stopVideoTracks(readerElement);
+    };
+
+    const acceptDecoded=(decodedText:string)=>{
+      if(!active)return;
+      const normalizedValue=decodedText.trim();
+      if(!normalizedValue)return;
+      const now=performance.now();
+      const previousSeenAt=lastHandledSeenAt;
+      if(normalizedValue===lastDecodedText)lastHandledSeenAt=now;
+      if(scanLocked)return;
+      if(normalizedValue===lastDecodedText&&(now-lastDecodedAt<1000||now-previousSeenAt<450))return;
+      lastHandledSeenAt=now;
+      lastDecodedText=normalizedValue;
+      lastDecodedAt=now;
+      scanLocked=true;
+      void Promise.resolve().then(()=>{if(active)return onResultRef.current(normalizedValue);})
+        .catch(error=>console.error("QRコードの受付処理に失敗しました",error))
+        .finally(()=>window.setTimeout(()=>{if(active)scanLocked=false;},60));
+    };
+
+    // Independent jsQR fallback: run only a few times per second, so the
+    // primary native/ZXing reader remains responsive on school iPads.
+    const fallbackDecode=()=>{
+      if(!active||scanLocked||fallbackBusy||!fallbackContext||!readerElement)return;
+      const video=readerElement.querySelector("video");
+      if(!video||video.readyState<2||!video.videoWidth)return;
+      fallbackBusy=true;
+      try{
+        const width=Math.min(960,video.videoWidth);
+        const height=Math.max(1,Math.round(width*video.videoHeight/video.videoWidth));
+        if(fallbackCanvas.width!==width)fallbackCanvas.width=width;
+        if(fallbackCanvas.height!==height)fallbackCanvas.height=height;
+        fallbackContext.drawImage(video,0,0,width,height);
+        const frame=fallbackContext.getImageData(0,0,width,height);
+        const decoded=jsQR(frame.data,width,height,{inversionAttempts:"attemptBoth"});
+        if(decoded?.data)acceptDecoded(decoded.data);
+      }catch(error){console.debug("補助QR解析をスキップしました",error);}
+      finally{fallbackBusy=false;}
     };
 
     const startCamera=async()=>{
@@ -131,38 +181,13 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
             // orientations instead of skipping half of the QR candidates.
             disableFlip:cameraFacing==="environment"
           },
-          decodedText=>{
-            if(!active)return;
-            const normalizedValue=decodedText.trim();
-            if(!normalizedValue)return;
-
-            // Duplicate suppression measures elapsed time. Wall-clock changes
-            // must neither lock a ticket out nor accept a continuously held QR.
-            const now=performance.now();
-            const previousSeenAt=lastHandledSeenAt;
-            if(normalizedValue===lastDecodedText)lastHandledSeenAt=now;
-            if(scanLocked)return;
-            // Require removal from view before accepting the same QR again.
-            if(normalizedValue===lastDecodedText&&(now-lastDecodedAt<1000||now-previousSeenAt<450))return;
-            lastHandledSeenAt=now;
-            lastDecodedText=normalizedValue;
-            lastDecodedAt=now;
-            scanLocked=true;
-            // Serialize acceptance, without waiting for the result animation.
-            void Promise.resolve()
-              .then(()=>{if(active)return onResultRef.current(normalizedValue);})
-              .catch(error=>console.error("QRコードの受付処理に失敗しました",error))
-              .finally(()=>{
-                window.setTimeout(()=>{
-                  if(active)scanLocked=false;
-                },60);
-              });
-          },
+          acceptDecoded,
           ()=>undefined
         );
 
         if(!active){await stopCamera();return;}
         await applyFastCameraSettings(instance);
+        if(active)fallbackTimer=window.setInterval(fallbackDecode,350);
       }catch(reason){
         console.error("QRカメラの読み取りを開始できませんでした",reason);
         await stopCamera();
