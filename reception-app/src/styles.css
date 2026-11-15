@@ -3892,3 +3892,9 @@ body {
 /* Keep the safe-stop control usable on narrow iPad/Safari viewports. */
 .entry-reception-page .entry-scanner-card-header { display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap; }
 .entry-reception-page .entry-scanner-card-header > button { flex:0 0 auto; }
+
+/* Camera controls stay accessible while the video fills the visitor display. */
+.reception-camera-header-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.reception-camera-controls{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px;padding:10px 4px;color:#52677d;font-size:13px}
+.reception-camera-controls .secondary,.reception-camera-header-actions .secondary{white-space:nowrap}
+@media(max-width:650px){.reception-camera-header-actions{gap:6px}.reception-camera-header-actions .secondary{font-size:12px;padding:7px 9px}.reception-camera-controls{font-size:12px}}

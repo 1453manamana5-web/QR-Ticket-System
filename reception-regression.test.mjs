@@ -453,6 +453,51 @@ test("reception service worker does not intercept management navigation",()=>{
   }
 });
 
+test("camera switch is available during reception and persists for event QR setup",async()=>{
+  const h=await harness();
+  try{
+    await h.click("受付を開始する");
+    assert.equal(h.renderer.root.findByType(h.Scanner).props.cameraFacing,"user");
+    await h.click("背面カメラに切替");
+    assert.equal(h.renderer.root.findByType(h.Scanner).props.cameraFacing,"environment");
+    await h.click("前面カメラに切替");
+    assert.equal(h.renderer.root.findByType(h.Scanner).props.cameraFacing,"user");
+    await h.click("受付を停止");
+    await h.click("イベントQRを読み直す");
+    assert.equal(h.renderer.root.findByType(h.Scanner).props.cameraFacing,"user");
+    await h.click("背面カメラに切替");
+    assert.equal(h.renderer.root.findByType(h.Scanner).props.cameraFacing,"environment");
+  }finally{await h.close();}
+});
+
+test("front QR camera tries mirrored decoding and rear camera uses its own optical device",async()=>{
+  const starts=[],settings=[],stops=[];
+  class Camera{
+    static async getCameras(){return [{id:"front-id",label:"FaceTime Front Camera"},{id:"back-id",label:"Back Camera"}];}
+    constructor(){this.isScanning=false;}
+    async start(device,options){starts.push({device,options});this.isScanning=true;}
+    async stop(){stops.push("stop");this.isScanning=false;}
+    clear(){}
+    async applyVideoConstraints(config){settings.push(config);}
+  }
+  const Scanner=load("./reception-app/src/QrScanner.tsx",{"html5-qrcode":{Html5Qrcode:Camera,Html5QrcodeSupportedFormats:{QR_CODE:0}}},{
+    document:{getElementById:()=>({innerHTML:"",querySelectorAll:()=>[]})},
+    console:{info:()=>{},warn:()=>{},error:()=>{}},
+  }).default;
+  let renderer;
+  try{
+    await act(async()=>{renderer=create(React.createElement(Scanner,{readerId:"switch-test",cameraFacing:"user",onResult:()=>{}}));for(let i=0;i<5;i++)await nextTurn();});
+    assert.equal(starts[0].device,"front-id");
+    assert.equal(starts[0].options.disableFlip,false);
+    assert.deepEqual(settings[0].width,{ideal:1920});
+    assert.equal(settings[1].advanced[0].focusMode,"continuous");
+    await act(async()=>{renderer.update(React.createElement(Scanner,{readerId:"switch-test",cameraFacing:"environment",onResult:()=>{}}));for(let i=0;i<6;i++)await nextTurn();});
+    assert.equal(starts[1].device,"back-id");
+    assert.equal(starts[1].options.disableFlip,true);
+    assert.ok(stops.length>=1,"old camera must stop before the back camera starts");
+  }finally{if(renderer)await act(async()=>renderer.unmount());}
+});
+
 test("camera restart waits for a pending start and old cleanup before starting the next reader",async()=>{
   let releaseStart,firstStarted;
   const started=new Promise(resolve=>{firstStarted=resolve;});
