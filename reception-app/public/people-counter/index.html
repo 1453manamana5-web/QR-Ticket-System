@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=3">
+  <link rel="stylesheet" href="./style.css?v=4">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 03</div>
+      <div class="trial-tag">PROTOTYPE 04</div>
     </header>
     <main>
       <div class="intro">
@@ -46,7 +46,7 @@
               <span id="tracking" class="tracking" role="status">検出待ち</span>
               <span id="fps" class="fps">検出速度 —</span>
             </div>
-            <p class="hint">黄色：頭・胴体を確認した人物 ／ 灰色：候補（人数に含めません）</p>
+            <p class="hint">黄色：肩〜腰の胴体を確認した人物 ／ 灰色：候補（人数に含めません）</p>
             <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
           </div>
 
@@ -69,7 +69,7 @@
             <input type="range" id="firstLine" min="20" max="48" value="40" step="1">
             <div class="slider-row"><label for="secondLine">ライン B：入場確定</label><span id="secondValue">60%</span></div>
             <input type="range" id="secondLine" min="52" max="80" value="60" step="1">
-            <p class="hint">頭・肩・腰を確認した人物の黄色い追跡点が、2本のラインをA→Bの順に越えたときだけ+1。人の動きが映像の横方向なら左右、奥行き方向なら上下を選びます。設置・方向・位置を変更すると追跡をリセットします。</p>
+            <p class="hint">肩〜腰の胴体を確認した人物の黄色い追跡点が、2本のラインをA→Bの順に越えたときだけ+1。人の動きが映像の横方向なら左右、奥行き方向なら上下を選びます。設置・方向・位置を変更すると追跡をリセットします。</p>
           </div>
         </section>
 
@@ -99,6 +99,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=3"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </body>
 </html>

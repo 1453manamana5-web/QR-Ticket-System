@@ -125,140 +125,169 @@ test('malformed boxes and invalid frame dimensions produce no detections', () =>
   assert.deepEqual(peopleFromResult(result, 0, 0), []);
 });
 
-// The real detector may label an isolated arm as person, even at high scores.
-// These tests exercise the mandatory body gate and the counter together.
+// Verify the shoulder-to-waist region, independently of a visible head.
 const { verifyBodies } = await import('./reception-app/public/people-counter/body-check.mjs');
 const { createVisionPipeline } = await import('./reception-app/public/people-counter/vision.mjs');
-const landmark = (x, y, visibility = 0.95) => ({ x, y, visibility, presence: 0.95 });
-function poseAt(x = 0.5, sideOnly = false) {
-  const points = Array.from({ length: 33 }, () => landmark(0, 0, 0));
-  points[0] = landmark(x, 0.15);
-  points[7] = landmark(x - 0.02, 0.16);
-  points[11] = landmark(x - 0.025, 0.3);
-  points[23] = landmark(x - 0.02, 0.62);
-  if (!sideOnly) {
-    points[8] = landmark(x + 0.02, 0.16);
-    points[12] = landmark(x + 0.025, 0.3);
-    points[24] = landmark(x + 0.02, 0.62);
+function mask(rectangles = []) {
+  const width = 100, height = 100, data = new Int32Array(width * height).fill(-1);
+  for (const [left, top, rw, rh, part = 12] of rectangles) {
+    for (let y = top; y < top + rh; y++) for (let x = left; x < left + rw; x++) data[y * width + x] = part;
   }
-  return points;
+  return { width, height, data };
 }
-const bodyDetection = (x = 0.5) => ({ ...person(x), box: { originX: (x - 0.12) * 1000, originY: 80, width: 240, height: 820 } });
-const verify = (detections, poses) => verifyBodies(detections, { landmarks: poses }, 1000, 1000);
+const bodyDetection = (x = 0.5) => ({ ...person(x), box: { originX: (x - 0.15) * 1000, originY: 150, width: 300, height: 700 } });
+const torso = (x = 0.5, part = 12) => [Math.round(x * 100) - 4, 30, 8, 30, part];
+const verify = (detections, parts) => verifyBodies(detections, parts, 1000, 1000);
 
-test('a high-confidence person-labelled arm cannot count without a visible body', () => {
+test('shoulder-to-waist torso is accepted with no head, face or legs in the mask', () => {
+  const result = verify([bodyDetection()], mask([torso()]));
+  assert.equal(result.accepted.length, 1);
+  assert.equal(result.accepted[0].bodyVerified, true);
+});
+test('the back of a torso is also accepted', () => {
+  assert.equal(verify([bodyDetection()], mask([torso(0.5, 13)])).accepted.length, 1);
+});
+test('a narrow side-on torso is accepted', () => {
+  assert.equal(verify([bodyDetection()], mask([[49, 25, 3, 40]])).accepted.length, 1);
+});
+test('a high-score person-labelled arm crossing both lines never counts', () => {
   const { tracker, counts } = counter();
   [0.25, 0.4, 0.55, 0.7].forEach((x, i) => {
     const arm = { ...bodyDetection(x), score: 0.99 };
-    const { accepted, annotated } = verify([arm], []);
-    assert.equal(annotated[0].bodyVerified, false);
-    tracker.update(accepted, i * 120);
+    const result = verify([arm], mask([[Math.round(x * 100) - 4, 30, 8, 30, 4]]));
+    assert.equal(result.annotated[0].bodyVerified, false);
+    tracker.update(result.accepted, i * 120);
   });
   assert.equal(counts.length, 0);
-  assert.equal(tracker.tracks.length, 0);
 });
-test('visible arm landmarks alone never pass as a trunk', () => {
-  const points = Array.from({ length: 33 }, () => landmark(0, 0, 0));
-  points[13] = landmark(0.4, 0.4); points[15] = landmark(0.6, 0.4);
-  assert.equal(verify([bodyDetection()], [points]).accepted.length, 0);
-});
-test('a visible head, shoulder and hip on one side accept a side-on visitor', () => {
-  const { accepted } = verify([bodyDetection()], [poseAt(0.5, true)]);
-  assert.equal(accepted.length, 1);
-  assert.equal(accepted[0].bodyVerified, true);
-});
-test('low-visibility or off-screen guessed hips cannot confirm an arm', () => {
-  for (const hip of [landmark(0.5, 0.62, 0.1), landmark(0.5, 1.12)]) {
-    const points = poseAt(0.5, true); points[23] = hip;
-    assert.equal(verify([bodyDetection()], [points]).accepted.length, 0);
+test('face, arm, hand and leg pixels cannot supply torso evidence', () => {
+  for (const part of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]) {
+    assert.equal(verify([bodyDetection()], mask([torso(0.5, part)])).accepted.length, 0);
   }
 });
-test('a head and shoulders without a visible hip do not count', () => {
-  const points = poseAt(); points[23].visibility = 0; points[24].visibility = 0;
-  assert.equal(verify([bodyDetection()], [points]).accepted.length, 0);
+test('small mislabelled torso patches cannot confirm an arm', () => {
+  assert.equal(verify([bodyDetection()], mask([[49, 45, 2, 2]])).accepted.length, 0);
 });
-test('a body whose head is outside the image is not accepted', () => {
-  const points = poseAt();
-  for (const i of [0, 7, 8]) points[i].y = -0.1;
-  assert.equal(verify([bodyDetection()], [points]).accepted.length, 0);
+test('a horizontal patch labelled torso cannot confirm a visitor', () => {
+  assert.equal(verify([bodyDetection()], mask([[40, 40, 20, 6]])).accepted.length, 0);
 });
-test('an arm box next to a real body cannot borrow its confirmation', () => {
-  const arm = { ...bodyDetection(), box: { originX: 450, originY: 280, width: 400, height: 80 } };
-  const result = verify([arm, bodyDetection()], [poseAt()]);
-  assert.equal(result.accepted.length, 1);
+test('an extremely wide person-labelled arm box is rejected even with a torso-like patch', () => {
+  const arm = { ...bodyDetection(), box: { originX: 100, originY: 250, width: 800, height: 200 } };
+  assert.equal(verify([arm], mask([[47, 28, 6, 14]])).accepted.length, 0);
+});
+test('a nearby real torso cannot confirm an unrelated arm detection', () => {
+  const arm = { ...bodyDetection(0.1), box: { originX: 0, originY: 150, width: 150, height: 700 } };
+  const result = verify([arm, bodyDetection()], mask([torso()]));
   assert.equal(result.annotated[0].bodyVerified, false);
-  assert.equal(result.annotated[1].bodyVerified, true);
+  assert.equal(result.accepted.length, 1);
 });
-test('overlapping person boxes cannot reuse one pose to produce two visitors', () => {
-  assert.equal(verify([bodyDetection(), bodyDetection(0.51)], [poseAt()]).accepted.length, 1);
+test('overlapping boxes cannot reuse one torso to count two visitors', () => {
+  assert.equal(verify([bodyDetection(), bodyDetection(0.51)], mask([torso()])).accepted.length, 1);
 });
-test('separate visible bodies are both accepted', () => {
-  assert.equal(verify([bodyDetection(0.25), bodyDetection(0.75)], [poseAt(0.25), poseAt(0.75)]).accepted.length, 2);
+test('two separate torsos are independently accepted', () => {
+  assert.equal(verify([bodyDetection(0.25), bodyDetection(0.75)], mask([torso(0.25), torso(0.75)])).accepted.length, 2);
 });
-test('a waving arm moving a box across both lines does not move the torso anchor', () => {
+test('moving the detection box by waving an arm does not move the torso anchor', () => {
   const { tracker, counts } = counter();
-  [0.28, 0.42, 0.55, 0.68, 0.72].forEach((boxAnchor, i) => {
-    const d = { ...bodyDetection(0.5), x: boxAnchor, box: { originX: 100, originY: 50, width: 800, height: 900 } };
-    const { accepted } = verify([d], [poseAt(0.5)]);
-    assert.equal(accepted.length, 1);
-    tracker.update(accepted, i * 120);
+  [0.28, 0.42, 0.55, 0.68, 0.72].forEach((x, i) => {
+    const d = { ...bodyDetection(), x, box: { originX: 100, originY: 50, width: 800, height: 900 } };
+    const result = verify([d], mask([torso()]));
+    assert.equal(result.accepted.length, 1);
+    tracker.update(result.accepted, i * 120);
   });
   assert.equal(counts.length, 0);
 });
-test('a verified side-on trunk crossing A then B counts once', () => {
+test('a torso with no head crossing A then B counts once', () => {
   const { tracker, counts } = counter();
   [0.25, 0.4, 0.54, 0.69, 0.8].forEach((x, i) => {
-    const { accepted } = verify([bodyDetection(x)], [poseAt(x, true)]);
-    assert.equal(accepted.length, 1);
-    tracker.update(accepted, i * 120);
+    const result = verify([bodyDetection(x)], mask([torso(x)]));
+    assert.equal(result.accepted.length, 1);
+    tracker.update(result.accepted, i * 120);
   });
   assert.equal(counts.length, 1);
 });
-test('body confirmation from a prior frame is never reused for an arm', () => {
-  assert.equal(verify([bodyDetection()], [poseAt()]).accepted.length, 1);
-  assert.equal(verify([bodyDetection()], []).accepted.length, 0);
+test('previous torso evidence is not reused on an arm or an empty frame', () => {
+  assert.equal(verify([bodyDetection()], mask([torso()])).accepted.length, 1);
+  assert.equal(verify([bodyDetection()], mask()).accepted.length, 0);
+  assert.equal(verify([bodyDetection()], null).accepted.length, 0);
 });
-
-test('a blocked body model closes the object detector and refuses an unverified pipeline', async () => {
+test('invalid segmentation dimensions are ignored', () => {
+  assert.equal(verify([bodyDetection()], { width: 100, height: 100, data: [] }).accepted.length, 0);
+});
+const mockSDK = detector => ({
+  FilesetResolver: { forVisionTasks: async () => ({}) },
+  ObjectDetector: { createFromOptions: async () => detector },
+});
+test('blocked torso model closes the detector and never starts unverified counting', async () => {
   let closed = false;
-  const sdk = {
-    FilesetResolver: { forVisionTasks: async () => ({}) },
-    ObjectDetector: { createFromOptions: async () => ({ close() { closed = true; } }) },
-    PoseLandmarker: { createFromOptions: async () => { throw new Error('model blocked'); } },
-  };
-  await assert.rejects(createVisionPipeline({ resolveSDK: async () => sdk }), /model blocked/);
+  await assert.rejects(createVisionPipeline({ resolveSDK: async () => mockSDK({ close() { closed = true; } }),
+    resolveTorso: async () => { throw new Error('model blocked'); } }), /model blocked/);
   assert.equal(closed, true);
 });
-test('both models inspect the same frame and CPU fallback retains the body gate', async () => {
-  const calls = [];
-  const frame = {};
-  const sdk = {
-    FilesetResolver: { forVisionTasks: async () => ({}) },
-    ObjectDetector: { createFromOptions: async () => ({
-      detectForVideo(f, t) { calls.push(['object', f, t]); return { detections: [detection(0.9)] }; }, close() {},
-    }) },
-    PoseLandmarker: { createFromOptions: async (_, options) => {
-      if (options.baseOptions.delegate === 'GPU') throw new Error('GPU unavailable');
-      return { detectForVideo(f, t) { calls.push(['body', f, t]); return { landmarks: [] }; }, close() {} };
-    } },
-  };
-  const pipeline = await createVisionPipeline({ resolveSDK: async () => sdk });
-  const result = pipeline.detectForVideo(frame, 123);
-  assert.deepEqual(calls, [['object', frame, 123], ['body', frame, 123]]);
-  const candidates = peopleFromResult(result.objects, 1000, 1000);
-  assert.equal(verifyBodies(candidates, result.poses, 1000, 1000).accepted.length, 0);
+test('the object detector and asynchronous torso verifier use the same snapshot', async () => {
+  const calls = [], frame = {};
+  const pipeline = await createVisionPipeline({ resolveSDK: async () => mockSDK({
+    detectForVideo(f, t) { calls.push(['object', f, t]); return { detections: [detection(0.9)] }; }, close() {},
+  }), resolveTorso: async () => ({ async detect(f) { calls.push(['torso', f]); return mask(); }, close() {} }) });
+  const result = await pipeline.detectForVideo(frame, 123);
+  assert.deepEqual(calls, [['object', frame, 123], ['torso', frame]]);
+  assert.equal(verifyBodies(peopleFromResult(result.objects, 1000, 1000), result.parts, 1000, 1000).accepted.length, 0);
 });
-test('real arm false-positive with a hallucinated visible pose is rejected by its wide box', () => {
-  // Coordinates observed using both released models on the arm-only sample.
-  const points = Array.from({ length: 33 }, () => landmark(0, 0, 0));
-  points[0] = landmark(0.35725, 0.50339);
-  points[7] = landmark(0.36007, 0.50649);
-  points[8] = landmark(0.33564, 0.52313);
-  points[11] = landmark(0.36943, 0.50235);
-  points[12] = landmark(0.33459, 0.53362);
-  points[23] = landmark(0.37562, 0.60116);
-  points[24] = landmark(0.35268, 0.61909);
-  const d = { x: 0.497, y: 0.498, score: 0.603, w: 0.708, h: 147 / 667,
-    box: { originX: 143, originY: 281, width: 708, height: 147 } };
-  assert.equal(verifyBodies([d], { landmarks: [points] }, 1000, 667).accepted.length, 0);
+test('an empty object frame skips segmentation and returns no torso evidence', async () => {
+  let called = false;
+  const pipeline = await createVisionPipeline({ resolveSDK: async () => mockSDK({ detectForVideo() { return { detections: [] }; }, close() {} }),
+    resolveTorso: async () => ({ async detect() { called = true; return mask([torso()]); }, close() {} }) });
+  assert.equal((await pipeline.detectForVideo({}, 1)).parts, null);
+  assert.equal(called, false);
+});
+
+// Exercise the real camera loop while the new async model is still working.
+const { readFileSync } = await import('node:fs');
+function cameraLoopHarness(pipeline) {
+  const ctx = Object.fromEntries(['clearRect', 'drawImage', 'setLineDash', 'beginPath', 'moveTo', 'lineTo', 'stroke', 'fillText', 'strokeRect', 'fillRect', 'arc', 'fill'].map(name => [name, () => {}]));
+  const elements = new Map(), scheduled = [];
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { width: 320, height: 213, style: {}, classList: { toggle() {} },
+      addEventListener() {}, getContext() { return ctx; }, pause() {}, readyState: 2, currentTime: 1 });
+    return elements.get(id);
+  };
+  const document = { hidden: false, getElementById: element, createElement: () => element('analysis'), addEventListener() {} };
+  const source = readFileSync(new URL('./reception-app/public/people-counter/app.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace('void initialize();', '');
+  const load = new Function('document', 'window', 'navigator', 'requestAnimationFrame', 'cancelAnimationFrame',
+    'LineTracker', 'PROFILES', 'peopleFromResult', 'verifyBodies', 'createVisionPipeline', source +
+    '\nreturn {tick, stopCamera, configureTracker, activate(p){detector=p;running=true;}, tracks(){return tracker.tracks.length;}};');
+  const api = load(document, { addEventListener() {} }, {}, fn => { scheduled.push(fn); return scheduled.length; }, () => {},
+    LineTracker, PROFILES, peopleFromResult, verifyBodies, createVisionPipeline);
+  api.activate(pipeline);
+  return { api, scheduled };
+}
+const cameraFrameResult = () => ({ objects: { detections: [detection(0.9, { originX: 110, originY: 20, width: 100, height: 180 })] }, parts: mask([torso()]) });
+test('async camera loop schedules the next frame only after the current model finishes', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { api, scheduled } = cameraLoopHarness({ detectForVideo() { return pending; } });
+  const runningTick = api.tick(100);
+  assert.equal(scheduled.length, 0);
+  finish(cameraFrameResult()); await runningTick;
+  assert.equal(api.tracks(), 1);
+  assert.equal(scheduled.length, 1);
+});
+test('stopping during async inference discards the late result and schedules no frame', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { api, scheduled } = cameraLoopHarness({ detectForVideo() { return pending; } });
+  const runningTick = api.tick(100); api.stopCamera();
+  finish(cameraFrameResult()); await runningTick;
+  assert.equal(api.tracks(), 0);
+  assert.equal(scheduled.length, 0);
+});
+test('changing the counting lines during inference drops the old frame before tracking', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { api, scheduled } = cameraLoopHarness({ detectForVideo() { return pending; } });
+  const runningTick = api.tick(100); api.configureTracker();
+  finish(cameraFrameResult()); await runningTick;
+  assert.equal(api.tracks(), 0);
+  assert.equal(scheduled.length, 1);
 });
