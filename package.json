@@ -8,6 +8,7 @@
     "shared"
   ],
   "scripts": {
+    "test:people-counter": "node --test people-counter.test.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "build": "npm run build --workspace management-app && npm run build --workspace reception-app",
     "test:rules": "firebase emulators:exec --project qr-ticket-rules-test --only firestore \"node --test --test-concurrency=1 firestore.rules.test.mjs event-reception.flow.test.mjs stress-destruction.test.mjs security-rules.attack.test.mjs\"",
