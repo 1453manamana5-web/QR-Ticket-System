@@ -115,6 +115,27 @@ test('a request arriving during a failed connection does not recursively retry u
   assert.equal(attempts,2);assert.equal((await local.getPendingSyncItems()).length,0);
 });
 
+test('a deferred exit remains durable and retries after the entry is eventually synchronized',async()=>{
+  const local=localDb();
+  await local.prepareLocalEventData(localEvent(),[ticket()]);
+  await local.saveReceptionTransaction({...ticket(),currentStatus:'exited'},record('deferred-exit','one','exit'),ticket());
+  let entrySynced=false;
+  const uploads=[];
+  const upload=worker(local,async saved=>{
+    uploads.push(saved.recordId);
+    if(!entrySynced)throw Object.assign(Error('entry has not synchronized'),{code:'permission-denied'});
+    return 'saved';
+  });
+  await upload.syncPendingReceptionRecords();
+  assert.equal((await local.getTicket('one')).currentStatus,'exited');
+  assert.deepEqual((await local.getPendingSyncItems()).map(item=>[item.recordId,item.status]),[['deferred-exit','failed']]);
+  entrySynced=true;
+  await upload.syncPendingReceptionRecords();
+  assert.deepEqual(uploads,['deferred-exit','deferred-exit']);
+  assert.equal((await local.getPendingSyncItems()).length,0);
+  assert.equal((await local.getReceptionRecord('deferred-exit')).type,'exit');
+});
+
 test('per-ticket conflicts preserve their ordering but do not starve another ticket',async()=>{
   const local=localDb();await local.prepareLocalEventData(localEvent({ticketCount:2}),[ticket('one'),ticket('two')]);
   await local.saveReceptionTransaction(ticket('one'),record('entry-one'));

@@ -698,7 +698,7 @@ for(const mode of ['entry','exit'])for(const status of ['unused','inside','exite
       await h.click('受付を開始する');h.navigator.onLine=false;
       if(mode==='exit')await h.control('出口受付','2026-10-27T02:00:00.000Z');
       await h.scan('ticket-one');
-      const allowed=enabled&&(mode==='entry'?status!=='inside':status==='inside');
+      const allowed=enabled&&(mode==='entry'?status!=='inside':status==='inside'||status==='unused');
       assert.equal((await h.local.getPendingSyncItems()).length,allowed?1:0);
       if(allowed)assert.equal((await h.local.getTicket('ticket-one')).currentStatus,mode==='exit'?'exited':'inside');
       else assert.match(h.text(),/受付失敗/);
