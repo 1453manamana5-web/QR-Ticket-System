@@ -1,0 +1,54 @@
+:root{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;color:#193049;background:#f3f6f9;font-size:15px;-webkit-text-size-adjust:100%}
+*{box-sizing:border-box}body{margin:0}button,select,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.42;cursor:default}
+.shell{min-height:100vh}.topbar{background:#102d4b;color:#fff;display:flex;justify-content:space-between;align-items:center;padding:14px max(20px,env(safe-area-inset-left));gap:12px}
+.brand{display:flex;align-items:center;gap:12px}.brand-icon{width:38px;height:38px;border-radius:12px;background:#2e95f6;display:grid;place-items:center;font-size:28px;line-height:1}
+.brand-title{font-size:16px;font-weight:800;letter-spacing:.03em}.brand-subtitle{font-size:11px;opacity:.72;margin-top:3px}
+.trial-tag{border:1px solid #ffffff55;color:#d4e7f7;border-radius:100px;padding:6px 10px;font-size:10px;letter-spacing:.07em;font-weight:800}
+main{width:min(1200px,100%);margin:auto;padding:26px 22px 44px}
+.intro{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:21px}h1{font-size:clamp(22px,3.4vw,31px);letter-spacing:-.04em;margin:0 0 7px;font-weight:800}
+.intro p{margin:0;color:#64748b;font-size:13px;line-height:1.6}.privacy-pill,.local-pill{border-radius:30px;font-size:11px;font-weight:700;white-space:nowrap;background:#e7f5ee;color:#18764c;padding:7px 10px}
+.layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(275px,.9fr);gap:16px;align-items:start}.main-column,.side-column{display:grid;gap:16px;min-width:0}
+.card{background:#fff;border:1px solid #e0e8f0;box-shadow:0 5px 23px #15283d0b;border-radius:17px;padding:18px;min-width:0}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.section-head h2{font-size:14px;font-weight:800;margin:0}
+.state{border-radius:25px;background:#edf0f4;color:#657386;padding:6px 10px;font-size:11px;font-weight:700}
+.state.good{background:#e7f5ee;color:#18764c}.state.bad{background:#fff0ed;color:#b63d22}.state.loading{background:#fff5db;color:#916000}
+.camera-frame{position:relative;background:linear-gradient(135deg,#1b354e,#0b1d2d);border-radius:13px;overflow:hidden;aspect-ratio:16/9;min-height:190px}
+.camera-frame video,.camera-frame canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+.camera-frame video{display:none}.camera-frame canvas{pointer-events:none}
+.placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:#d5e2ec;text-align:center;padding:20px}
+.placeholder-symbol{font-size:43px;opacity:.74}.placeholder strong{font-size:16px}.placeholder span{font-size:12px;color:#90a7b8}
+.camera-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:14px}
+.button{border-radius:10px;border:1px solid transparent;min-height:42px;padding:10px 15px;font-weight:750;font-size:13px;touch-action:manipulation}
+.button:focus-visible,.text-button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #85bafd;outline-offset:2px}
+.button.primary{background:#2469d2;color:white}.button.primary:active{background:#1755af}
+.button.secondary{background:#ecf1f7;color:#274561}.fps{font-size:11px;color:#64748b;margin-left:auto}
+.message{margin:12px 0 0;color:#607286;font-size:12px;line-height:1.7}.message.error{color:#ad3428}
+.section-note{color:#718398;font-size:11px}
+.config-card label{display:block;font-size:12px;font-weight:750;color:#39536b}
+select{display:block;width:100%;height:42px;border:1px solid #d8e2ed;border-radius:10px;background:white;color:#193049;margin-top:9px;padding:0 12px}
+.slider-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px}
+.slider-row span{font-size:12px;font-weight:750;color:#4e6b82}
+input[type=range]{width:100%;margin:12px 0 3px;accent-color:#256bc9;touch-action:pan-y}
+.hint{font-size:11px;color:#728196;line-height:1.75;margin:13px 0 0}
+.count-card{background:linear-gradient(145deg,#fff,#fafdff)}
+.count-number{display:flex;align-items:baseline;justify-content:center;gap:6px;margin:21px 0 23px}
+.count-number span{font-size:clamp(62px,7vw,98px);line-height:1;letter-spacing:-.055em;font-variant-numeric:tabular-nums;font-weight:800;color:#183c60}
+.count-number small{font-size:16px;color:#667e95;font-weight:700}
+.count-foot{display:flex;justify-content:space-between;gap:8px;border-top:1px solid #e7ecf2;padding:12px 0;color:#738398;font-size:12px}
+.count-foot strong{color:#1c5c94;font-weight:750}
+.manual-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.button.add{background:#e4f1ff;border-color:#c9e2ff;color:#155eaf}
+.button.subtract{background:#f4f6f8;border-color:#e1e6ec;color:#44586d}
+.local-pill{background:#ebf4fd;color:#25649e}
+.history{margin:0;padding:0;list-style:none;max-height:244px;overflow:auto}
+.history li{display:flex;gap:8px;justify-content:space-between;align-items:center;border-bottom:1px solid #edf1f5;padding:12px 0;font-size:12px}
+.history li:last-child{border:0}.history .empty{color:#8898a8;justify-content:center;padding:29px 0}
+.history .delta{font-weight:800;font-variant-numeric:tabular-nums;font-size:13px}
+.history .positive{color:#18764c}.history .negative{color:#c44b37}.history .time{color:#8798aa}
+.text-button{background:none;border:0;padding:6px 0;color:#2469d2;font-weight:750;font-size:12px}
+.button.outline{background:white;border-color:#d9e3ef;color:#4d6278}.button.full{width:100%;margin-top:16px}
+.notice{border-radius:15px;padding:15px 17px;background:#e8eef5;color:#53687e;font-size:12px;line-height:1.75}
+.notice strong{display:block;color:#25435e;margin-bottom:5px;font-size:12px}.notice p{margin:0}
+footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.side-column{grid-template-columns:1fr 1fr}.count-card,.log-card{min-width:0}.notice{grid-column:1/-1}}
+@media(max-width:590px){main{padding:20px 12px 32px}.topbar{padding:12px}.trial-tag{font-size:9px}.intro{display:block}.privacy-pill{display:inline-block;margin-top:11px}.side-column{grid-template-columns:1fr}.notice{grid-column:auto}.card{padding:14px;border-radius:14px}.camera-actions .button{flex:1}.fps{flex-basis:100%;text-align:right}.camera-frame{min-height:220px}.count-number span{font-size:76px}}
