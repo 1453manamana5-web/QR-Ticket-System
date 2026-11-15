@@ -3,6 +3,7 @@ import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
 
 type Props={
   readerId:string;
+  cameraFacing?:"user"|"environment";
   onResult:(text:string)=>void|Promise<void>;
   onError?:(message:string)=>void;
   className?:string;
@@ -14,6 +15,12 @@ type ExtendedVideoConstraints=MediaTrackConstraints&{
     exposureMode?:string|string[];
   }>;
 };
+
+function isBackCameraLabel(cameraLabel:string){
+  const label=cameraLabel.toLowerCase();
+  return label.includes("back")||label.includes("rear")||label.includes("environment")||
+    label.includes("背面")||label.includes("アウトカメラ");
+}
 
 function isFrontCameraLabel(cameraLabel:string){
   const label=cameraLabel.toLowerCase();
@@ -43,29 +50,22 @@ function stopVideoTracks(reader:HTMLElement|null){
 }
 
 async function applyFastCameraSettings(scanner:Html5Qrcode){
-  const fastConstraints:ExtendedVideoConstraints={
-    width:{ideal:1280},
-    height:{ideal:720},
-    frameRate:{ideal:30,min:15},
-    advanced:[{focusMode:"continuous",exposureMode:"continuous"}]
-  };
+  // Prefer the sharpest supported capture. An unsupported focus constraint
+  // must not undo the resolution settings or prevent scanning.
   try{
-    await scanner.applyVideoConstraints(fastConstraints);
-  }catch(advancedError){
-    console.warn("連続フォーカス設定を使用できないため、基本設定を試します",advancedError);
-    try{
-      await scanner.applyVideoConstraints({
-        width:{ideal:1280},
-        height:{ideal:720},
-        frameRate:{ideal:30,min:15}
-      });
-    }catch(basicError){
-      console.warn("端末標準のカメラ設定を使用します",basicError);
-    }
+    await scanner.applyVideoConstraints({width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}});
+  }catch(basicError){
+    console.warn("端末標準のカメラ画質設定を使用します",basicError);
+  }
+  try{
+    const focusConstraints:ExtendedVideoConstraints={advanced:[{focusMode:"continuous"}]};
+    await scanner.applyVideoConstraints(focusConstraints);
+  }catch(focusError){
+    console.info("このカメラは連続フォーカス指定に対応していません",focusError);
   }
 }
 
-export default function QrScanner({readerId,onResult,onError,className}:Props){
+export default function QrScanner({readerId,onResult,onError,className,cameraFacing="user"}:Props){
   const onResultRef=useRef(onResult);
   const onErrorRef=useRef(onError);
 
@@ -109,15 +109,13 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         if(!active){await stopCamera();return;}
         if(cameras.length===0)throw new Error("使用できるカメラが見つかりませんでした。");
 
-        // iPad/SafariではカメラID指定の方が安定するため、端末の前面カメラを明示的に選択。
-        const preferredCamera=cameras.find(camera=>isFrontCameraLabel(camera.label));
-        // Safariでカメラ名が隠される場合は、ID順に依存せず facingMode=user を指定する。
-        const cameraConfig:string|MediaTrackConstraints=preferredCamera?.id??{facingMode:"user"};
-        if(preferredCamera){
-          console.info("使用する前面カメラ:",preferredCamera.label||preferredCamera.id);
-        }else{
-          console.info("カメラ名を判定できないため facingMode=user で前面カメラを要求します");
-        }
+        // Prefer a known device ID on iPad/Safari. If labels are hidden,
+        // facingMode asks the browser rather than guessing the camera order.
+        const preferredCamera=cameras.find(camera=>cameraFacing==="user"
+          ?isFrontCameraLabel(camera.label):isBackCameraLabel(camera.label));
+        const cameraConfig:string|MediaTrackConstraints=preferredCamera?.id??
+          {facingMode:{exact:cameraFacing}};
+        console.info("使用するQRカメラ:",preferredCamera?.label||cameraFacing);
         await instance.start(
           cameraConfig,
           {
@@ -129,8 +127,9 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
               const finalSize=Math.min(calculatedSize,availableSize);
               return {width:finalSize,height:finalSize};
             },
-            aspectRatio:16/9,
-            disableFlip:true
+            // Front camera previews can be mirrored on iPad. Try both
+            // orientations instead of skipping half of the QR candidates.
+            disableFlip:cameraFacing==="environment"
           },
           decodedText=>{
             if(!active)return;
@@ -165,7 +164,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
         if(!active){await stopCamera();return;}
         await applyFastCameraSettings(instance);
       }catch(reason){
-        console.error("前面カメラのQR読み取りを開始できませんでした",reason);
+        console.error("QRカメラの読み取りを開始できませんでした",reason);
         await stopCamera();
         if(active){
           const message=reason instanceof Error
@@ -182,7 +181,7 @@ export default function QrScanner({readerId,onResult,onError,className}:Props){
       scanLocked=true;
       enqueueCameraOperation(stopCamera);
     };
-  },[readerId]);
+  },[readerId,cameraFacing]);
 
-  return <div id={readerId} className={className??"qr-reader"} aria-label="前面カメラのQRコード読み取りエリア"/>;
+  return <div id={readerId} className={className??"qr-reader"} aria-label={cameraFacing==="user"?"前面カメラのQRコード読み取りエリア":"背面カメラのQRコード読み取りエリア"}/>;
 }
