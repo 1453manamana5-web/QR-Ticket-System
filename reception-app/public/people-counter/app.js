@@ -1,15 +1,17 @@
-import { LineTracker } from "./tracker.mjs?v=2";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=2";
+import { LineTracker } from "./tracker.mjs?v=3";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=3";
 
-const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
-const SDK_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
+import { verifyBodies } from "./body-check.mjs?v=3";
+import { createVisionPipeline } from "./vision.mjs?v=3";
+
 const DB_NAME = "koken-people-counter-prototype-v1";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
 const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
 const startButton = $("startButton"), stopButton = $("stopButton");
+const analysisFrame = document.createElement("canvas");
+const analysisCtx = analysisFrame.getContext("2d");
 const defaults = { movement: "x+", first: 40, second: 60, profile: "side" };
 
 let db = null;
@@ -17,6 +19,8 @@ let session = "";
 let events = [];
 let counter = 0;
 let detector = null;
+let detectorLoading = null;
+let startAttempt = 0;
 let stream = null;
 let running = false;
 let raf = 0;
@@ -138,8 +142,8 @@ function configureTracker() {
   $("movement").value = settings.movement;
   $("viewMode").value = settings.profile;
   $("viewHint").textContent = settings.profile === "side"
-    ? "真横では頭から腰がなるべく映る距離に固定し、左右へ歩いてください。黄色い点がA→Bを越える位置に調整します。弱い検出は3回以上確認してから採用します。重なった人や画面外の人は数えられない場合があります。"
-    : "斜め上から撮る場合の標準設定です。黄色い点がA→Bを越える位置に調整してください。";
+    ? "真横でも頭・肩・腰が映る距離に固定し、左右へ歩いてください。見えている側の胴体を確認し、黄色い点がA→Bを越えると加算します。灰色の候補は数えません。重なりや体の見切れで数え漏れる場合があります。"
+    : "斜め上から撮る場合の標準設定です。頭・肩・腰が映るように設置してください。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
   $("firstLine").value = String(settings.first);
   $("secondLine").value = String(settings.second);
   drawOverlay([]);
@@ -177,18 +181,27 @@ function drawOverlay(detections) {
   }
   ctx.setLineDash([]);
   for (const d of detections) {
-    ctx.strokeStyle = "#f9dc72";
+    const color = d.bodyVerified ? "#f9dc72" : "#a8b4c0";
+    ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(2, w / 330);
     ctx.strokeRect(d.box.originX, d.box.originY, d.box.width, d.box.height);
-    ctx.fillStyle = "#f9dc72";
+    ctx.fillStyle = color;
     ctx.font = "bold " + Math.max(13, w / 57) + "px sans-serif";
-    ctx.fillText("人物 " + Math.round(d.score * 100) + "%", d.box.originX + 3, Math.max(15, d.box.originY - 6));
-    ctx.beginPath();
-    ctx.arc(d.x * w, d.y * h, Math.max(4, w / 160), 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillText(d.bodyVerified ? "人物・胴体確認" : "候補・人数に含めません", d.box.originX + 3, Math.max(15, d.box.originY - 6));
+    if (d.bodyVerified) {
+      ctx.beginPath();
+      ctx.moveTo(d.body.head.x * w, d.body.head.y * h);
+      ctx.lineTo(d.body.shoulder.x * w, d.body.shoulder.y * h);
+      ctx.lineTo(d.body.hip.x * w, d.body.hip.y * h);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(d.x * w, d.y * h, Math.max(4, w / 160), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 function stopCamera() {
+  startAttempt++;
   running = false;
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
@@ -214,13 +227,18 @@ function tick(now) {
   lastSample = now;
   lastVideoTime = video.currentTime;
   try {
-    const result = detector.detectForVideo(video, now);
-    const good = peopleFromResult(result, video.videoWidth, video.videoHeight, settings.profile);
-    const tracks = tracker.update(good, now);
-    drawOverlay(good);
+    // Snapshot once so both models inspect the exact same image.
+    analysisCtx.drawImage(video, 0, 0, analysisFrame.width, analysisFrame.height);
+    const result = detector.detectForVideo(analysisFrame, now);
+    const candidates = peopleFromResult(result.objects, analysisFrame.width, analysisFrame.height, settings.profile);
+    const { annotated, accepted } = verifyBodies(candidates, result.poses, analysisFrame.width, analysisFrame.height);
+    const tracks = tracker.update(accepted, now);
+    drawOverlay(annotated);
     const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
-    $("tracking").textContent = good.length ? "人物 " + good.length + "人 · 追跡確認 " + confirmed + "人" : "人物を探しています";
+    $("tracking").textContent = candidates.length
+      ? "胴体確認 " + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
+      : "頭・肩・腰が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
     $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " 回/秒";
@@ -232,40 +250,39 @@ function tick(now) {
 }
 async function loadDetector() {
   if (detector) return;
-  const { FilesetResolver, ObjectDetector } = await import(SDK_URL);
-  const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-  const options = {
-    baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-    runningMode: "VIDEO", scoreThreshold: 0.30, categoryAllowlist: ["person"], maxResults: 10,
-  };
-  try {
-    detector = await ObjectDetector.createFromOptions(vision, options);
-  } catch {
-    options.baseOptions.delegate = "CPU";
-    detector = await ObjectDetector.createFromOptions(vision, options);
-  }
+  detectorLoading ||= createVisionPipeline({ onProgress: text => { if (stream) message(text); } });
+  try { detector = await detectorLoading; }
+  finally { detectorLoading = null; }
 }
 async function startCamera() {
-  if (running) return;
+  if (running || startButton.disabled) return;
+  const attempt = ++startAttempt;
   startButton.disabled = true;
   status("カメラを準備中", "loading");
   message("iPadのカメラを確認しています…");
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("HTTPS接続のSafariから開いてください。");
-    stream = await navigator.mediaDevices.getUserMedia({
+    const cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 }, frameRate: { ideal: 24 } },
     });
+    if (attempt !== startAttempt) { cameraStream.getTracks().forEach(track => track.stop()); return; }
+    stream = cameraStream;
+    stopButton.disabled = false;
     video.srcObject = stream;
     await video.play();
+    if (attempt !== startAttempt) return;
     $("cameraFrame").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    analysisFrame.width = video.videoWidth;
+    analysisFrame.height = video.videoHeight;
     video.style.display = "block";
     $("placeholder").hidden = true;
     status("AIモデル読込中", "loading");
     message("初回はネットワークからAIモデルを読み込みます。映像自体は送信しません。");
     await loadDetector();
+    if (attempt !== startAttempt) return;
     tracker.reset();
     running = true;
     lastSample = 0;
@@ -273,9 +290,10 @@ async function startCamera() {
     recentTimes = [];
     stopButton.disabled = false;
     status("自動計測中", "good");
-    message("A→Bの通過で+1。カメラの画面を開いたまま試験してください。");
+    message("黄色は頭・胴体を確認した人物です。灰色の候補は数えません。黄色い点がA→Bを通過すると+1。");
     raf = requestAnimationFrame(tick);
   } catch (error) {
+    if (attempt !== startAttempt) return;
     stopCamera();
     status("開始できません", "bad");
     message("開始に失敗しました: " + (error?.message || String(error)) + "。カメラ許可、ネット接続、校内Wi-Fiの制限を確認してください。", true);
