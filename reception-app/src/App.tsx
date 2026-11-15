@@ -929,6 +929,10 @@ export default function App(){
         return;
       }
 
+      // The entry terminal may still hold an unsynced entry. Accept the exit
+      // locally and queue it; Firestore will only confirm it after the entry
+      // has been synchronized, preserving the canonical state transition.
+      const awaitingEntrySync=mode==="exit"&&ticket.currentStatus==="unused";
       const receptionType=getReceptionType(mode,ticket.currentStatus,currentEvent.settings);
       if(!receptionType){
         const detail=mode==="entry"
@@ -960,7 +964,7 @@ export default function App(){
       void syncPendingRecords();
       setResult({
         kind:"success",
-        title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":"退場を確認しました",
+        title:receptionType==="entry"?"入場を確認しました":receptionType==="reentry"?"再入場を確認しました":awaitingEntrySync?"退出を仮受付しました（入場記録の同期待ち）":"退場を確認しました",
         detail:ticketId
       });
       announceReception(receptionType);
@@ -1436,7 +1440,9 @@ function getReceptionType(mode:Mode,status:Ticket["currentStatus"],settings:Loca
     if(status==="exited"&&settings.reentryEnabled)return "reentry";
     return null;
   }
-  if(status==="inside"&&settings.exitEnabled)return "exit";
+  // An unseen entry on another terminal must not block the visitor at exit.
+  // The persisted exit record is retried until the corresponding entry syncs.
+  if((status==="inside"||status==="unused")&&settings.exitEnabled)return "exit";
   return null;
 }
 
