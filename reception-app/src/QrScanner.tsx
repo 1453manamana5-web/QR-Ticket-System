@@ -192,7 +192,7 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
         if(fallbackPasses%2!==0||!detailContext)return;
         const focus=lastQrSpot&&now-lastQrSpot.seenAt<8000 ? lastQrSpot.focus
           : movingSpot&&now-movingSpot.seenAt<1400 ? movingSpot.focus : null;
-        const detailPass=fallbackPasses/2;
+        const detailPass=fallbackPasses/2-1; // Start with the central region.
         const crop=chooseDetailedCrop(video.videoWidth,video.videoHeight,detailPass,focus);
         if(!crop)return;
         if(detailCanvas.width!==crop.size)detailCanvas.width=crop.size;
@@ -201,7 +201,7 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
         const region=detailContext.getImageData(0,0,crop.size,crop.size);
         let closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
         // Only rarely pay for an additional low-light contrast pass.
-        if(!closeUp && detailPass%3===0){
+        if(!closeUp && detailPass%3===2){
           boostQrContrast(region);
           closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
         }
