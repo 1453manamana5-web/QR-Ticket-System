@@ -30,6 +30,14 @@ function torsoRegions(parts) {
     // cannot establish a visitor. No head or full-body landmarks are required.
     if (end < Math.max(16, width * height * 0.0007) || rw < 3 ||
       rh < Math.max(6, height * 0.06) || rh < rw * 0.65 || end / (rw * rh) < 0.2) continue;
+    // Require substantial torso material throughout its height, rather than a
+    // blob with a thin one-pixel bridge or an isolated shoulder-sized patch.
+    const bands = new Uint32Array(3);
+    for (let q = 0; q < end; q++) {
+      const y = Math.floor(queue[q] / width);
+      bands[Math.min(2, Math.floor((y - top) * 3 / rh))]++;
+    }
+    if (bands.some(count => count < end * 0.12)) continue;
     regions.push({ left: left / width, top: top / height, width: rw / width, height: rh / height,
       x: (sumX / end + 0.5) / width, y: (sumY / end + 0.5) / height,
       pixels: end, pixelArea: width * height });
@@ -41,10 +49,11 @@ export function verifyBodies(detections, parts, width, height) {
   const regions = torsoRegions(parts), candidates = [];
   if (width > 0 && height > 0) detections.forEach((d, di) => {
     const b = d.box;
-    if (!b || b.width <= 0 || b.height < b.width * 0.65) return;
+    if (!b || ![b.originX, b.originY, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height < b.width * 0.65) return;
     const dl = b.originX / width, dt = b.originY / height;
     const dw = b.width / width, dh = b.height / height;
     regions.forEach((body, ri) => {
+      if (body.height < dh * 0.20 || body.y > dt + dh * 0.8) return;
       const overlapW = Math.max(0, Math.min(dl + dw, body.left + body.width) - Math.max(dl, body.left));
       const overlapH = Math.max(0, Math.min(dt + dh, body.top + body.height) - Math.max(dt, body.top));
       if (overlapW * overlapH < body.width * body.height * 0.65 ||

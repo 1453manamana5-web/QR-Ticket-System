@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=5";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=5";
+import { LineTracker } from "./tracker.mjs?v=6";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=6";
 
-import { verifyBodies } from "./body-check.mjs?v=5";
-import { createVisionPipeline } from "./vision.mjs?v=5";
+import { verifyBodies } from "./body-check.mjs?v=6";
+import { createVisionPipeline } from "./vision.mjs?v=6";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=5";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=5";
+import { openRecordStore, totalOf } from "./records.mjs?v=6";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=6";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -274,7 +274,7 @@ async function tick(now) {
     const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height);
     const tracks = tracker.update(accepted, now);
     drawOverlay(annotated);
-    const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits &&
+    const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits && t.continuousEvidence &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
     $("tracking").textContent = candidates.length
       ? "胴体確認 " + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
