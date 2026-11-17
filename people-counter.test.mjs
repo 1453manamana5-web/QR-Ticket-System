@@ -243,6 +243,7 @@ test('an empty object frame skips segmentation and returns no torso evidence', a
 
 // Exercise the real camera loop while the new async model is still working.
 const { readFileSync } = await import('node:fs');
+const { withDeadline, MAX_INFERENCE_MS } = await import('./reception-app/public/people-counter/health.mjs');
 function cameraLoopHarness(pipeline) {
   const ctx = Object.fromEntries(['clearRect', 'drawImage', 'setLineDash', 'beginPath', 'moveTo', 'lineTo', 'stroke', 'fillText', 'strokeRect', 'fillRect', 'arc', 'fill'].map(name => [name, () => {}]));
   const elements = new Map(), scheduled = [];
@@ -255,10 +256,10 @@ function cameraLoopHarness(pipeline) {
   const source = readFileSync(new URL('./reception-app/public/people-counter/app.js', import.meta.url), 'utf8')
     .replace(/^import .*;\n/gm, '').replace('void initialize();', '');
   const load = new Function('document', 'window', 'navigator', 'requestAnimationFrame', 'cancelAnimationFrame',
-    'LineTracker', 'PROFILES', 'peopleFromResult', 'verifyBodies', 'createVisionPipeline', source +
+    'LineTracker', 'PROFILES', 'peopleFromResult', 'verifyBodies', 'createVisionPipeline', 'withDeadline', 'MAX_INFERENCE_MS', 'BroadcastChannel', source +
     '\nreturn {tick, stopCamera, configureTracker, activate(p){detector=p;running=true;}, tracks(){return tracker.tracks.length;}};');
   const api = load(document, { addEventListener() {} }, {}, fn => { scheduled.push(fn); return scheduled.length; }, () => {},
-    LineTracker, PROFILES, peopleFromResult, verifyBodies, createVisionPipeline);
+    LineTracker, PROFILES, peopleFromResult, verifyBodies, createVisionPipeline, withDeadline, MAX_INFERENCE_MS);
   api.activate(pipeline);
   return { api, scheduled };
 }
@@ -290,4 +291,16 @@ test('changing the counting lines during inference drops the old frame before tr
   finish(cameraFrameResult()); await runningTick;
   assert.equal(api.tracks(), 0);
   assert.equal(scheduled.length, 1);
+});
+
+test('a following visitor first seen just before A is counted separately', () => {
+  const { tracker, counts } = counter();
+  pass(tracker, [0.25, 0.4, 0.55, 0.65]);
+  pass(tracker, [0.38, 0.5, 0.65, 0.8], 480);
+  assert.equal(counts.length, 2);
+});
+test('steady 1.1-second processing cadence does not lose every track', () => {
+  const { tracker, counts } = counter();
+  pass(tracker, [0.25, 0.4, 0.55, 0.7], 0, 1100);
+  assert.equal(counts.length, 1);
 });

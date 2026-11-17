@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=4">
+  <link rel="stylesheet" href="./style.css?v=5">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 04</div>
+      <div class="trial-tag">PROTOTYPE 05</div>
     </header>
     <main>
       <div class="intro">
@@ -41,7 +41,7 @@
               </div>
             </div>
             <div class="camera-actions">
-              <button type="button" id="startButton" class="button primary">計測を開始</button>
+              <button type="button" id="startButton" class="button primary" disabled>計測を開始</button>
               <button type="button" id="stopButton" class="button secondary" disabled>計測を停止</button>
               <span id="tracking" class="tracking" role="status">検出待ち</span>
               <span id="fps" class="fps">検出速度 —</span>
@@ -79,16 +79,16 @@
             <div class="count-number"><span id="total">0</span><small>人</small></div>
             <div class="count-foot"><span>最新の記録</span><strong id="latest">まだありません</strong></div>
             <div class="manual-controls">
-              <button id="addButton" class="button add" type="button">＋1 訂正</button>
-              <button id="minusButton" class="button subtract" type="button">－1 訂正</button>
+              <button id="addButton" class="button add" disabled type="button">＋1 訂正</button>
+              <button id="minusButton" class="button subtract" disabled type="button">－1 訂正</button>
             </div>
             <p class="hint">人数がずれたときだけ修正してください。スタッフの通過分もここで訂正します。</p>
           </div>
 
           <div class="card log-card">
-            <div class="section-head"><h2>最近の記録</h2><button type="button" class="text-button" id="exportButton">CSV出力</button></div>
+            <div class="section-head"><h2>最近の記録</h2><button type="button" class="text-button" id="exportButton" disabled>CSV出力</button></div>
             <ul id="history" class="history"><li class="empty">まだ記録がありません</li></ul>
-            <button type="button" id="resetButton" class="button outline full">新しい試験を開始（0人に戻す）</button>
+            <button type="button" id="resetButton" class="button outline full" disabled>新しい試験を開始（0人に戻す）</button>
           </div>
           <div class="notice">
             <strong>試験用・本番集計には未接続</strong>
@@ -99,6 +99,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=4"></script>
+  <script type="module" src="./app.js?v=5"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@ export class LineTracker {
     minHits = 2, minMeanScore = 0.45 } = {}) {
     if (!['x', 'y'].includes(axis) || ![1, -1].includes(direction) ||
       ![first, second, minHits, minMeanScore].every(Number.isFinite) ||
-      first < 0.10 || second > 0.90 || second - first < 0.10 ||
+      first < 0.10 || second > 0.90 || second - first < 0.10 - 1e-9 ||
       minHits < 2 || minMeanScore < 0 || minMeanScore > 1) {
       throw new Error('計測ラインの設定が不正です。');
     }
@@ -17,7 +17,7 @@ export class LineTracker {
     this.reset();
   }
 
-  reset() { this.tracks = []; this.nextId = 1; }
+  reset() { this.tracks = []; this.nextId = 1; this.lastUpdate = null; this.frameInterval = null; }
 
   position(point) {
     const value = point[this.axis];
@@ -28,7 +28,14 @@ export class LineTracker {
     const now = Number.isFinite(timeMs) ? timeMs : Date.now();
     points = points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
     // After a long interruption, do not join a new visitor to an old track.
-    const recent = this.tracks.filter(t => now >= t.lastSeen && now - t.lastSeen <= 1000);
+    const maxGap = this.frameInterval === null ? 1250 : Math.min(3000, Math.max(1000, this.frameInterval * 2.1));
+    const recent = this.tracks.filter(t => now >= t.lastSeen && now - t.lastSeen <= maxGap);
+    if (this.lastUpdate !== null) {
+      const elapsed = now - this.lastUpdate;
+      if (elapsed > 0 && elapsed <= 1500) this.frameInterval = this.frameInterval === null
+        ? elapsed : this.frameInterval * 0.5 + elapsed * 0.5;
+    }
+    this.lastUpdate = now;
     const candidates = [];
     recent.forEach((track, ti) => {
       const dt = now - track.lastSeen;
@@ -37,7 +44,7 @@ export class LineTracker {
       points.forEach((point, pi) => {
         const predictedDistance = Math.hypot(predicted.x - point.x, predicted.y - point.y);
         const rawDistance = Math.hypot(track.x - point.x, track.y - point.y);
-        if (track.counted && this.position(point) < this.first - 0.035) return;
+        if (track.counted && this.position(point) < this.first) return;
         const along = Math.abs(point[this.axis] - track[this.axis]);
         const across = Math.abs(point[this.axis === 'x' ? 'y' : 'x'] - track[this.axis === 'x' ? 'y' : 'x']);
         // A wider gate only along the selected walking direction. Keep separate
