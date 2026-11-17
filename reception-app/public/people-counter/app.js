@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=6";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=6";
+import { LineTracker } from "./tracker.mjs?v=7";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=7";
 
-import { verifyBodies } from "./body-check.mjs?v=6";
-import { createVisionPipeline } from "./vision.mjs?v=6";
+import { verifyBodies } from "./body-check.mjs?v=7";
+import { createVisionPipeline } from "./vision.mjs?v=7";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=6";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=6";
+import { openRecordStore, totalOf } from "./records.mjs?v=7";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=7";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -13,7 +13,7 @@ const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
 const startButton = $("startButton"), stopButton = $("stopButton");
 let analysisFrame = document.createElement("canvas");
 let analysisCtx = analysisFrame.getContext("2d");
-const defaults = { movement: "x+", first: 40, second: 60, profile: "side" };
+const defaults = { movement: "x+", first: 40, second: 60, profile: "side", bodyMode: "torso" };
 
 let recordStore = null;
 let initialized = false;
@@ -151,9 +151,13 @@ function configureTracker() {
   $("secondValue").textContent = settings.second + "%";
   $("movement").value = settings.movement;
   $("viewMode").value = settings.profile;
+  $("bodyMode").value = settings.bodyMode;
+  $("bodyHint").textContent = settings.bodyMode === "legs"
+    ? "胴体から太もも・すね・足先まで、見えている片側を追加確認します。足先まで映るように設置してください。脚や足が隠れると数えない場合があります。"
+    : "肩〜腰の胴体で確認します。脚・足先が画面外でも使用できます。";
   $("viewHint").textContent = settings.profile === "side"
-    ? "真横では肩〜腰の胴体が映る距離に固定し、左右へ歩いてください。頭や足は必須ではありません。見えている側の胴体を確認し、黄色い点がA→Bを越えると加算します。灰色の候補は数えません。重なりや体の見切れで数え漏れる場合があります。"
-    : "斜め上から撮る場合の標準設定です。肩〜腰の胴体が映るように設置してください。頭や足は必須ではありません。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
+    ? "真横では肩〜腰の胴体が映る距離に固定し、左右へ歩いてください。頭は必須ではありません。脚・足先の条件は下で選べます。見えている側の胴体を確認し、黄色い点がA→Bを越えると加算します。灰色の候補は数えません。重なりや体の見切れで数え漏れる場合があります。"
+    : "斜め上から撮る場合の標準設定です。肩〜腰の胴体が映るように設置してください。頭は必須ではありません。脚・足先の条件は下で選べます。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
   $("firstLine").value = String(settings.first);
   $("secondLine").value = String(settings.second);
   drawOverlay([]);
@@ -198,7 +202,7 @@ function drawOverlay(detections) {
     ctx.strokeRect(d.box.originX * sx, d.box.originY * sy, d.box.width * sx, d.box.height * sy);
     ctx.fillStyle = color;
     ctx.font = "bold " + Math.max(13, w / 57) + "px sans-serif";
-    ctx.fillText(d.bodyVerified ? "人物・胴体確認" : "候補・人数に含めません", d.box.originX * sx + 3, Math.max(15, d.box.originY * sy - 6));
+    ctx.fillText(d.bodyVerified ? (d.legVerified ? "人物・胴体＋脚足確認" : "人物・胴体確認") : "候補・人数に含めません", d.box.originX * sx + 3, Math.max(15, d.box.originY * sy - 6));
     if (d.bodyVerified) {
       ctx.fillStyle = "rgba(249, 220, 114, 0.18)";
       ctx.fillRect(d.body.left * w, d.body.top * h, d.body.width * w, d.body.height * h);
@@ -271,13 +275,13 @@ async function tick(now) {
     if (!running || attempt !== startAttempt || epoch !== trackingEpoch || document.hidden) return;
     if (performance.now() - started >= MAX_INFERENCE_MS) throw new Error("解析が遅いため停止しました。ほかのアプリを閉じて再試行してください。");
     const candidates = peopleFromResult(result.objects, analysisFrame.width, analysisFrame.height, settings.profile);
-    const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height);
+    const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height, settings.bodyMode);
     const tracks = tracker.update(accepted, now);
     drawOverlay(annotated);
     const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits && t.continuousEvidence &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
     $("tracking").textContent = candidates.length
-      ? "胴体確認 " + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
+      ? (settings.bodyMode === "legs" ? "胴体＋脚足確認 " : "胴体確認 ") + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
       : "肩〜腰の胴体が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
@@ -371,6 +375,7 @@ function updateSettings(event) {
   settings = {
     movement: $("movement").value,
     profile: $("viewMode").value,
+    bodyMode: $("bodyMode").value === "legs" ? "legs" : "torso",
     first, second,
   };
   localSet(OPTIONS_KEY, JSON.stringify(settings));
@@ -419,7 +424,8 @@ function initialize() {
       if (saved && ["x+", "x-", "y+", "y-"].includes(saved.movement) &&
         Number.isFinite(saved.first) && Number.isFinite(saved.second) &&
         saved.first >= 20 && saved.first <= 48 && saved.second >= 52 && saved.second <= 80 && saved.second - saved.first >= 10) {
-        settings = { ...defaults, ...saved, profile: Object.hasOwn(PROFILES, saved.profile) ? saved.profile : defaults.profile };
+        settings = { ...defaults, ...saved, profile: Object.hasOwn(PROFILES, saved.profile) ? saved.profile : defaults.profile,
+          bodyMode: saved.bodyMode === "legs" ? "legs" : "torso" };
       }
     } catch {}
     configureTracker();
@@ -451,7 +457,7 @@ $("addButton").addEventListener("click", () => record(1, "manual"));
 $("minusButton").addEventListener("click", () => record(-1, "manual"));
 $("exportButton").addEventListener("click", () => void exportCSV());
 $("resetButton").addEventListener("click", () => void newSession());
-for (const id of ["viewMode", "movement", "firstLine", "secondLine"]) {
+for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine"]) {
   $(id).addEventListener("input", updateSettings);
 }
 document.addEventListener("visibilitychange", () => {

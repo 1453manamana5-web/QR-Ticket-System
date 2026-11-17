@@ -326,3 +326,43 @@ test('a briefly occluded real visitor can confirm again and count once', () => {
   tracker.update([person(.55)],360);tracker.update([person(.7)],480);tracker.update([person(.8)],600);
   assert.equal(counts.length,1);
 });
+
+const legMask = (side = 'left') => mask([torso(), [47,60,6,10,side === 'left' ? 14 : 16],
+  [47,70,6,10,side === 'left' ? 18 : 20], [47,80,9,5,side === 'left' ? 22 : 23]]);
+const verifyLegs = (parts, detections = [bodyDetection()]) => verifyBodies(detections, parts, 1000, 1000, 'legs');
+test('either visible leg can confirm torso, upper leg, lower leg and foot in side view', () => {
+  for (const side of ['left','right']) {
+    const r=verifyLegs(legMask(side));assert.equal(r.accepted.length,1);assert.equal(r.accepted[0].legVerified,true);
+    assert.equal(r.accepted[0].y,verify([bodyDetection()],legMask(side)).accepted[0].y);
+  }
+});
+test('leg mode rejects torso only but default mode still accepts a cropped shoulder-to-waist view', () => {
+  assert.equal(verifyLegs(mask([torso()])).accepted.length,0);
+  assert.equal(verify([bodyDetection()],mask([torso()])).accepted.length,1);
+});
+test('feet alone or arms attached below a torso cannot verify legs', () => {
+  assert.equal(verifyLegs(mask([[47,80,9,5,22]])).accepted.length,0);
+  assert.equal(verifyLegs(mask([torso(),[47,60,6,20,4],[47,80,9,5,22]])).accepted.length,0);
+});
+test('missing feet, disconnected feet and inverted limb order are rejected', () => {
+  for (const rects of [
+    [torso(),[47,60,6,10,14],[47,70,6,15,18]],
+    [torso(),[47,60,6,10,14],[47,70,6,7,18],[47,82,9,3,22]],
+    [torso(),[47,60,6,5,22],[47,65,6,10,18],[47,75,6,10,14]],
+    [torso(),[47,60,6,10,14],[47,70,6,10,20],[47,80,9,5,23]],
+  ]) assert.equal(verifyLegs(mask(rects)).accepted.length,0);
+});
+test('a nearby persons legs cannot complete this torso', () => {
+  assert.equal(verifyLegs(mask([torso(),[65,60,6,10,14],[65,70,6,10,18],[65,80,9,5,22]])).accepted.length,0);
+});
+test('overlapping detections cannot reuse the same torso and foot chain', () => {
+  assert.equal(verifyLegs(legMask(),[bodyDetection(),bodyDetection(.51)]).accepted.length,1);
+});
+test('a fully verified leg-mode passage counts once', () => {
+  const {tracker,counts}=counter();
+  [.25,.4,.55,.7].forEach((x,i)=>{
+    const p=legMask(),delta=Math.round((x-.5)*100),data=new Int32Array(10000).fill(-1);
+    for(let y=0;y<100;y++)for(let xx=0;xx<100;xx++)if(xx+delta>=0&&xx+delta<100)data[y*100+xx+delta]=p.data[y*100+xx];
+    tracker.update(verifyBodies([bodyDetection(x)],{...p,data},1000,1000,'legs').accepted,i*120);
+  });assert.equal(counts.length,1);
+});
