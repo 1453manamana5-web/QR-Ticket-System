@@ -117,6 +117,9 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
       const job=workerJob;
       workerJob=null;
       fallbackBusy=false;
+      // A primary scan that completed after the worker snapshot wins.
+      // Discard slow/stale snapshots instead of accepting the previous ticket.
+      if(lastDecodedAt>job.start || performance.now()-job.start>1300)return;
       if(!event.data.text)return;
       if(Number.isFinite(event.data.x)&&Number.isFinite(event.data.y)){
         const x=(job.sourceX+(event.data.x as number)*job.sourceWidth)/job.videoWidth;
