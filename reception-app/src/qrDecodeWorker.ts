@@ -21,14 +21,16 @@ scope.onmessage=event=>{
     scope.postMessage({id,text:null});return;
   }
   try{
+    const started=performance.now();
     const raw=new Uint8ClampedArray(pixels);
     let found=jsQR(raw,width,height,{inversionAttempts:"attemptBoth"});
-    if(!found && detailed){
+    // Do not let a very slow frame monopolize the auxiliary worker.
+    if(!found && detailed && performance.now()-started<230){
       // Rescue attempts run only after a native-resolution decode has failed.
       const rescue=new Uint8ClampedArray(raw);
       boostQrContrast({data:rescue} as ImageData);
       found=jsQR(rescue,width,height,{inversionAttempts:"attemptBoth"});
-      if(!found){
+      if(!found && performance.now()-started<320){
         adaptiveQrThreshold({data:rescue,width,height} as ImageData);
         found=jsQR(rescue,width,height,{inversionAttempts:"attemptBoth"});
       }
