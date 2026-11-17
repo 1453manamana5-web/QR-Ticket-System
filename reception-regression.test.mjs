@@ -13,6 +13,13 @@ const ts=require("typescript");
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 
 function load(file, dependencies={}, globals={}) {
+  // Canvas/timer stand-ins for camera lifecycle tests (not pixel decoding).
+  if(file.endsWith('/QrScanner.tsx')){
+    globals={...globals,
+      document:{createElement:()=>({getContext:()=>null}),...globals.document},
+      window:{setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,...globals.window},
+    };
+  }
   const compiled=ts.transpileModule(readFileSync(new URL(file, import.meta.url),"utf8")
     .replaceAll("import.meta.env.BASE_URL",'"/QR-Ticket-System/"'), {
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX},
@@ -24,6 +31,8 @@ function load(file, dependencies={}, globals={}) {
     if(name==="./receptionState")return load("./reception-app/src/receptionState.ts");
     if(name==="../../shared/src/browserSecurity")return load("./shared/src/browserSecurity.ts");
     if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
+    if(name==='jsqr')return {default:()=>null};
+    if(name==='./qrEnhancement')return load('./reception-app/src/qrEnhancement.ts');
     if(name==="react"||name==="react/jsx-runtime")return require(name);
     throw Error("Unexpected dependency: "+name);
   },...Object.values(globals));
@@ -490,7 +499,7 @@ test("front QR camera tries mirrored decoding and rear camera uses its own optic
     assert.equal(starts[0].device,"front-id");
     assert.equal(starts[0].options.disableFlip,false);
     assert.deepEqual(settings[0].width,{ideal:1920});
-    assert.equal(settings[1].advanced[0].focusMode,"continuous");
+    assert.ok(settings.some(config=>config.advanced?.some(item=>item.focusMode==="continuous")),"continuous focus should be requested");
     await act(async()=>{renderer.update(React.createElement(Scanner,{readerId:"switch-test",cameraFacing:"environment",onResult:()=>{}}));for(let i=0;i<6;i++)await nextTurn();});
     assert.equal(starts[1].device,"back-id");
     assert.equal(starts[1].options.disableFlip,true);

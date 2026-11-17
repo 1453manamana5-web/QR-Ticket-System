@@ -1,6 +1,7 @@
 import {useEffect,useRef} from "react";
 import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
 import jsQR from "jsqr";
+import {findMotionFocus,chooseDetailedCrop,boostQrContrast,type ScanFocus} from "./qrEnhancement";
 
 type Props={
   readerId:string;
@@ -90,6 +91,16 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
     let fallbackTimer:number|undefined;
     const fallbackCanvas=document.createElement("canvas");
     const fallbackContext=fallbackCanvas.getContext("2d",{willReadFrequently:true});
+    const detailCanvas=document.createElement("canvas");
+    const detailContext=detailCanvas.getContext("2d",{willReadFrequently:true});
+    const motionCanvas=document.createElement("canvas");
+    motionCanvas.width=64;
+    motionCanvas.height=36;
+    const motionContext=motionCanvas.getContext("2d",{willReadFrequently:true});
+    let previousMotionPixels:Uint8ClampedArray|null=null;
+    let movingSpot:({focus:ScanFocus;seenAt:number})|null=null;
+    let lastQrSpot:({focus:ScanFocus;seenAt:number})|null=null;
+    let fallbackPasses=0;
     let fallbackBusy=false;
 
     const stopCamera=async()=>{
@@ -122,14 +133,38 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
         .finally(()=>window.setTimeout(()=>{if(active)scanLocked=false;},60));
     };
 
-    // Independent jsQR fallback: run only a few times per second, so the
-    // primary native/ZXing reader remains responsive on school iPads.
+    // Remember a successfully decoded position, as with tracked objects.
+    // Pixel coordinates are converted back to the original camera frame.
+    const rememberQrSpot=(
+      decoded:NonNullable<ReturnType<typeof jsQR>>,
+      sourceX:number,sourceY:number,scaleX:number,scaleY:number,
+      videoWidth:number,videoHeight:number
+    )=>{
+      const location=decoded.location;
+      if(!location)return;
+      const points=[location.topLeftCorner,location.topRightCorner,
+        location.bottomLeftCorner,location.bottomRightCorner];
+      const meanX=points.reduce((sum,point)=>sum+point.x,0)/points.length;
+      const meanY=points.reduce((sum,point)=>sum+point.y,0)/points.length;
+      const x=(sourceX+meanX*scaleX)/videoWidth;
+      const y=(sourceY+meanY*scaleY)/videoHeight;
+      if(Number.isFinite(x)&&Number.isFinite(y)){
+        lastQrSpot={focus:{x:Math.max(0,Math.min(1,x)),y:Math.max(0,Math.min(1,y))},seenAt:performance.now()};
+      }
+    };
+
+    // The standard reader remains the fast path. On failure, inspect
+    // native-resolution regions (not digitally enlarged low-res pixels).
+    // Small motion gives a temporary candidate; fixed presets still cover
+    // stationary tickets. No images are recorded, uploaded or persisted.
     const fallbackDecode=()=>{
-      if(!active||scanLocked||fallbackBusy||!fallbackContext||!readerElement)return;
+      if(!active||scanLocked||fallbackBusy||!fallbackContext||!readerElement||
+          document.visibilityState==="hidden")return;
       const video=readerElement.querySelector("video");
-      if(!video||video.readyState<2||!video.videoWidth)return;
+      if(!video||video.readyState<2||!video.videoWidth||!video.videoHeight)return;
       fallbackBusy=true;
       try{
+        const now=performance.now();
         const width=Math.min(960,video.videoWidth);
         const height=Math.max(1,Math.round(width*video.videoHeight/video.videoWidth));
         if(fallbackCanvas.width!==width)fallbackCanvas.width=width;
@@ -137,7 +172,43 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
         fallbackContext.drawImage(video,0,0,width,height);
         const frame=fallbackContext.getImageData(0,0,width,height);
         const decoded=jsQR(frame.data,width,height,{inversionAttempts:"attemptBoth"});
-        if(decoded?.data)acceptDecoded(decoded.data);
+        if(decoded?.data){
+          rememberQrSpot(decoded,0,0,video.videoWidth/width,video.videoHeight/height,video.videoWidth,video.videoHeight);
+          acceptDecoded(decoded.data);
+          return;
+        }
+
+        fallbackPasses++;
+        // A tiny motion thumbnail costs much less than running an AI model
+        // and proposes which area might contain the held-up ticket.
+        if(motionContext){
+          motionContext.drawImage(video,0,0,motionCanvas.width,motionCanvas.height);
+          const thumbnail=motionContext.getImageData(0,0,motionCanvas.width,motionCanvas.height);
+          const focus=findMotionFocus(previousMotionPixels,thumbnail.data,motionCanvas.width,motionCanvas.height);
+          previousMotionPixels=new Uint8ClampedArray(thumbnail.data);
+          if(focus)movingSpot={focus,seenAt:now};
+        }
+        // Limit expensive full-resolution attempts to approximately 1.4/s.
+        if(fallbackPasses%2!==0||!detailContext)return;
+        const focus=lastQrSpot&&now-lastQrSpot.seenAt<8000 ? lastQrSpot.focus
+          : movingSpot&&now-movingSpot.seenAt<1400 ? movingSpot.focus : null;
+        const detailPass=fallbackPasses/2-1; // Start with the central region.
+        const crop=chooseDetailedCrop(video.videoWidth,video.videoHeight,detailPass,focus);
+        if(!crop)return;
+        if(detailCanvas.width!==crop.size)detailCanvas.width=crop.size;
+        if(detailCanvas.height!==crop.size)detailCanvas.height=crop.size;
+        detailContext.drawImage(video,crop.x,crop.y,crop.size,crop.size,0,0,crop.size,crop.size);
+        const region=detailContext.getImageData(0,0,crop.size,crop.size);
+        let closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
+        // Only rarely pay for an additional low-light contrast pass.
+        if(!closeUp && detailPass%3===2){
+          boostQrContrast(region);
+          closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
+        }
+        if(closeUp?.data){
+          rememberQrSpot(closeUp,crop.x,crop.y,1,1,video.videoWidth,video.videoHeight);
+          acceptDecoded(closeUp.data);
+        }
       }catch(error){console.debug("補助QR解析をスキップしました",error);}
       finally{fallbackBusy=false;}
     };

@@ -23,6 +23,9 @@ jobs:
       - name: People counter regression tests
         run: npm run test:people-counter
 
+      - name: Smart QR scanner regression tests
+        run: node --test qr-enhancement.test.mjs
+
       - name: Firebase client regression tests
         run: npm run test:client
 
