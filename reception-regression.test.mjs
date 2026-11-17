@@ -13,6 +13,13 @@ const ts=require("typescript");
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 
 function load(file, dependencies={}, globals={}) {
+  // Canvas/timer stand-ins for camera lifecycle tests (not pixel decoding).
+  if(file.endsWith('/QrScanner.tsx')){
+    globals={...globals,
+      document:{createElement:()=>({getContext:()=>null}),...globals.document},
+      window:{setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,...globals.window},
+    };
+  }
   const compiled=ts.transpileModule(readFileSync(new URL(file, import.meta.url),"utf8")
     .replaceAll("import.meta.env.BASE_URL",'"/QR-Ticket-System/"'), {
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX},
@@ -24,6 +31,8 @@ function load(file, dependencies={}, globals={}) {
     if(name==="./receptionState")return load("./reception-app/src/receptionState.ts");
     if(name==="../../shared/src/browserSecurity")return load("./shared/src/browserSecurity.ts");
     if(name==="../../shared/src/offlineTransfer")return load("./shared/src/offlineTransfer.ts",{}, {crypto:webcrypto});
+    if(name==='jsqr')return {default:()=>null};
+    if(name==='./qrEnhancement')return load('./reception-app/src/qrEnhancement.ts');
     if(name==="react"||name==="react/jsx-runtime")return require(name);
     throw Error("Unexpected dependency: "+name);
   },...Object.values(globals));
