@@ -100,3 +100,41 @@ export function boostQrContrast(image: ImageData): void {
     data[i] = value; data[i + 1] = value; data[i + 2] = value;
   }
 }
+
+
+/**
+ * Local-threshold rescue for uneven illumination (worker-only, after failure).
+ * An integral image computes local means in linear time, not per-pixel windows.
+ * This is optional: successful QR decodes never incur this cost.
+ */
+export function adaptiveQrThreshold(image:ImageData, radius=9):void {
+  const {data,width,height}=image;
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+    width<1||height<1||data.length!==width*height*4)return;
+  const r=Math.max(2,Math.min(32,Math.round(radius)));
+  const stride=width+1;
+  const sums=new Float64Array((width+1)*(height+1));
+  const luma=new Uint8Array(width*height);
+  for(let y=0;y<height;y++){
+    let rowSum=0;
+    for(let x=0;x<width;x++){
+      const p=y*width+x,i=p*4;
+      const value=(data[i]*77+data[i+1]*150+data[i+2]*29)>>8;
+      luma[p]=value;
+      rowSum+=value;
+      sums[(y+1)*stride+x+1]=sums[y*stride+x+1]+rowSum;
+    }
+  }
+  for(let y=0;y<height;y++){
+    const y1=Math.max(0,y-r),y2=Math.min(height,y+r+1);
+    for(let x=0;x<width;x++){
+      const x1=Math.max(0,x-r),x2=Math.min(width,x+r+1);
+      const area=(x2-x1)*(y2-y1);
+      const mean=(sums[y2*stride+x2]-sums[y1*stride+x2]-
+        sums[y2*stride+x1]+sums[y1*stride+x1])/area;
+      const v=luma[y*width+x]<mean-6?0:255;
+      const i=(y*width+x)*4;
+      data[i]=data[i+1]=data[i+2]=v;
+    }
+  }
+}

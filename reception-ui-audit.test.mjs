@@ -27,6 +27,7 @@ function load(file,dependencies={},globals={}){
     if(name==='../../shared/src/offlineTransfer')return load('./shared/src/offlineTransfer.ts',{}, {crypto:webcrypto});
     if(name==='jsqr')return {default:()=>null};
     if(name==='./qrEnhancement')return load('./reception-app/src/qrEnhancement.ts');
+    if(name==='./qrDecodeWorker?worker&inline')return {default:class QRWorkerStub{postMessage(){}terminate(){}}};
     if(name==='react'||name==='react/jsx-runtime')return require(name);
     throw Error('Unexpected dependency: '+name);
   },...Object.values(globals));
