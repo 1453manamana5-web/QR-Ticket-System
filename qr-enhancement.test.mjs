@@ -10,7 +10,7 @@ const compiled=ts.transpileModule(source,{compilerOptions:{
 }}).outputText;
 const helper={};
 new Function('exports','require',compiled)(helper,require);
-const {findMotionFocus,chooseDetailedCrop,boostQrContrast}=helper;
+const {findMotionFocus,chooseDetailedCrop,boostQrContrast,adaptiveQrThreshold}=helper;
 
 function pixels(w,h,value=35) {
   const data=new Uint8ClampedArray(w*h*4);
@@ -69,4 +69,62 @@ test('contrast rescue preserves alpha and enlarges a compressed range',()=>{
   assert.ok(data[0]<50);
   assert.ok(data[127*4]>160);
   assert.ok(data[127*4]-data[0]>130);
+});
+
+test('adaptive threshold rescues uneven backgrounds without changing alpha',()=>{
+  const w=40,h=32,data=pixels(w,h,150);
+  for(let y=12;y<17;y++)for(let x=15;x<20;x++){
+    const i=(y*w+x)*4;
+    data[i]=data[i+1]=data[i+2]=20;
+  }
+  adaptiveQrThreshold({data,width:w,height:h});
+  assert.equal(data[(14*w+17)*4],0);
+  assert.equal(data[(3*w+3)*4],255);
+  assert.equal(data[(14*w+17)*4+3],255);
+});
+
+function prepareWorker(fakeDecode){
+  const workerSource=readFileSync(new URL('./reception-app/src/qrDecodeWorker.ts',import.meta.url),'utf8');
+  const workerCompiled=ts.transpileModule(workerSource,{compilerOptions:{
+    module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,
+    esModuleInterop:true
+  }}).outputText;
+  const output=[];
+  const scope={onmessage:null,postMessage:message=>output.push(message)};
+  new Function('exports','require','self',workerCompiled)({},name=>{
+    if(name==='jsqr')return {__esModule:true,default:fakeDecode};
+    if(name==='./qrEnhancement')return helper;
+    throw Error('Unexpected worker dependency: '+name);
+  },scope);
+  return {scope,output};
+}
+test('worker returns a QR on the first pass without unnecessary enhancements',()=>{
+  let calls=0;
+  const {scope,output}=prepareWorker(()=>{
+    calls++;
+    return {data:'ticket-42',location:{
+      topLeftCorner:{x:10,y:20},topRightCorner:{x:30,y:20},
+      bottomLeftCorner:{x:10,y:40},bottomRightCorner:{x:30,y:40}
+    }};
+  });
+  scope.onmessage({data:{id:3,width:100,height:100,
+    pixels:pixels(100,100).buffer,detailed:true}});
+  assert.equal(calls,1);
+  assert.deepEqual(output,[{id:3,text:'ticket-42',x:0.2,y:0.3}]);
+});
+test('worker tries expensive rescue only for failed detail images',()=>{
+  let calls=0;
+  const {scope,output}=prepareWorker(()=>{
+    calls++;
+    return null;
+  });
+  const image=()=>pixels(64,64).buffer;
+  scope.onmessage({data:{id:1,width:64,height:64,pixels:image(),detailed:false}});
+  assert.equal(calls,1);
+  scope.onmessage({data:{id:2,width:64,height:64,pixels:image(),detailed:true}});
+  assert.equal(calls,4);
+  assert.deepEqual(output,[{id:1,text:null},{id:2,text:null}]);
+  scope.onmessage({data:{id:3,width:64,height:64,pixels:new ArrayBuffer(5),detailed:true}});
+  assert.equal(calls,4);
+  assert.deepEqual(output.at(-1),{id:3,text:null});
 });
