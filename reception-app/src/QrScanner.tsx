@@ -1,6 +1,7 @@
 import {useEffect,useRef} from "react";
 import {Html5Qrcode,Html5QrcodeSupportedFormats} from "html5-qrcode";
 import jsQR from "jsqr";
+import QrDecodeWorker from "./qrDecodeWorker?worker&inline";
 import {findMotionFocus,chooseDetailedCrop,boostQrContrast,type ScanFocus} from "./qrEnhancement";
 
 type Props={
@@ -102,9 +103,34 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
     let lastQrSpot:({focus:ScanFocus;seenAt:number})|null=null;
     let fallbackPasses=0;
     let fallbackBusy=false;
+    let lastLegacyAttempt=0;
+    let workerRequestId=0;
+    let qrWorker:Worker|null=null;
+    let workerJob:{
+      id:number;start:number;sourceX:number;sourceY:number;
+      sourceWidth:number;sourceHeight:number;videoWidth:number;videoHeight:number
+    }|null=null;
+    const onWorkerMessage=(event:MessageEvent<{
+      id:number;text:string|null;x?:number;y?:number
+    }>)=>{
+      if(!active||!workerJob||event.data.id!==workerJob.id)return;
+      const job=workerJob;
+      workerJob=null;
+      fallbackBusy=false;
+      if(!event.data.text)return;
+      if(Number.isFinite(event.data.x)&&Number.isFinite(event.data.y)){
+        const x=(job.sourceX+(event.data.x as number)*job.sourceWidth)/job.videoWidth;
+        const y=(job.sourceY+(event.data.y as number)*job.sourceHeight)/job.videoHeight;
+        lastQrSpot={focus:{x:Math.max(0,Math.min(1,x)),
+          y:Math.max(0,Math.min(1,y))},seenAt:performance.now()};
+      }
+      acceptDecoded(event.data.text);
+    };
 
     const stopCamera=async()=>{
       if(fallbackTimer!==undefined){window.clearInterval(fallbackTimer);fallbackTimer=undefined;}
+      if(qrWorker){qrWorker.onmessage=null;qrWorker.onerror=null;qrWorker.terminate();qrWorker=null;}
+      workerJob=null;fallbackBusy=false;
       const current=scanner;
       scanner=null;
       if(current){
@@ -157,60 +183,80 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
     // native-resolution regions (not digitally enlarged low-res pixels).
     // Small motion gives a temporary candidate; fixed presets still cover
     // stationary tickets. No images are recorded, uploaded or persisted.
+    // Two-tier scanner: the existing camera reader is always the fast path.
+    // An optional worker decodes more candidates without blocking UI/ZXing.
+    // Detail crops inspect native sensor pixels, not enlarged low-res frames.
     const fallbackDecode=()=>{
+      if(workerJob && performance.now()-workerJob.start>2200){
+        // A failed/stalled worker must never block the scanner indefinitely.
+        qrWorker?.terminate();qrWorker=null;workerJob=null;fallbackBusy=false;
+      }
       if(!active||scanLocked||fallbackBusy||!fallbackContext||!readerElement||
-          document.visibilityState==="hidden")return;
+        document.visibilityState==="hidden")return;
+      const now=performance.now();
+      if(!qrWorker&&now-lastLegacyAttempt<350)return;
       const video=readerElement.querySelector("video");
       if(!video||video.readyState<2||!video.videoWidth||!video.videoHeight)return;
+      lastLegacyAttempt=now;
       fallbackBusy=true;
+      let handedOff=false;
       try{
-        const now=performance.now();
-        const width=Math.min(960,video.videoWidth);
-        const height=Math.max(1,Math.round(width*video.videoHeight/video.videoWidth));
-        if(fallbackCanvas.width!==width)fallbackCanvas.width=width;
-        if(fallbackCanvas.height!==height)fallbackCanvas.height=height;
-        fallbackContext.drawImage(video,0,0,width,height);
-        const frame=fallbackContext.getImageData(0,0,width,height);
-        const decoded=jsQR(frame.data,width,height,{inversionAttempts:"attemptBoth"});
-        if(decoded?.data){
-          rememberQrSpot(decoded,0,0,video.videoWidth/width,video.videoHeight/height,video.videoWidth,video.videoHeight);
-          acceptDecoded(decoded.data);
-          return;
-        }
-
         fallbackPasses++;
-        // A tiny motion thumbnail costs much less than running an AI model
-        // and proposes which area might contain the held-up ticket.
+        // Motion is just a suggestion; stationary tickets still get scanned.
         if(motionContext){
           motionContext.drawImage(video,0,0,motionCanvas.width,motionCanvas.height);
           const thumbnail=motionContext.getImageData(0,0,motionCanvas.width,motionCanvas.height);
-          const focus=findMotionFocus(previousMotionPixels,thumbnail.data,motionCanvas.width,motionCanvas.height);
+          const focus=findMotionFocus(previousMotionPixels,thumbnail.data,
+            motionCanvas.width,motionCanvas.height);
           previousMotionPixels=new Uint8ClampedArray(thumbnail.data);
           if(focus)movingSpot={focus,seenAt:now};
         }
-        // Limit expensive full-resolution attempts to approximately 1.4/s.
-        if(fallbackPasses%2!==0||!detailContext)return;
-        const focus=lastQrSpot&&now-lastQrSpot.seenAt<8000 ? lastQrSpot.focus
-          : movingSpot&&now-movingSpot.seenAt<1400 ? movingSpot.focus : null;
-        const detailPass=fallbackPasses/2-1; // Start with the central region.
-        const crop=chooseDetailedCrop(video.videoWidth,video.videoHeight,detailPass,focus);
-        if(!crop)return;
-        if(detailCanvas.width!==crop.size)detailCanvas.width=crop.size;
-        if(detailCanvas.height!==crop.size)detailCanvas.height=crop.size;
-        detailContext.drawImage(video,crop.x,crop.y,crop.size,crop.size,0,0,crop.size,crop.size);
-        const region=detailContext.getImageData(0,0,crop.size,crop.size);
-        let closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
-        // Only rarely pay for an additional low-light contrast pass.
-        if(!closeUp && detailPass%3===2){
-          boostQrContrast(region);
-          closeUp=jsQR(region.data,crop.size,crop.size,{inversionAttempts:"attemptBoth"});
+        const focus=lastQrSpot&&now-lastQrSpot.seenAt<5500 ? lastQrSpot.focus
+          : movingSpot&&now-movingSpot.seenAt<1200 ? movingSpot.focus : null;
+        const detailedCrop=fallbackPasses%2===0
+          ? chooseDetailedCrop(video.videoWidth,video.videoHeight,
+            Math.floor(fallbackPasses/2)-1,focus)
+          : null;
+        const detailed=!!detailedCrop&&!!detailContext;
+        const sourceX=detailed?detailedCrop!.x:0;
+        const sourceY=detailed?detailedCrop!.y:0;
+        const sourceWidth=detailed?detailedCrop!.size:video.videoWidth;
+        const sourceHeight=detailed?detailedCrop!.size:video.videoHeight;
+        const width=detailed?sourceWidth:Math.min(960,video.videoWidth);
+        const height=detailed?sourceHeight:Math.max(1,
+          Math.round(width*video.videoHeight/video.videoWidth));
+        const canvas=detailed?detailCanvas:fallbackCanvas;
+        const context=detailed?detailContext!:fallbackContext;
+        if(canvas.width!==width)canvas.width=width;
+        if(canvas.height!==height)canvas.height=height;
+        context.drawImage(video,sourceX,sourceY,sourceWidth,sourceHeight,0,0,width,height);
+        const frame=context.getImageData(0,0,width,height);
+        if(qrWorker){
+          const id=++workerRequestId;
+          workerJob={id,start:now,sourceX,sourceY,sourceWidth,sourceHeight,
+            videoWidth:video.videoWidth,videoHeight:video.videoHeight};
+          const pixels=frame.data.buffer as ArrayBuffer;
+          qrWorker.postMessage({id,width,height,pixels,detailed},[pixels]);
+          handedOff=true;
+          return;
         }
-        if(closeUp?.data){
-          rememberQrSpot(closeUp,crop.x,crop.y,1,1,video.videoWidth,video.videoHeight);
-          acceptDecoded(closeUp.data);
+        // If workers are blocked/unsupported, keep the proven synchronous fallback.
+        let decoded=jsQR(frame.data,width,height,{inversionAttempts:"attemptBoth"});
+        if(!decoded&&detailed){
+          boostQrContrast(frame);
+          decoded=jsQR(frame.data,width,height,{inversionAttempts:"attemptBoth"});
         }
-      }catch(error){console.debug("補助QR解析をスキップしました",error);}
-      finally{fallbackBusy=false;}
+        if(decoded?.data){
+          rememberQrSpot(decoded,sourceX,sourceY,sourceWidth/width,
+            sourceHeight/height,video.videoWidth,video.videoHeight);
+          acceptDecoded(decoded.data);
+        }
+      }catch(error){
+        workerJob=null;
+        console.debug("補助QR解析をスキップしました",error);
+      }finally{
+        if(!handedOff)fallbackBusy=false;
+      }
     };
 
     const startCamera=async()=>{
@@ -258,7 +304,20 @@ export default function QrScanner({readerId,onResult,onError,className,cameraFac
 
         if(!active){await stopCamera();return;}
         await applyFastCameraSettings(instance);
-        if(active)fallbackTimer=window.setInterval(fallbackDecode,350);
+        if(active && typeof Worker!=="undefined"){
+          try{
+            qrWorker=new QrDecodeWorker();
+            qrWorker.onmessage=onWorkerMessage;
+            qrWorker.onerror=()=>{
+              console.warn("QR補助ワーカーの起動に失敗しました。標準方式へ切り替えます。");
+              qrWorker?.terminate();qrWorker=null;workerJob=null;fallbackBusy=false;
+            };
+          }catch(error){
+            console.info("QR補助ワーカーを使用できないため標準方式に切り替えます",error);
+          }
+        }
+        // Worker scans opportunistically; the primary reader keeps 30fps.
+        if(active)fallbackTimer=window.setInterval(fallbackDecode,qrWorker?170:350);
       }catch(reason){
         console.error("QRカメラの読み取りを開始できませんでした",reason);
         await stopCamera();
