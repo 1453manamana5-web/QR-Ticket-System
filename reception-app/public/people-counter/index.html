@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=6">
+  <link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 06</div>
+      <div class="trial-tag">PROTOTYPE 07</div>
     </header>
     <main>
       <div class="intro">
@@ -46,7 +46,7 @@
               <span id="tracking" class="tracking" role="status">検出待ち</span>
               <span id="fps" class="fps">検出速度 —</span>
             </div>
-            <p class="hint">黄色：肩〜腰の胴体を確認した人物 ／ 灰色：候補（人数に含めません）</p>
+            <p class="hint">黄色：選択した確認範囲を満たした人物 ／ 灰色：候補（人数に含めません）</p>
             <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
           </div>
 
@@ -58,6 +58,12 @@
               <option value="standard">斜め上からの通過（標準）</option>
             </select>
             <p id="viewHint" class="hint"></p>
+            <label for="bodyMode">人物の確認範囲</label>
+            <select id="bodyMode" aria-describedby="bodyHint">
+              <option value="torso">肩〜腰で確認</option>
+              <option value="legs">胴体＋脚・足先で確認（試験）</option>
+            </select>
+            <p id="bodyHint" class="hint"></p>
             <label class="direction-label" for="movement">映像内の入場方向</label>
             <select id="movement">
               <option value="x+">左 → 右</option>
@@ -99,6 +105,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=6"></script>
+  <script type="module" src="./app.js?v=7"></script>
 </body>
 </html>

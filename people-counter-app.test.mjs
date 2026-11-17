@@ -103,3 +103,11 @@ test('counting lines keep the required gap and invalid saved settings cannot blo
  a.element('secondLine').value='52';a.element('secondLine').oninput({target:{id:'secondLine'}});
  assert.equal(a.element('secondLine').value,'58');await a.api.record(1,'manual');assert.equal(a.api.state().counter,1);await a.close();
 });
+
+test('leg mode is restored and wired into the camera loop instead of accepting torso-only frames',async()=>{
+ const a=harness({savedOptions:{movement:'x+',profile:'side',first:40,second:60,bodyMode:'legs'},pipelineFactory:async()=>({async detectForVideo(){return frame(.5)},close(){}})});
+ await a.api.initialize();assert.equal(a.element('bodyMode').value,'legs');await a.api.startCamera();await a.api.tick(100);
+ assert.match(a.element('tracking').textContent,/胴体＋脚足確認 0人/);
+ a.element('bodyMode').value='torso';a.element('bodyMode').oninput();a.element('video').currentTime=3;await a.api.tick(300);
+ assert.match(a.element('tracking').textContent,/胴体確認 1人/);await a.close();
+});
