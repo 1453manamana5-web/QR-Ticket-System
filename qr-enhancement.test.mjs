@@ -66,6 +66,7 @@ test('contrast rescue preserves alpha and enlarges a compressed range',()=>{
   boostQrContrast({data});
   assert.equal(data[3],255);
   assert.equal(data[127*4+3],255);
-  assert.ok(data[0]<40);
+  assert.ok(data[0]<50);
   assert.ok(data[127*4]>160);
+  assert.ok(data[127*4]-data[0]>130);
 });
