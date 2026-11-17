@@ -304,3 +304,25 @@ test('steady 1.1-second processing cadence does not lose every track', () => {
   pass(tracker, [0.25, 0.4, 0.55, 0.7], 0, 1100);
   assert.equal(counts.length, 1);
 });
+
+// Adversarial masks: the detector itself may still label these as a person.
+test('a small torso-labelled patch inside a large person box is insufficient', () => {
+  assert.equal(verify([bodyDetection()], mask([[46,40,8,8]])).accepted.length, 0);
+});
+test('a thin stalk joined to a wide base is not a complete torso', () => {
+  assert.equal(verify([bodyDetection()], mask([[46,25,1,40],[46,57,10,8]])).accepted.length, 0);
+});
+test('torso labels at the foot of a full-height detection cannot verify a person', () => {
+  assert.equal(verify([bodyDetection()], mask([[46,68,8,17]])).accepted.length, 0);
+});
+test('isolated ghost detections separated by empty frames never count', () => {
+  const {tracker,counts}=counter();
+  [.25,.4,.55,.7].forEach((x,i)=>{tracker.update([person(x)],i*240);tracker.update([],i*240+120);});
+  assert.equal(counts.length,0);
+});
+test('a briefly occluded real visitor can confirm again and count once', () => {
+  const {tracker,counts}=counter();
+  tracker.update([person(.25)],0);tracker.update([person(.4)],120);tracker.update([],240);
+  tracker.update([person(.55)],360);tracker.update([person(.7)],480);tracker.update([person(.8)],600);
+  assert.equal(counts.length,1);
+});

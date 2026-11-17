@@ -66,6 +66,8 @@ export class LineTracker {
       const previous = this.position(track), current = this.position(point);
       const dt = Math.max(1, now - track.lastSeen);
       track.hits++;
+      track.streak = (track.streak || 0) + 1;
+      if (track.streak >= 2) track.continuousEvidence = true;
       track.scoreSum += point.score ?? 1;
       if (!track.counted) {
         if (previous < this.first && current >= this.first) track.armedAt = now;
@@ -76,7 +78,7 @@ export class LineTracker {
         if (track.armedAt !== null && previous < this.second && current >= this.second) track.pending = true;
         // A fast crossing may reach B on its second observation. Confirm on a
         // subsequent frame without losing the completed crossing or counting twice.
-        if (track.pending && current >= this.second && track.hits >= this.minHits &&
+        if (track.pending && current >= this.second && track.hits >= this.minHits && track.continuousEvidence &&
           track.scoreSum / track.hits >= this.minMeanScore) {
           track.counted = true; track.armedAt = null; track.pending = false;
           this.onCount({ trackId: track.id, at: now });
@@ -86,11 +88,12 @@ export class LineTracker {
       track.vy = track.vy * 0.35 + ((point.y - track.y) / dt) * 0.65;
       Object.assign(track, { x: point.x, y: point.y, w: point.w || 0, h: point.h || 0, lastSeen: now });
     }
+    recent.forEach((track, ti) => { if (!claimedTracks.has(ti)) track.streak = 0; });
     points.forEach((point, pi) => {
       if (claimedPoints.has(pi)) return;
       recent.push({ id: this.nextId++, x: point.x, y: point.y, w: point.w || 0, h: point.h || 0,
-        vx: 0, vy: 0, hits: 1, scoreSum: point.score ?? 1, lastSeen: now,
-        counted: false, armedAt: null, pending: false });
+        vx: 0, vy: 0, hits: 1, streak: 1, scoreSum: point.score ?? 1, lastSeen: now,
+        continuousEvidence: false, counted: false, armedAt: null, pending: false });
     });
     this.tracks = recent;
     return recent;
