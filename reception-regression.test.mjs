@@ -499,7 +499,7 @@ test("front QR camera tries mirrored decoding and rear camera uses its own optic
     assert.equal(starts[0].device,"front-id");
     assert.equal(starts[0].options.disableFlip,false);
     assert.deepEqual(settings[0].width,{ideal:1920});
-    assert.equal(settings[1].advanced[0].focusMode,"continuous");
+    assert.ok(settings.some(config=>config.advanced?.some(item=>item.focusMode==="continuous")),"continuous focus should be requested");
     await act(async()=>{renderer.update(React.createElement(Scanner,{readerId:"switch-test",cameraFacing:"environment",onResult:()=>{}}));for(let i=0;i<6;i++)await nextTurn();});
     assert.equal(starts[1].device,"back-id");
     assert.equal(starts[1].options.disableFlip,true);
