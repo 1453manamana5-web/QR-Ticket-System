@@ -92,11 +92,15 @@ export function verifyBodies(detections, parts, width, height, mode = 'torso') {
   const regions = torsoRegions(parts), legs = mode === 'legs' ? legRegions(parts) : [], candidates = [];
   if (width > 0 && height > 0) detections.forEach((d, di) => {
     const b = d.box;
-    if (!b || ![b.originX, b.originY, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height < b.width * 0.65) return;
+    if (!b || ![b.originX, b.originY, b.width, b.height].every(Number.isFinite) || b.width <= 0) return;
+    // A vertically cropped torso can have a wider person box. Retain the
+    // independent torso checks and limit the exception to the torso mode.
+    const cropped = mode === 'torso' && d.verticalCrop === true;
+    if (b.height < b.width * (cropped ? 0.50 : 0.65)) return;
     const dl = b.originX / width, dt = b.originY / height;
     const dw = b.width / width, dh = b.height / height;
     regions.forEach((body, ri) => {
-      if (body.height < dh * 0.20 || body.y > dt + dh * 0.8) return;
+      if ((cropped && b.height < b.width * 0.65 && body.height < dh * 0.40) || body.height < dh * 0.20 || body.y > dt + dh * 0.8) return;
       const overlapW = Math.max(0, Math.min(dl + dw, body.left + body.width) - Math.max(dl, body.left));
       const overlapH = Math.max(0, Math.min(dt + dh, body.top + body.height) - Math.max(dt, body.top));
       if (overlapW * overlapH < body.width * body.height * 0.65 ||

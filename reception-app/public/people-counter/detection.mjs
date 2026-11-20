@@ -25,6 +25,7 @@ export function peopleFromResult(result, width, height, profile = 'side') {
       // should not pull the anchor towards the edge of the frame.
       x: Math.min(1, Math.max(0, (box.originX + box.width / 2) / width)),
       y: Math.min(1, Math.max(0, (box.originY + box.height * options.anchorY) / height)),
+      verticalCrop: top === 0 || bottom === height,
       w: (right - left) / width, h: (bottom - top) / height, score,
     }];
   });

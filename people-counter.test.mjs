@@ -249,7 +249,7 @@ function cameraLoopHarness(pipeline) {
   const elements = new Map(), scheduled = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, { width: 320, height: 213, style: {}, classList: { toggle() {} },
-      addEventListener() {}, getContext() { return ctx; }, pause() {}, readyState: 2, currentTime: 1 });
+      addEventListener() {}, replaceChildren() {}, getContext() { return ctx; }, pause() {}, readyState: 2, currentTime: 1 });
     return elements.get(id);
   };
   const document = { hidden: false, getElementById: element, createElement: () => element('analysis'), addEventListener() {} };
@@ -365,4 +365,14 @@ test('a fully verified leg-mode passage counts once', () => {
     for(let y=0;y<100;y++)for(let xx=0;xx<100;xx++)if(xx+delta>=0&&xx+delta<100)data[y*100+xx+delta]=p.data[y*100+xx];
     tracker.update(verifyBodies([bodyDetection(x)],{...p,data},1000,1000,'legs').accepted,i*120);
   });assert.equal(counts.length,1);
+});
+
+test('a cropped torso can pass the wide-box check only at a vertical frame edge with substantial torso evidence', () => {
+  const box = {originX: 200, originY: 0, width: 600, height: 320};
+  const [cropped] = peopleFromResult({detections: [detection(.9, box)]}, 1000, 1000);
+  const torsoMask = mask([[42, 3, 16, 25]]);
+  assert.equal(verify([cropped], torsoMask).accepted.length, 1);
+  assert.equal(verify([{...cropped, verticalCrop: false}], torsoMask).accepted.length, 0);
+  assert.equal(verify([cropped], mask([[42, 3, 16, 25, 4]])).accepted.length, 0);
+  assert.equal(verify([cropped], mask([[42, 3, 16, 10]])).accepted.length, 0);
 });

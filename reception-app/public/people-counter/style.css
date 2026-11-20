@@ -56,3 +56,9 @@ footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
 .placeholder[hidden]{display:none!important}
 
 .tracking{font-size:11px;color:#39536b;flex-basis:100%}.config-card .direction-label{margin-top:18px}
+
+.area-controls{min-inline-size:0;margin:16px 0;padding:12px;border:1px solid #c9d7e3;border-radius:10px}
+.area-controls legend{font-weight:700}
+#trialActual,#trialNote{box-sizing:border-box;width:100%;padding:10px;border:1px solid #b8c9da;border-radius:8px;font:inherit}
+.trial-results{padding-inline-start:20px;line-height:1.55;overflow-wrap:anywhere}
+.trial-results li+li{margin-top:8px}
