@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=7">
+  <link rel="stylesheet" href="./style.css?v=8">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 07</div>
+      <div class="trial-tag">PROTOTYPE 08</div>
     </header>
     <main>
       <div class="intro">
@@ -51,7 +51,7 @@
           </div>
 
           <div class="card config-card">
-            <div class="section-head"><h2>計測ラインの調整</h2><span class="section-note">設定は端末に保存</span></div>
+            <div class="section-head"><h2>検出エリアと計測ライン</h2><span class="section-note">設定は端末に保存</span></div>
             <label for="viewMode">カメラの設置</label>
             <select id="viewMode" aria-describedby="viewHint">
               <option value="side">真横・横向きの通過（試験）</option>
@@ -71,6 +71,29 @@
               <option value="y+">上 → 下</option>
               <option value="y-">下 → 上</option>
             </select>
+            <label for="overlayTarget">映像をタップして調整</label>
+            <select id="overlayTarget">
+              <option value="">スライダーで調整</option>
+              <option value="firstLine">ライン A</option>
+              <option value="secondLine">ライン B</option>
+              <option value="left">白枠の左端</option>
+              <option value="right">白枠の右端</option>
+              <option value="top">白枠の上端</option>
+              <option value="bottom">白枠の下端</option>
+            </select>
+            <p id="areaStatus" class="hint" role="status"></p>
+            <fieldset class="area-controls">
+              <legend>検出エリア（映像の白枠）</legend>
+              <p class="hint">入口だけを囲み、人物がAに届く手前からBを越えた先まで映るよう調整してください。</p>
+              <div class="slider-row"><label for="left">左端</label><span id="leftValue">0%</span></div>
+              <input type="range" id="left" min="0" max="100" value="0" step="1">
+              <div class="slider-row"><label for="right">右端</label><span id="rightValue">100%</span></div>
+              <input type="range" id="right" min="0" max="100" value="100" step="1">
+              <div class="slider-row"><label for="top">上端</label><span id="topValue">0%</span></div>
+              <input type="range" id="top" min="0" max="100" value="0" step="1">
+              <div class="slider-row"><label for="bottom">下端</label><span id="bottomValue">100%</span></div>
+              <input type="range" id="bottom" min="0" max="100" value="100" step="1">
+            </fieldset>
             <div class="slider-row"><label for="firstLine">ライン A：通過開始</label><span id="firstValue">40%</span></div>
             <input type="range" id="firstLine" min="20" max="48" value="40" step="1">
             <div class="slider-row"><label for="secondLine">ライン B：入場確定</label><span id="secondValue">60%</span></div>
@@ -91,6 +114,30 @@
             <p class="hint">人数がずれたときだけ修正してください。スタッフの通過分もここで訂正します。</p>
           </div>
 
+          <div class="card config-card">
+            <div class="section-head"><h2>設置角度の検証</h2></div>
+            <label for="trialAngle">実際の設置角度</label>
+            <select id="trialAngle">
+              <option value="side">真横</option>
+              <option value="25">斜め25°</option>
+              <option value="45">斜め45°</option>
+            </select>
+            <p class="hint">真横を0°とし、進行方向の正面に近づく側へ測ります。角度は記録用です。距離や照明もそろえて比較してください。</p>
+            <label for="trialNote">設置メモ（任意）</label>
+            <input id="trialNote" type="text" maxlength="120" placeholder="机の高さ、入口までの距離、照明">
+            <div class="camera-actions">
+              <button id="trialStart" class="button primary" type="button" disabled>検証開始</button>
+              <button id="trialEnd" class="button secondary" type="button" disabled>検証終了</button>
+            </div>
+            <p id="trialStatus" class="hint" role="status"></p>
+            <label for="trialActual">実際に通過した人数</label>
+            <input id="trialActual" type="number" inputmode="numeric" min="0" step="1">
+            <div class="camera-actions">
+              <button id="trialSave" class="button primary" type="button" disabled>結果を保存</button>
+              <button id="trialDiscard" class="button secondary" type="button" disabled>検証を取り消す</button>
+            </div>
+            <ul id="trialResults" class="trial-results" aria-label="直近30件の比較結果"></ul>
+          </div>
           <div class="card log-card">
             <div class="section-head"><h2>最近の記録</h2><button type="button" class="text-button" id="exportButton" disabled>CSV出力</button></div>
             <ul id="history" class="history"><li class="empty">まだ記録がありません</li></ul>
@@ -105,6 +152,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=7"></script>
+  <script type="module" src="./app.js?v=8"></script>
 </body>
 </html>

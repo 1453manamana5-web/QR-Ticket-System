@@ -111,3 +111,76 @@ test('leg mode is restored and wired into the camera loop instead of accepting t
  a.element('bodyMode').value='torso';a.element('bodyMode').oninput();a.element('video').currentTime=3;await a.api.tick(300);
  assert.match(a.element('tracking').textContent,/胴体確認 1人/);await a.close();
 });
+
+test('venue trials count only complete passages inside the area and compare independently of normal records', async () => {
+  const path = [.25, .4, .55, .7, .25, .4, .3, .22, .22, .22];
+  let index = 0;
+  const a = harness({
+    savedOptions: {movement:'x+', profile:'side', first:40, second:60, top:20, bottom:70},
+    pipelineFactory: async () => ({
+      async detectForVideo() {
+        const input = frame(path[index]);
+        if (index++ < 4) {
+          input.parts.data.fill(-1);
+          const x = Math.round(path[index - 1] * 100);
+          for (let y = 9; y < 27; y++) input.parts.data.fill(12, y * 100 + x - 4, y * 100 + x + 4);
+          input.objects.detections[0].boundingBox.originY = 0;
+        }
+        return input;
+      },
+      close() {},
+    }),
+  });
+  await a.api.initialize();
+  await a.api.startCamera();
+  a.element('trialAngle').value = '25';
+  a.element('trialNote').value = '入口横の机';
+  a.element('trialStart').onclick();
+  assert.equal(a.element('firstLine').disabled, true);
+  for (let n = 0; n < path.length; n++) {
+    a.element('video').currentTime = n + 2;
+    await a.api.tick(100 + n * 120);
+  }
+  assert.match(a.element('trialStatus').textContent, /自動 0人/);
+  a.element('trialEnd').onclick();
+  a.element('trialActual').value = '1';
+  a.element('trialSave').onclick();
+  assert.match(a.element('trialResults').children[0].textContent, /斜め25°.*自動 0人.*実際 1人.*差 -1人/);
+  assert.equal(a.element('firstLine').disabled, false);
+  assert.equal(a.api.state().counter, 0);
+  await a.close();
+});
+
+test('a complete verified passage increments only the active venue trial', async () => {
+  const path = [.25, .4, .55, .7];
+  let index = 0;
+  const a = harness({pipelineFactory: async () => ({async detectForVideo(){return frame(path[index++]);}, close(){}})});
+  await a.api.initialize();
+  await a.api.startCamera();
+  a.element('trialAngle').value = '45';
+  a.element('trialNote').value = '';
+  a.element('trialStart').onclick();
+  for (let n = 0; n < path.length; n++) {
+    a.element('video').currentTime = n + 2;
+    await a.api.tick(100 + n * 120);
+  }
+  assert.match(a.element('trialStatus').textContent, /斜め45°.*自動 1人/);
+  assert.equal(a.api.state().counter, 0);
+  await a.close();
+});
+
+test('a tap on the live preview moves a line in the selected reverse direction', async () => {
+  const a = harness({savedOptions: {movement:'x-', profile:'side', first:40, second:60}});
+  await a.api.initialize();
+  await a.api.startCamera();
+  a.element('cameraFrame').getBoundingClientRect = () => ({left:100, top:0, width:500, height:300});
+  a.element('overlayTarget').value = 'firstLine';
+  const input = a.element('firstLine');
+  input.min = '20';
+  input.max = '48';
+  input.id = 'firstLine';
+  a.element('cameraFrame').onclick({clientX:425, clientY:100});
+  assert.equal(input.value, '35');
+  assert.equal(a.element('firstValue').textContent, '35%');
+  await a.close();
+});

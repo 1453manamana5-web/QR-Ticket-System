@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=7";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=7";
+import { LineTracker } from "./tracker.mjs?v=8";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=8";
 
-import { verifyBodies } from "./body-check.mjs?v=7";
-import { createVisionPipeline } from "./vision.mjs?v=7";
+import { verifyBodies } from "./body-check.mjs?v=8";
+import { createVisionPipeline } from "./vision.mjs?v=8";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=7";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=7";
+import { openRecordStore, totalOf } from "./records.mjs?v=8";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=8";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -13,7 +13,7 @@ const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
 const startButton = $("startButton"), stopButton = $("stopButton");
 let analysisFrame = document.createElement("canvas");
 let analysisCtx = analysisFrame.getContext("2d");
-const defaults = { movement: "x+", first: 40, second: 60, profile: "side", bodyMode: "torso" };
+const defaults = { movement: "x+", first: 40, second: 60, profile: "side", bodyMode: "torso", left: 0, right: 100, top: 0, bottom: 100 };
 
 let recordStore = null;
 let initialized = false;
@@ -135,6 +135,60 @@ function record(delta, type) {
   }).catch(storageFailure);
   return eventQueue;
 }
+const trialAngles = { side: "真横", "25": "斜め25°", "45": "斜め45°" };
+const areaEdges = ["left", "right", "top", "bottom"];
+let trial = null;
+let trialResults = [];
+
+function renderTrials(showResults = false) {
+  $("trialStart").disabled = !running || !!trial;
+  $("trialEnd").disabled = !trial || trial.ended;
+  $("trialSave").disabled = !trial?.ended;
+  $("trialDiscard").disabled = !trial;
+  $("trialAngle").disabled = !!trial;
+  $("trialNote").disabled = !!trial;
+  $("overlayTarget").disabled = !!trial;
+  for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) $(id).disabled = !!trial;
+  $("trialStatus").textContent = trial
+    ? trialAngles[trial.angle] + " · 自動 " + trial.count + "人" + (trial.ended ? " · 実人数を入力してください" : " · 検証中")
+    : "カメラを開始し、設置角度を選んで検証を始めてください。";
+  if (!showResults) return;
+  $("trialResults").replaceChildren();
+  for (const result of trialResults) {
+    const item = document.createElement("li");
+    const diff = result.count - result.actual;
+    item.textContent = trialAngles[result.angle] + " ／ 自動 " + result.count + "人 ／ 実際 " + result.actual +
+      "人 ／ 差 " + (diff > 0 ? "+" : "") + diff + "人 ／ " + result.condition;
+    $("trialResults").append(item);
+  }
+}
+function endTrial(interrupted = false) {
+  if (!trial || trial.ended) return;
+  trial.ended = true;
+  if (interrupted) trial.condition += " ／ カメラ停止で終了";
+  resetTracking();
+  renderTrials();
+}
+function areaSettings(source) {
+  const result = {};
+  for (const edge of areaEdges) {
+    const value = source[edge];
+    result[edge] = Number.isInteger(value) && value >= 0 && value <= 100 ? value : defaults[edge];
+  }
+  if (result.right - result.left < 10 || result.bottom - result.top < 10) {
+    return {left: 0, right: 100, top: 0, bottom: 100};
+  }
+  return result;
+}
+function areaContainsLines() {
+  const a = Math.round(tracker.lineAt(tracker.first) * 100), b = Math.round(tracker.lineAt(tracker.second) * 100);
+  const [lo, hi] = tracker.axis === "x" ? [settings.left, settings.right] : [settings.top, settings.bottom];
+  return Math.min(a, b) > lo && Math.max(a, b) < hi;
+}
+function inArea(point) {
+  return point.x * 100 >= settings.left && point.x * 100 <= settings.right &&
+    point.y * 100 >= settings.top && point.y * 100 <= settings.bottom;
+}
 function resetTracking() { trackingEpoch++; tracker.reset(); }
 function configureTracker() {
   trackingEpoch++;
@@ -160,15 +214,32 @@ function configureTracker() {
     : "斜め上から撮る場合の標準設定です。肩〜腰の胴体が映るように設置してください。頭は必須ではありません。脚・足先の条件は下で選べます。胴体を確認した黄色い点がA→Bを越えると加算します。灰色の候補は数えません。";
   $("firstLine").value = String(settings.first);
   $("secondLine").value = String(settings.second);
+  for (const edge of areaEdges) {
+    $(edge).value = String(settings[edge]);
+    $(edge + "Value").textContent = settings[edge] + "%";
+  }
+  $("areaStatus").textContent = areaContainsLines()
+    ? "白枠の内側で人物を追跡します。"
+    : "白枠にA・Bの両ラインと、その前後を含めてください。";
   drawOverlay([]);
 }
-const tracker = new LineTracker(() => record(1, "auto"));
+const tracker = new LineTracker(() => {
+  if (!trial) return record(1, "auto");
+  if (!trial.ended) {
+    trial.count++;
+    renderTrials();
+  }
+});
 
 function drawOverlay(detections) {
   if (!canvas.width || !canvas.height) return;
   const w = canvas.width, h = canvas.height;
   const sx = w / analysisFrame.width, sy = h / analysisFrame.height;
   ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = "#f7f8fc";
+  ctx.lineWidth = Math.max(2, w / 350);
+  ctx.strokeRect(settings.left * w / 100, settings.top * h / 100,
+    (settings.right - settings.left) * w / 100, (settings.bottom - settings.top) * h / 100);
   const lines = [
     { at: tracker.lineAt(tracker.first), name: "A", color: "#3b82f6" },
     { at: tracker.lineAt(tracker.second), name: "B", color: "#00b79a" },
@@ -182,13 +253,13 @@ function drawOverlay(detections) {
     ctx.beginPath();
     if (tracker.axis === "x") {
       const x = line.at * w;
-      ctx.moveTo(x, 0); ctx.lineTo(x, h);
+      ctx.moveTo(x, settings.top * h / 100); ctx.lineTo(x, settings.bottom * h / 100);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillText(line.name, Math.min(w - 30, x + 7), 29);
     } else {
       const y = line.at * h;
-      ctx.moveTo(0, y); ctx.lineTo(w, y);
+      ctx.moveTo(settings.left * w / 100, y); ctx.lineTo(settings.right * w / 100, y);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillText(line.name, 11, Math.max(25, y - 9));
@@ -221,8 +292,10 @@ function discardDetector(model = detector, pending = inferencePending) {
   else close();
 }
 function stopCamera() {
+  endTrial(true);
   startAttempt++;
   running = false;
+  renderTrials();
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
   clearInterval(healthTimer); healthTimer = null;
@@ -276,12 +349,13 @@ async function tick(now) {
     if (performance.now() - started >= MAX_INFERENCE_MS) throw new Error("解析が遅いため停止しました。ほかのアプリを閉じて再試行してください。");
     const candidates = peopleFromResult(result.objects, analysisFrame.width, analysisFrame.height, settings.profile);
     const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height, settings.bodyMode);
-    const tracks = tracker.update(accepted, now);
-    drawOverlay(annotated);
+    const eligible = accepted.filter(inArea);
+    const tracks = trial?.ended || !areaContainsLines() ? [] : tracker.update(eligible, now);
+    drawOverlay(annotated.map(d => d.bodyVerified && !inArea(d) ? {...d, bodyVerified: false} : d));
     const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits && t.continuousEvidence &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
     $("tracking").textContent = candidates.length
-      ? (settings.bodyMode === "legs" ? "胴体＋脚足確認 " : "胴体確認 ") + accepted.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - accepted.length) + "件"
+      ? (settings.bodyMode === "legs" ? "胴体＋脚足確認 " : "胴体確認 ") + eligible.length + "人 · 追跡確認 " + confirmed + "人 · 対象外 " + (candidates.length - eligible.length) + "件"
       : "肩〜腰の胴体が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
@@ -353,7 +427,8 @@ async function startCamera() {
     status("AIモデル読込中", "loading");
     await withDeadline(loadDetector(), 45000, "モデル読込が応答しません。ネット接続を確認して画面を再読み込みしてください。");
     if (attempt !== startAttempt) return;
-    resetTracking(); running = true; lastSample = 0; lastVideoTime = -1; recentTimes = [];
+    resetTracking(); running = true;
+    renderTrials(); lastSample = 0; lastVideoTime = -1; recentTimes = [];
     health = new CameraHealth(performance.now(), video.currentTime);
     healthTimer = setInterval(checkCameraHealth, 500);
     status("自動計測中", "good");
@@ -367,12 +442,20 @@ async function startCamera() {
   }
 }
 function updateSettings(event) {
+  if (trial) return;
   let first = Number($("firstLine").value), second = Number($("secondLine").value);
   if (second - first < 10) {
     if (event?.target?.id === "secondLine") second = first + 10;
     else first = second - 10;
   }
+  const area = Object.fromEntries(areaEdges.map(edge => [edge, Number($(edge).value)]));
+  const edge = event?.target?.id;
+  if (edge === "left") area.left = Math.min(area.left, area.right - 10);
+  if (edge === "right") area.right = Math.max(area.right, area.left + 10);
+  if (edge === "top") area.top = Math.min(area.top, area.bottom - 10);
+  if (edge === "bottom") area.bottom = Math.max(area.bottom, area.top + 10);
   settings = {
+    ...areaSettings(area),
     movement: $("movement").value,
     profile: $("viewMode").value,
     bodyMode: $("bodyMode").value === "legs" ? "legs" : "torso",
@@ -424,11 +507,17 @@ function initialize() {
       if (saved && ["x+", "x-", "y+", "y-"].includes(saved.movement) &&
         Number.isFinite(saved.first) && Number.isFinite(saved.second) &&
         saved.first >= 20 && saved.first <= 48 && saved.second >= 52 && saved.second <= 80 && saved.second - saved.first >= 10) {
-        settings = { ...defaults, ...saved, profile: Object.hasOwn(PROFILES, saved.profile) ? saved.profile : defaults.profile,
+        settings = { ...defaults, ...saved, ...areaSettings(saved), profile: Object.hasOwn(PROFILES, saved.profile) ? saved.profile : defaults.profile,
           bodyMode: saved.bodyMode === "legs" ? "legs" : "torso" };
       }
     } catch {}
+    try {
+      const savedResults = JSON.parse(localGet("koken-counter-venue-trials-v1") || "[]");
+      if (Array.isArray(savedResults)) trialResults = savedResults.filter(r => r && Object.hasOwn(trialAngles, r.angle) &&
+        Number.isSafeInteger(r.count) && r.count >= 0 && Number.isSafeInteger(r.actual) && r.actual >= 0 && typeof r.condition === "string").slice(0, 30);
+    } catch {}
     configureTracker();
+    renderTrials(true);
     try {
       recordStore = await openRecordStore({ uuid, legacySession: localGet(SESSION_KEY), onClose: () => {
         initialized = false; readyPromise = null; stopCamera(); setStorageBusy(true);
@@ -457,9 +546,69 @@ $("addButton").addEventListener("click", () => record(1, "manual"));
 $("minusButton").addEventListener("click", () => record(-1, "manual"));
 $("exportButton").addEventListener("click", () => void exportCSV());
 $("resetButton").addEventListener("click", () => void newSession());
-for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine"]) {
+for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) {
   $(id).addEventListener("input", updateSettings);
 }
+$("cameraFrame").addEventListener("click", event => {
+  const target = $("overlayTarget").value;
+  if (!running || trial || !["firstLine", "secondLine", ...areaEdges].includes(target)) return;
+  const bounds = $("cameraFrame").getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+  const line = target === "firstLine" || target === "secondLine";
+  const horizontal = line ? tracker.axis === "x" : target === "left" || target === "right";
+  let percent = horizontal ? (event.clientX - bounds.left) / bounds.width : (event.clientY - bounds.top) / bounds.height;
+  if (line && tracker.direction === -1) percent = 1 - percent;
+  const input = $(target);
+  input.value = String(Math.max(Number(input.min), Math.min(Number(input.max), Math.round(percent * 100))));
+  updateSettings({ target: input });
+});
+$("trialStart").addEventListener("click", () => {
+  if (!running || trial) return;
+  const angle = $("trialAngle").value;
+  if (!Object.hasOwn(trialAngles, angle)) return;
+  const a = Math.round(tracker.lineAt(tracker.first) * 100), b = Math.round(tracker.lineAt(tracker.second) * 100);
+  if (!areaContainsLines()) {
+    message("検出エリアがA・Bの両ラインと、その前後を含むように調整してください。", true);
+    return;
+  }
+  const condition = [
+    $("viewMode").selectedOptions?.[0]?.textContent || settings.profile,
+    $("bodyMode").selectedOptions?.[0]?.textContent || settings.bodyMode,
+    $("movement").selectedOptions?.[0]?.textContent || settings.movement,
+    "A " + a + "%・B " + b + "%",
+    "エリア 横" + settings.left + "–" + settings.right + "%・縦" + settings.top + "–" + settings.bottom + "%",
+    $("trialNote").value.trim().slice(0, 120),
+  ].filter(Boolean).join(" ／ ");
+  trial = {angle, condition, count: 0, ended: false};
+  resetTracking();
+  message("検証中です。専用の人数を記録しています。");
+  renderTrials();
+});
+$("trialEnd").addEventListener("click", () => endTrial());
+$("trialSave").addEventListener("click", () => {
+  if (!trial?.ended) return;
+  const input = $("trialActual");
+  const actual = Number(input.value);
+  if (!input.value.trim() || !Number.isSafeInteger(actual) || actual < 0) {
+    $("trialStatus").textContent = "実際に通過した人数を0以上の整数で入力してください。";
+    return;
+  }
+  trialResults = [{...trial, actual}, ...trialResults].slice(0, 30);
+  const saved = localSet("koken-counter-venue-trials-v1", JSON.stringify(trialResults));
+  trial = null;
+  input.value = "";
+  resetTracking();
+  renderTrials(true);
+  message(saved ? "比較結果をこの端末に保存しました。" : "保存できませんでした。比較結果はこの画面を開いている間だけ表示されます。", !saved);
+});
+$("trialDiscard").addEventListener("click", () => {
+  if (!trial) return;
+  trial = null;
+  $("trialActual").value = "";
+  resetTracking();
+  renderTrials();
+  message("検証を取り消しました。");
+});
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && (running || stream || activeLeaseOwner)) {
     stopCamera(); status("画面非表示のため停止"); message("画面が非表示になったため計測を停止しました。再開するには開始ボタンを押してください。");
