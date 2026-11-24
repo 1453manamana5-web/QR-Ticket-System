@@ -18,6 +18,15 @@ export function totalOf(events) {
   // evidence, but never let it create a hidden debt against future visitors.
   return events.reduce((sum, event) => Math.max(0, sum + event.delta), 0);
 }
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined)
+    .map(key => [key, canonical(value[key])]));
+}
+function ledgerContent({synced, ...row}) {
+  return JSON.stringify(canonical(row));
+}
 export async function openRecordStore({ indexedDB = globalThis.indexedDB,
   uuid = () => globalThis.crypto.randomUUID(), legacySession = null, onClose = () => {} } = {}) {
   if (!indexedDB) throw new Error('このブラウザは端末内保存に対応していません。');
@@ -95,8 +104,7 @@ export async function openRecordStore({ indexedDB = globalThis.indexedDB,
       for (const row of incoming) {
         const old = existing.get(row.id);
         if (old) {
-          const content = ({synced, ...rest}) => JSON.stringify(rest);
-          if (content(old) !== content(row)) throw new Error('同一IDの記録内容が一致しません: ' + row.id);
+          if (ledgerContent(old) !== ledgerContent(row)) throw new Error('同一IDの記録内容が一致しません: ' + row.id);
           store.put({...old, synced: true});
         } else store.add({...row, synced: true});
       }

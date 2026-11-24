@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=12";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=12";
+import { LineTracker } from "./tracker.mjs?v=13";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=13";
 
-import { verifyBodies } from "./body-check.mjs?v=12";
-import { createVisionPipeline } from "./vision.mjs?v=12";
+import { verifyBodies } from "./body-check.mjs?v=13";
+import { createVisionPipeline } from "./vision.mjs?v=13";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=12";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=12";
+import { openRecordStore, totalOf } from "./records.mjs?v=13";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=13";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const adaptive = window.counterAdaptive;
@@ -123,7 +123,7 @@ function renderRecords() {
   }
 }
 function record(delta, type) {
-  if (adaptive?.isolated()) return Promise.resolve();
+  if (adaptive?.isolated() || (type === "auto" && window.counterLedger?.captureBlockReason?.())) return Promise.resolve();
   const capturedSession = session || null;
   const owner = activeLeaseOwner;
   const at = Date.now();
@@ -535,9 +535,24 @@ async function loadDetector() {
     else { try { loaded.close(); } catch {} }
   } finally { if (detectorLoading === pending) detectorLoading = null; }
 }
+function checkRemoteCapture() {
+  const reason = window.counterLedger?.captureBlockReason?.();
+  if (!reason) return false;
+  if (running || stream || activeLeaseOwner || recoveryTimer || startButton.disabled) stopCamera();
+  status("計測待機", "bad");
+  message(reason, true);
+  return true;
+}
+window.counterStationCamera = () => ({
+  camera: Boolean(stream?.getTracks().some(track => track.readyState === "live")),
+  ai: running && Boolean(detector),
+  profile: adaptive?.stationStatus?.().profile,
+  alert: $("status").textContent.includes("保存") && !initialized ? "storage" :
+    adaptive?.stationStatus?.().alert,
+});
 async function startCamera({automaticRetry = false} = {}) {
-  if (running || startButton.disabled) return;
-  if (!await initialize()) return;
+  if (running || startButton.disabled || checkRemoteCapture()) return;
+  if (!await initialize() || checkRemoteCapture()) return;
   clearTimeout(recoveryTimer);
   if (!automaticRetry) recoveryUsed = false;
   const attempt = ++startAttempt, owner = uuid(), capturedSession = session;
@@ -549,13 +564,13 @@ async function startCamera({automaticRetry = false} = {}) {
       try { await withDeadline(inferencePending, MAX_INFERENCE_MS, "previous inference stalled"); }
       catch { discardDetector(); inferencePending = null; }
     }
-    if (attempt !== startAttempt) return;
+    if (attempt !== startAttempt || checkRemoteCapture()) return;
     if (!await recordStore.acquireLease(owner, capturedSession)) {
       startButton.disabled = false; status("別の画面で計測中", "bad");
       message("この端末の別の画面で計測中、または試験が切り替わっています。ほかの画面を停止して再試行してください。", true);
       await refreshRecords(); return;
     }
-    if (attempt !== startAttempt) { await recordStore.releaseLease(owner); return; }
+    if (attempt !== startAttempt || checkRemoteCapture()) { await recordStore.releaseLease(owner); return; }
     activeLeaseOwner = owner;
     leaseTimer = setInterval(() => {
       void recordStore.renewLease(owner, capturedSession).then(ok => {
@@ -582,7 +597,7 @@ async function startCamera({automaticRetry = false} = {}) {
     video.style.display = "block"; $("placeholder").hidden = true;
     status("AIモデル読込中", "loading");
     await withDeadline(loadDetector(), 45000, "モデル読込が応答しません。ネット接続を確認して画面を再読み込みしてください。");
-    if (attempt !== startAttempt) return;
+    if (attempt !== startAttempt || checkRemoteCapture()) return;
     adaptive?.observeFault(automaticRetry ? "カメラと認識処理を再開しました。停止中の通過を確認してください。" : "");
     resetTracking(); running = true;
     renderTrials(); lastSample = 0; lastVideoTime = -1; recentTimes = [];
@@ -721,6 +736,7 @@ $("reverseDirection").addEventListener("click", () => {
   $("secondLine").value = String(100 - settings.first);
   updateSettings();
 });
+window.addEventListener("counter-control-changed", checkRemoteCapture);
 window.addEventListener("counter-role-changed", () => {renderDirections(); syncAdaptiveScope();});
 $("cameraFrame").addEventListener("click", event => {
   const target = $("overlayTarget").value;

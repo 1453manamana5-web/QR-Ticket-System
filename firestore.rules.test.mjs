@@ -703,27 +703,148 @@ test("pending owner can cancel atomically and reapply, without deleting another 
   await assertFails(approvedCancel.commit());
 });
 
-test("counter operations are event-scoped and immutable for approved terminals", async () => {
+const counterIdentity = "5b1c80c3-9924-4ed9-a1f2-71c39e9fd93d";
+const counterPassageId = "ledger:97da10aa-c291-4e38-94fe-55d87a336b11";
+const legacyCounterId = "ledger:877f6381-c291-42c1-91f7-658380631d10";
+const counterRevisionId = "edit:d2139319-0b7b-4aa4-8ad9-d23e4460b8f1";
+const counterDevice = (db, uid, event = "festival") => doc(db,"events",event,"counterDevices",uid);
+const counterDevices = db => collection(db,"events","festival","counterDevices");
+const counterConfig = (db, mode = "live") => doc(db,"events","festival","counterConfig",mode);
+const counterOperations = (db, mode = "live", event = "festival") => collection(db,"events",event,"counterRuns",mode,"operations");
+const counterOperation = (db, id = counterPassageId, mode = "live", event = "festival") => doc(counterOperations(db,mode,event),id);
+const counterDb = uid => env.authenticatedContext(uid).firestore();
+const pendingCounterDevice = {name: "入口端末", device:counterIdentity, role:"in", status:"pending"};
+const wallTime = 1750000000000;
+const counterPayload = {id:counterPassageId, kind:"passage", eventId:"festival", mode:"live", device:counterIdentity,
+  rawAt:wallTime, at:wallTime, station:"in", direction:"in", person:"visitor", source:"auto", invalid:false};
+const counterData = payload => ({payload, receivedAt:serverTimestamp()});
+
+async function seedCounterRoles() {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
-    await setDoc(doc(db,"terminalInstallations","counter-operator"), {authUid:"counter-operator",terminalId:"counter-terminal",approved:true});
-    await setDoc(doc(db,"terminalOwners","counter-terminal"), {ownerUid:"counter-operator",enabled:true});
-    await setDoc(doc(db,"terminals","counter-terminal"), {approved:true,role:"reception"});
-    await setDoc(doc(db,"events","festival","receptionApprovals","counter-terminal"), {status:"approved",requestedByUid:"counter-operator"});
+    await Promise.all([setDoc(doc(db,"events","festival"),{receptionTarget:true}), setDoc(doc(db,"events","other"),{})]);
+    for (const [uid,role] of [["counter-admin","management"],["counter-sub","management"],
+      ["counter-observer","management"],["qr-only","reception"]]) {
+      const terminalId = `terminal-${uid}`;
+      await Promise.all([
+        setDoc(doc(db,"terminalInstallations",uid),{authUid:uid,terminalId,approved:true}),
+        setDoc(doc(db,"terminalOwners",terminalId),{ownerUid:uid,enabled:true}),
+        setDoc(doc(db,"terminals",terminalId),{approved:true,role,managementApproved:role === "management",
+          admin:uid === "counter-admin",subAdmin:uid === "counter-sub"}),
+      ]);
+    }
+    await setDoc(doc(db,"events","festival","receptionApprovals","terminal-qr-only"),{status:"approved",requestedByUid:"qr-only"});
   });
-  const operator = env.authenticatedContext("counter-operator").firestore();
-  const outsider = env.authenticatedContext("counter-outsider").firestore();
-  const id = "ledger:97da10aa-c291-4e38-94fe-55d87a336b11";
-  const path = ["events","festival","counterRuns","live","operations",id];
-  const ref = doc(operator, ...path);
-  const data = {payload:"{}",receivedAt:serverTimestamp()};
-  await assertFails(setDoc(doc(operator,"events","other","counterRuns","live","operations",id),data));
-  await assertFails(setDoc(doc(operator,"events","festival","counterRuns","unknown","operations",id),data));
-  await assertSucceeds(setDoc(ref,data));
-  await assertSucceeds(getDocs(collection(operator,"events","festival","counterRuns","live","operations")));
-  await assertFails(getDoc(doc(outsider,...path)));
-  await assertFails(updateDoc(ref,{payload:"overwritten"}));
-  await assertFails(deleteDoc(ref));
-  await assertSucceeds(setDoc(doc(operator,"counterClocks","counter-operator"),{at:serverTimestamp()}));
-  await assertFails(setDoc(doc(operator,"counterClocks","counter-outsider"),{at:serverTimestamp()}));
+}
+
+async function enrollCounterStation(station, admin) {
+  await assertSucceeds(setDoc(counterDevice(station,"counter-station"),{...pendingCounterDevice,requestedAt:serverTimestamp()}));
+  await assertSucceeds(updateDoc(counterDevice(admin,"counter-station"),
+    {status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+}
+
+test("counter devices self-enroll only as pending; operators can inspect and only the admin can approve", async () => {
+  await seedCounterRoles();
+  const station = counterDb("counter-station"), stranger = counterDb("stranger"), admin = counterDb("counter-admin"), sub = counterDb("counter-sub");
+  const request = {...pendingCounterDevice,requestedAt:serverTimestamp()};
+  await assertSucceeds(getDoc(counterDevice(station,"counter-station")));
+  await assertFails(setDoc(counterDevice(station,"someone-else"),request));
+  await assertFails(setDoc(counterDevice(station,"counter-station","missing"),request));
+  await assertFails(setDoc(counterDevice(station,"counter-station"),{...request,status:"approved"}));
+  await assertSucceeds(setDoc(counterDevice(station,"counter-station"),request));
+  await assertSucceeds(getDoc(counterDevice(station,"counter-station")));
+  await assertFails(getDoc(counterDevice(stranger,"counter-station")));
+  await assertFails(getDocs(counterDevices(station)));
+  await assertSucceeds(getDocs(counterDevices(admin)));
+  await assertSucceeds(getDocs(counterDevices(sub)));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{status:"approved"}));
+  await assertFails(updateDoc(counterDevice(sub,"counter-station"),{status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-sub"}));
+  await assertFails(updateDoc(counterDevice(admin,"counter-station"),{device:"80913781-fc6d-4af0-8b9f-9b808d4e1259",status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  await assertSucceeds(updateDoc(counterDevice(admin,"counter-station"),{status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  const heartbeat = {lastSeen:serverTimestamp(),version:"13",camera:true,ai:true,profile:"detail",pending:2,alert:"none",mode:"live"};
+  await assertSucceeds(updateDoc(counterDevice(station,"counter-station"),heartbeat));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,rawTrackCount:2}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,alert:"自由入力"}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,status:"revoked"}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,role:"out"}));
+  await assertSucceeds(updateDoc(counterDevice(admin,"counter-station"),{status:"revoked",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),heartbeat));
+  await assertFails(deleteDoc(counterDevice(admin,"counter-station")));
+});
+
+test("counter config is event and mode scoped; only admin sets hours and subadmin can pause", async () => {
+  await seedCounterRoles();
+  const admin = counterDb("counter-admin"), sub = counterDb("counter-sub"), station = counterDb("counter-station");
+  const qr = counterDb("qr-only"), observer = counterDb("counter-observer");
+  const config = {opened:wallTime,closed:null,paused:false,verified:false,updatedAt:serverTimestamp(),updatedByUid:"counter-admin"};
+  await enrollCounterStation(station,admin);
+  await assertFails(setDoc(counterConfig(admin,"unknown"),config));
+  await assertFails(setDoc(counterConfig(admin),{...config,verified:true}));
+  await assertFails(setDoc(counterConfig(admin),{...config,opened:wallTime + .5}));
+  await assertFails(setDoc(counterConfig(sub),{...config,updatedByUid:"counter-sub"}));
+  await assertSucceeds(setDoc(counterConfig(admin),config));
+  await assertSucceeds(setDoc(counterConfig(admin,"test"),{...config,opened:null}));
+  await assertSucceeds(getDoc(counterConfig(station)));
+  await assertSucceeds(getDoc(counterConfig(sub)));
+  await assertFails(getDoc(counterConfig(qr)));
+  await assertFails(getDoc(counterConfig(observer)));
+  const pause = {paused:true,updatedAt:serverTimestamp(),updatedByUid:"counter-sub"};
+  await assertSucceeds(updateDoc(counterConfig(sub),pause));
+  await assertFails(updateDoc(counterConfig(sub),{...pause,opened:wallTime+1}));
+  await assertFails(updateDoc(counterConfig(station),{...pause,updatedByUid:"counter-station"}));
+  await assertFails(updateDoc(counterConfig(admin),{closed:wallTime-1,updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  await assertSucceeds(updateDoc(counterConfig(admin),{closed:wallTime+1,verified:true,updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+});
+
+test("counter ledger grants reads only to enrolled stations and operators; operation admission is event, mode, device, and role bound", async () => {
+  await seedCounterRoles();
+  await env.withSecurityRulesDisabled(context => setDoc(counterOperation(context.firestore(),legacyCounterId),counterData("{}")));
+  const admin = counterDb("counter-admin"), station = counterDb("counter-station"), qr = counterDb("qr-only");
+  const stranger = counterDb("stranger"), observer = counterDb("counter-observer");
+  const request = {...pendingCounterDevice,requestedAt:serverTimestamp()};
+  await assertSucceeds(setDoc(counterDevice(station,"counter-station"),request));
+  await assertFails(getDocs(counterOperations(station)));
+  await assertFails(setDoc(counterOperation(station),counterData(counterPayload)));
+  await assertFails(setDoc(counterOperation(qr),counterData(counterPayload)));
+  await assertSucceeds(updateDoc(counterDevice(admin,"counter-station"),{status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  await assertSucceeds(getDoc(counterOperation(station,legacyCounterId)));
+  await assertSucceeds(getDoc(counterOperation(admin,legacyCounterId)));
+  await assertFails(getDoc(counterOperation(qr,legacyCounterId)));
+  await assertFails(getDocs(counterOperations(stranger)));
+  await assertFails(getDocs(counterOperations(observer)));
+  await assertFails(getDocs(counterOperations(station,"live","other")));
+  await assertFails(setDoc(counterOperation(station,counterPassageId,"live","other"),counterData({...counterPayload,eventId:"other"})));
+  await assertFails(setDoc(counterOperation(station,counterPassageId,"test"),counterData(counterPayload)));
+  await assertFails(setDoc(counterOperation(station,counterPassageId,"unknown"),counterData({...counterPayload,mode:"unknown"})));
+  await assertFails(setDoc(counterOperation(station),counterData(JSON.stringify(counterPayload))));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,device:"other"})));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,station:"out",direction:"out"})));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,direction:"out"})));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,person:"staff"})));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,actorUid:"stranger"})));
+  await assertFails(setDoc(counterOperation(station),counterData({...counterPayload,cameraFrames:[]})));
+  await assertSucceeds(setDoc(counterOperation(station),counterData(counterPayload)));
+  await assertSucceeds(setDoc(counterOperation(station,counterPassageId,"test"),counterData({...counterPayload,mode:"test"})));
+  await assertSucceeds(getDocs(counterOperations(station)));
+  await assertFails(updateDoc(counterOperation(admin), {payload:"overwritten"}));
+  await assertFails(deleteDoc(counterOperation(admin)));
+  await assertSucceeds(setDoc(doc(station,"counterClocks","counter-station"),{at:serverTimestamp(),eventId:"festival"}));
+  await assertFails(setDoc(doc(station,"counterClocks","stranger"),{at:serverTimestamp(),eventId:"festival"}));
+});
+
+test("counter managers can append manual entries and revisions without forging identities or overwriting records", async () => {
+  await seedCounterRoles();
+  const sub = counterDb("counter-sub"), station = counterDb("counter-station"), admin = counterDb("counter-admin");
+  await enrollCounterStation(station,admin);
+  const manual = {...counterPayload,actorUid:"counter-sub",device:"terminal-counter-sub",source:"manual"};
+  await assertFails(setDoc(counterOperation(station),counterData({...manual,actorUid:"counter-station",device:counterIdentity})));
+  await assertFails(setDoc(counterOperation(sub),counterData({...manual,device:counterIdentity})));
+  await assertFails(setDoc(counterOperation(sub),counterData({...manual,actorUid:"counter-admin"})));
+  await assertSucceeds(setDoc(counterOperation(sub),counterData(manual)));
+  const before = {at:wallTime,direction:"in",person:"visitor",invalid:false,clockWarning:"",clockUncertainty:null};
+  const revision = {id:counterRevisionId,target:counterPassageId,parent:counterPassageId,eventId:"festival",mode:"live",
+    kind:"revision",rawAt:wallTime,station:"in",actorUid:"counter-sub",device:"terminal-counter-sub",reason:"訂正",resolves:[],before,after:{...before,invalid:true}};
+  await assertFails(setDoc(counterOperation(station,counterRevisionId),counterData({...revision,actorUid:"counter-station",device:counterIdentity})));
+  await assertFails(setDoc(counterOperation(sub,counterRevisionId),counterData({...revision,after:{...before,pose:[]}})));
+  await assertSucceeds(setDoc(counterOperation(sub,counterRevisionId),counterData(revision)));
 });
