@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=9";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=9";
+import { LineTracker } from "./tracker.mjs?v=10";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=10";
 
-import { verifyBodies } from "./body-check.mjs?v=9";
-import { createVisionPipeline } from "./vision.mjs?v=9";
+import { verifyBodies } from "./body-check.mjs?v=10";
+import { createVisionPipeline } from "./vision.mjs?v=10";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=9";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=9";
+import { openRecordStore, totalOf } from "./records.mjs?v=10";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=10";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -122,16 +122,20 @@ function record(delta, type) {
   const capturedSession = session || null;
   const owner = activeLeaseOwner;
   const at = Date.now();
+  const passage = delta > 0 ? window.counterLedger?.capture(at, type) : undefined;
   const ready = initialize();
   eventQueue = eventQueue.then(async () => {
     if (!await ready) return;
-    const result = await recordStore.append({ delta, type, expectedSession: capturedSession || session, owner, now: at });
+    const result = await recordStore.append({ delta, type, expectedSession: capturedSession || session, owner, now: at, passage });
     applySnapshot(result.snapshot);
     if (result.status === "lease-lost" || result.status === "session-changed") {
       stopCamera(); status("計測を停止しました", "bad");
       message("別の画面で計測または試験が切り替わりました。人数を確認して再開してください。", true);
     }
-    if (result.status === "saved") announce();
+    if (result.status === "saved") {
+      announce();
+      if (passage) window.counterLedger?.changed();
+    }
   }).catch(storageFailure);
   return eventQueue;
 }
@@ -557,6 +561,8 @@ function initialize() {
         initialized = false; readyPromise = null; stopCamera(); setStorageBusy(true);
         status("保存接続が終了しました", "bad"); message("画面を再読み込みしてください。", true);
       } });
+      window.counterRecordStore = recordStore;
+      window.counterLedger?.attach(recordStore);
       applySnapshot(recordStore.initial); initialized = true; setStorageBusy(false); status("待機中");
       startButton.textContent = "計測を開始";
       if (!pollTimer) pollTimer = setInterval(() => { if (!document.hidden) void refreshRecords(); }, 2000);
@@ -577,7 +583,10 @@ stopButton.addEventListener("click", () => {
   message("計測を停止しました。人数の記録は保存されています。");
 });
 $("addButton").addEventListener("click", () => record(1, "manual"));
-$("minusButton").addEventListener("click", () => record(-1, "manual"));
+$("minusButton").addEventListener("click", () => {
+  if (window.counterLedger?.configured()) message("通過記録の管理で対象の記録を無効化してください。");
+  else record(-1, "manual");
+});
 $("exportButton").addEventListener("click", () => void exportCSV());
 $("resetButton").addEventListener("click", () => void newSession());
 for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) {

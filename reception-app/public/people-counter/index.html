@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=9">
+  <link rel="stylesheet" href="./style.css?v=10">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 09</div>
+      <div class="trial-tag">PROTOTYPE 10</div>
     </header>
     <main>
       <div class="intro">
@@ -107,14 +107,14 @@
 
         <aside class="side-column">
           <div class="card count-card">
-            <div class="section-head"><h2>試験中の来場者数</h2><span class="local-pill">この端末のみ</span></div>
+            <div class="section-head"><h2>この端末の計測回数</h2><span class="local-pill">この端末のみ</span></div>
             <div class="count-number"><span id="total">0</span><small>人</small></div>
             <div class="count-foot"><span>最新の記録</span><strong id="latest">まだありません</strong></div>
             <div class="manual-controls">
               <button id="addButton" class="button add" disabled type="button">＋1 訂正</button>
               <button id="minusButton" class="button subtract" disabled type="button">－1 訂正</button>
             </div>
-            <p class="hint">人数がずれたときだけ修正してください。スタッフの通過分もここで訂正します。</p>
+            <p class="hint">運用設定後の集計・修正は「通過記録と滞在時間」から行えます。</p>
           </div>
 
           <div class="card config-card">
@@ -148,13 +148,52 @@
           </div>
           <div class="notice">
             <strong>試験用・本番集計には未接続</strong>
-            <p>人数と時刻はこのiPadにだけ保存。Firebaseへの送信・写真や動画の保存・顔認識は行いません。アプリを閉じても記録は残りますが、Safariのデータ削除で消える可能性があります。</p>
+            <p>通過記録はこのiPadに保存します。運用設定を行うと、承認済み端末間で通過時刻などの記録をFirebase経由で同期します。カメラ映像は端末内で解析し、録画・保存・外部送信や顔認証は行いません。アプリを閉じても記録は残りますが、Safariのデータ削除で消える可能性があります。</p>
           </div>
         </aside>
       </div>
+      <section class="card config-card" aria-labelledby="ledgerTitle">
+        <h2 id="ledgerTitle">通過記録と滞在時間</h2>
+        <p class="hint">入口・出口の両端末に同じイベントIDと運用区分を設定し、それぞれの通過方向にA→Bを合わせます。角度検証の結果は別に記録されます。</p>
+        <button id="prepareOffline" class="button secondary">オフライン準備</button>
+        <p id="offlineState" role="status">この端末のオフライン準備を確認中</p>
+        <form id="ledgerSetup">
+          <label>イベントID（受付システムのID） <input id="ledgerEvent" required pattern="[a-zA-Z0-9_-]{1,160}" maxlength="160"></label>
+          <label>運用 <select id="ledgerMode"><option value="test">試験</option><option value="live">本番</option></select></label>
+          <label>この端末 <select id="ledgerRole"><option value="in">入口</option><option value="out">出口</option></select></label>
+          <label>開場日時 <input id="ledgerOpen" type="datetime-local" required></label>
+          <label>閉場日時 <input id="ledgerClose" type="datetime-local"></label>
+          <label><input id="ledgerVerified" type="checkbox"> 開閉場時は0人で、入口・出口とも同期完了・記録確認済み</label>
+          <button class="button primary">運用設定を保存</button>
+        </form>
+        <p id="ledgerState" role="status"></p>
+        <button id="syncLedger" class="button secondary">今すぐ同期</button>
+        <p id="clockState" class="hint"></p>
+        <p id="ledgerError" role="alert" class="message error"></p>
+        <pre id="ledgerSummary" class="diagnostics"></pre>
+        <ul id="ledgerIssues"></ul>
+        <form id="ledgerEdit">
+          <label>対象 <select id="ledgerTarget"><option value="">新規通過記録</option></select></label>
+          <label>通過日時（補正後） <input id="editAt" type="datetime-local" step="0.001" required></label>
+          <label>通過方向 <select id="editDirection"><option value="in">入場</option><option value="out">退場</option></select></label>
+          <label>区分 <select id="editPerson"><option value="visitor">来場者</option><option value="staff">部員</option></select></label>
+          <label><input id="editInvalid" type="checkbox"> 無効化</label>
+          <label>修正理由 <input id="editReason" required maxlength="180"></label>
+          <button class="button primary">通過記録を保存</button>
+          <button type="button" id="restoreLedger" class="button secondary">元の内容をフォームへ戻す</button>
+        </form>
+        <details><summary>選択した記録の修正履歴</summary><pre id="editHistory" class="diagnostics"></pre></details>
+        <label>CSV出力 <select id="ledgerExport">
+          <option value="passages">通過記録</option><option value="edits">修正履歴</option>
+          <option value="hours">時間帯別入退場</option><option value="timeline">滞在人数推移</option>
+          <option value="average">滞在時間分析</option><option value="issues">整合性検証</option>
+        </select></label>
+        <button id="exportLedger" class="button secondary">CSVを出力</button>
+      </section>
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=9"></script>
+  <script type="module" src="./ledger-ui.mjs?v=10"></script>
+  <script type="module" src="./app.js?v=10"></script>
 </body>
 </html>

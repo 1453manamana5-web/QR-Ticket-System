@@ -66,7 +66,7 @@ export async function openRecordStore({ indexedDB = globalThis.indexedDB,
   return {
     initial,
     read: () => transact('readonly', rows => snapshot(rows)),
-    append: ({ delta, type, expectedSession, owner, now = Date.now() }) => transact('readwrite', (rows, store) => {
+    append: ({ delta, type, expectedSession, owner, now = Date.now(), passage }) => transact('readwrite', (rows, store) => {
       if (![1, -1].includes(delta) || !['auto', 'manual'].includes(type)) throw new Error('記録の内容が不正です。');
       const state = stateFrom(rows), current = snapshot(rows, state);
       if (expectedSession !== state.activeSession) return { status: 'session-changed', snapshot: current };
@@ -80,7 +80,26 @@ export async function openRecordStore({ indexedDB = globalThis.indexedDB,
       const record = { id: uuid(), session: expectedSession, delta, type, at: new Date(now).toISOString(), seq: state.revision + 1 };
       const next = { ...state, revision: state.revision + 1 };
       store.add(record); store.put(next);
+      if (passage) {
+        const sequenceId = "meta:counter-sequence:" + JSON.stringify([passage.eventId, passage.mode, passage.device]);
+        const number = (rows.find(row => row.id === sequenceId)?.number ?? 0) + 1;
+        store.put({ id: sequenceId, number });
+        store.add({ ...passage, id: "ledger:" + record.id, passageId: record.id, sequence: number, kind: 'passage', synced: false });
+      }
       return { status: 'saved', snapshot: snapshot([...rows, record], next) };
+    }),
+    ledger: () => transact('readonly', rows => rows.filter(row => row.kind === 'passage' || row.kind === 'revision')),
+    addLedger: row => transact('readwrite', (_, store) => store.add(row)),
+    mergeLedger: incoming => transact('readwrite', (rows, store) => {
+      const existing = new Map(rows.filter(r => r.kind === 'passage' || r.kind === 'revision').map(row => [row.id, row]));
+      for (const row of incoming) {
+        const old = existing.get(row.id);
+        if (old) {
+          const content = ({synced, ...rest}) => JSON.stringify(rest);
+          if (content(old) !== content(row)) throw new Error('同一IDの記録内容が一致しません: ' + row.id);
+          store.put({...old, synced: true});
+        } else store.add({...row, synced: true});
+      }
     }),
     newSession: () => transact('readwrite', (rows, store) => {
       const previous = stateFrom(rows), state = { id: STATE, activeSession: uuid(), revision: previous.revision + 1 };
