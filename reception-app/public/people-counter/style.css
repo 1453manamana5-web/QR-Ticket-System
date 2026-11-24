@@ -62,3 +62,5 @@ footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
 #trialActual,#trialNote{box-sizing:border-box;width:100%;padding:10px;border:1px solid #b8c9da;border-radius:8px;font:inherit}
 .trial-results{padding-inline-start:20px;line-height:1.55;overflow-wrap:anywhere}
 .trial-results li+li{margin-top:8px}
+
+.diagnostics{white-space:pre-line;line-height:1.6}

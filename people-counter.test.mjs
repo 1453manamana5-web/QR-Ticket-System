@@ -376,3 +376,67 @@ test('a cropped torso can pass the wide-box check only at a vertical frame edge 
   assert.equal(verify([cropped], mask([[42, 3, 16, 25, 4]])).accepted.length, 0);
   assert.equal(verify([cropped], mask([[42, 3, 16, 10]])).accepted.length, 0);
 });
+
+function groupedFrame(positions) {
+  return positions.map(([x, y, size = 1]) => ({
+    x, y, score: .92, w: .18 * size, h: .58 * size,
+    box: {originX: (x - .09 * size) * 1000, originY: (y - .18 * size) * 1000,
+      width: 180 * size, height: 580 * size},
+  }));
+}
+
+test('two overlapping detector boxes recover two verified people from a connected torso mask', () => {
+  const detections = groupedFrame([[.45,.46],[.56,.48]]);
+  const joined = mask([[40,33,10,27],[51,36,10,27],[49,46,3,2]]);
+  assert.equal(verifyBodies(detections, joined, 1000, 1000, 'torso', false).accepted.length, 1);
+  assert.equal(verify(detections, joined).accepted.length, 2);
+  assert.equal(verify(detections.slice(0,1), joined).accepted.length, 1);
+  const duplicate = groupedFrame([[.45,.46],[.47,.46]]);
+  assert.equal(verify(duplicate, mask([[40,33,12,27]])).accepted.length, 1);
+});
+
+test('two side-by-side visitors and three close visitors receive independent crossing events', () => {
+  for (const lanes of [[.42,.50],[.39,.47,.55]]) {
+    const {tracker,counts} = counter();
+    [.22,.36,.48,.65,.8].forEach((x,i) => {
+      const detections = groupedFrame(lanes.map((y,j) => [x + j * .016,y,1 - j * .13]));
+      tracker.update(i % 2 ? detections.reverse() : detections,i * 120);
+    });
+    assert.equal(counts.length, lanes.length);
+    assert.equal(new Set(counts.map(e => e.trackId)).size, lanes.length);
+  }
+});
+
+test('a temporarily hidden shorter visitor keeps its track and both visitors count once', () => {
+  const {tracker,counts} = counter();
+  let shorterId;
+  [.23,.38,.48,.63,.74].forEach((x,i) => {
+    const visible = groupedFrame([[x,.44], ...(i === 2 ? [] : [[x-.02,.51,.68]])]);
+    const tracks = tracker.update(visible,i * 150);
+    const shorter = tracks.find(t => t.y === .51);
+    if (i === 0) shorterId = shorter.id;
+    assert.equal(shorter.id,shorterId);
+  });
+  assert.equal(counts.length,2);
+});
+
+test('opposite-direction visitors crossing in adjacent lanes retain IDs and only entry counts', () => {
+  const {tracker,counts} = counter();
+  [.22,.34,.46,.58,.70,.81].forEach((x,i) => {
+    tracker.update(groupedFrame([[x,.45],[1-x,.49]]),i * 120);
+  });
+  assert.deepEqual(counts.map(e => e.trackId),[1]);
+  assert.equal(tracker.tracks.find(t => t.id === 2).reverseSeen,true);
+});
+
+test('connected torso evidence goes through verification and counts two complete passages', () => {
+  const {tracker,counts} = counter();
+  [22,34,46,58,70].forEach((x,i) => {
+    const detections = groupedFrame([[x/100,.46],[(x+11)/100,.48]]);
+    const joined = mask([[x-5,33,10,27],[x+6,36,10,27],[x+4,46,3,2]]);
+    const verified = verify(detections, joined).accepted;
+    assert.equal(verified.length,2);
+    tracker.update(verified,i*120);
+  });
+  assert.equal(counts.length,2);
+});

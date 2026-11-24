@@ -88,7 +88,7 @@ function matchingLeg(legs, body, box, width, height) {
   });
 }
 
-export function verifyBodies(detections, parts, width, height, mode = 'torso') {
+export function verifyBodies(detections, parts, width, height, mode = 'torso', separate = true) {
   const regions = torsoRegions(parts), legs = mode === 'legs' ? legRegions(parts) : [], candidates = [];
   if (width > 0 && height > 0) detections.forEach((d, di) => {
     const b = d.box;
@@ -121,5 +121,49 @@ export function verifyBodies(detections, parts, width, height, mode = 'torso') {
     return body ? { ...d, x: body.x, y: body.y, body, legs: match.legIndex >= 0 ? legs[match.legIndex] : null,
       legVerified: match.legIndex >= 0, bodyVerified: true } : { ...d, bodyVerified: false, legVerified: false };
   });
-  return { annotated, accepted: annotated.filter(d => d.bodyVerified) };
+  const accepted = annotated.filter(d => d.bodyVerified);
+  if (separate && mode === 'torso' && accepted.length < detections.length && detections.length > 1 && parts?.data &&
+    detections.every(d => d.box && d.box.originX >= 0 && d.box.originY >= 0 &&
+      d.box.originX + d.box.width <= width && d.box.originY + d.box.height <= height)) {
+    // A semantic torso mask can join touching people. Each recovered person
+    // must have its own detector box and torso pixels exclusive to that box.
+    const boxes = detections.map(({box}) => ({
+      left: Math.floor(box.originX / width * parts.width),
+      right: Math.ceil((box.originX + box.width) / width * parts.width),
+      top: Math.floor(box.originY / height * parts.height),
+      bottom: Math.ceil((box.originY + box.height) / height * parts.height),
+    }));
+    // Near-identical boxes must not turn the edges of one torso into two people.
+    let overlapping = false;
+    const duplicate = boxes.some((a, i) => boxes.slice(i + 1).some(b => {
+      const overlap = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+        Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      const smaller = Math.min((a.right - a.left) * (a.bottom - a.top), (b.right - b.left) * (b.bottom - b.top));
+      if (overlap > 0) overlapping = true;
+      return overlap >= smaller * 0.75;
+    }));
+    if (duplicate || !overlapping) return { annotated, accepted };
+    const owners = new Uint16Array(parts.data.length);
+    for (const box of boxes) {
+      for (let y = box.top; y < box.bottom; y++) {
+        for (let x = box.left; x < box.right; x++) owners[y * parts.width + x]++;
+      }
+    }
+    const recovered = [];
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i];
+      const data = new Int32Array(parts.data.length).fill(-1);
+      for (let y = box.top; y < box.bottom; y++) {
+        for (let x = box.left; x < box.right; x++) {
+          const index = y * parts.width + x;
+          if (owners[index] === 1) data[index] = parts.data[index];
+        }
+      }
+      const [person] = verifyBodies([detections[i]], {...parts, data}, width, height, mode, false).accepted;
+      if (!person) break;
+      recovered.push(person);
+    }
+    if (recovered.length === boxes.length) return { annotated: recovered, accepted: recovered };
+  }
+  return { annotated, accepted };
 }

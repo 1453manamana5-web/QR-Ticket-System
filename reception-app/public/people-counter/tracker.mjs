@@ -39,7 +39,7 @@ export class LineTracker {
     const candidates = [];
     recent.forEach((track, ti) => {
       const dt = now - track.lastSeen;
-      const horizon = Math.min(dt, 450);
+      const horizon = Math.min(dt, Math.max(450, (this.frameInterval || 0) * 1.5));
       const predicted = { x: track.x + track.vx * horizon, y: track.y + track.vy * horizon };
       points.forEach((point, pi) => {
         const predictedDistance = Math.hypot(predicted.x - point.x, predicted.y - point.y);
@@ -54,14 +54,36 @@ export class LineTracker {
         const sizeRatio = track.w && point.w ? Math.max(track.w / point.w, point.w / track.w) : 1;
         if (across > crossAllowance || sizeRatio > 3 ||
           (predictedDistance > allowance && along > allowance) || rawDistance > 0.55) return;
-        candidates.push({ ti, pi, distance: predictedDistance * 0.8 + rawDistance * 0.2 + Math.log(sizeRatio) * 0.025 });
+        // Prefer the predicted lane and comparable torso size at close crossings.
+        candidates.push({ ti, pi, distance: predictedDistance * 0.8 + rawDistance * 0.2 + across * 0.35 + Math.log(sizeRatio) * 0.045 });
       });
     });
     candidates.sort((a, b) => a.distance - b.distance);
-    const claimedTracks = new Set(), claimedPoints = new Set();
-    for (const candidate of candidates) {
-      if (claimedTracks.has(candidate.ti) || claimedPoints.has(candidate.pi)) continue;
-      claimedTracks.add(candidate.ti); claimedPoints.add(candidate.pi);
+    const assignments = new Map(), pointOwners = new Map();
+    const options = recent.map(() => []);
+    for (const match of candidates) {
+      options[match.ti].push(match);
+      if (assignments.has(match.ti) || pointOwners.has(match.pi)) continue;
+      assignments.set(match.ti, match);
+      pointOwners.set(match.pi, match);
+    }
+    // Keep the best initial matches. If a track is stranded, allow a small
+    // reassignment through neighbouring matches instead of creating a new ID.
+    function reassign(ti, visited) {
+      for (const match of options[ti]) {
+        if (match.distance > options[ti][0].distance + 0.055 || visited.has(match.pi)) continue;
+        const owner = pointOwners.get(match.pi);
+        if (owner?.ti === ti) continue;
+        visited.add(match.pi);
+        if (owner && !reassign(owner.ti, visited)) continue;
+        assignments.set(ti, match);
+        pointOwners.set(match.pi, match);
+        return true;
+      }
+      return false;
+    }
+    recent.forEach((_, ti) => { if (!assignments.has(ti)) reassign(ti, new Set()); });
+    for (const candidate of assignments.values()) {
       const track = recent[candidate.ti], point = points[candidate.pi];
       const previous = this.position(track), current = this.position(point);
       const dt = Math.max(1, now - track.lastSeen);
@@ -69,6 +91,12 @@ export class LineTracker {
       track.streak = (track.streak || 0) + 1;
       if (track.streak >= 2) track.continuousEvidence = true;
       track.scoreSum += point.score ?? 1;
+      if (previous >= this.second && current < this.second) track.reverseStarted = true;
+      if (current >= this.second) track.reverseStarted = false;
+      if (track.reverseStarted && current < this.first) {
+        track.reverseSeen = true;
+        track.reverseStarted = false;
+      }
       if (!track.counted) {
         if (previous < this.first && current >= this.first) track.armedAt = now;
         if (current < this.first - 0.035) { track.armedAt = null; track.pending = false; }
@@ -86,14 +114,16 @@ export class LineTracker {
       }
       track.vx = track.vx * 0.35 + ((point.x - track.x) / dt) * 0.65;
       track.vy = track.vy * 0.35 + ((point.y - track.y) / dt) * 0.65;
-      Object.assign(track, { x: point.x, y: point.y, w: point.w || 0, h: point.h || 0, lastSeen: now });
+      Object.assign(track, { x: point.x, y: point.y, w: point.w || 0, h: point.h || 0, lastSeen: now, observation: point });
+      track.trail.push({x: point.x, y: point.y});
+      if (track.trail.length > 10) track.trail.shift();
     }
-    recent.forEach((track, ti) => { if (!claimedTracks.has(ti)) track.streak = 0; });
+    recent.forEach((track, ti) => { if (!assignments.has(ti)) track.streak = 0; });
     points.forEach((point, pi) => {
-      if (claimedPoints.has(pi)) return;
+      if (pointOwners.has(pi)) return;
       recent.push({ id: this.nextId++, x: point.x, y: point.y, w: point.w || 0, h: point.h || 0,
         vx: 0, vy: 0, hits: 1, streak: 1, scoreSum: point.score ?? 1, lastSeen: now,
-        continuousEvidence: false, counted: false, armedAt: null, pending: false });
+        observation: point, trail: [{x: point.x, y: point.y}], continuousEvidence: false, counted: false, armedAt: null, pending: false });
     });
     this.tracks = recent;
     return recent;

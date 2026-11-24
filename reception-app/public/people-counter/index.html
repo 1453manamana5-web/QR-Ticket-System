@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=8">
+  <link rel="stylesheet" href="./style.css?v=9">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 08</div>
+      <div class="trial-tag">PROTOTYPE 09</div>
     </header>
     <main>
       <div class="intro">
@@ -47,6 +47,9 @@
               <span id="fps" class="fps">検出速度 —</span>
             </div>
             <p class="hint">黄色：選択した確認範囲を満たした人物 ／ 灰色：候補（人数に含めません）</p>
+            <label><input id="showTracking" type="checkbox"> 検証用の追跡ID・軌跡と判定理由を表示</label>
+            <div id="diagnostics" class="hint diagnostics"></div>
+            <p id="lastPassage" class="hint"></p>
             <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
           </div>
 
@@ -122,7 +125,7 @@
               <option value="25">斜め25°</option>
               <option value="45">斜め45°</option>
             </select>
-            <p class="hint">真横を0°とし、進行方向の正面に近づく側へ測ります。角度は記録用です。距離や照明もそろえて比較してください。</p>
+            <p class="hint">真横を0°とし、進行方向の正面に近づく側へ測ります。まず軽い斜めから試し、横並びの胴体がそれぞれ映る位置に調整してください。角度は記録用です。距離や照明もそろえて比較してください。</p>
             <label for="trialNote">設置メモ（任意）</label>
             <input id="trialNote" type="text" maxlength="120" placeholder="机の高さ、入口までの距離、照明">
             <div class="camera-actions">
@@ -152,6 +155,6 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./app.js?v=8"></script>
+  <script type="module" src="./app.js?v=9"></script>
 </body>
 </html>
