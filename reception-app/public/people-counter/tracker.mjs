@@ -91,11 +91,19 @@ export class LineTracker {
       track.streak = (track.streak || 0) + 1;
       if (track.streak >= 2) track.continuousEvidence = true;
       track.scoreSum += point.score ?? 1;
-      if (previous >= this.second && current < this.second) track.reverseStarted = true;
-      if (current >= this.second) track.reverseStarted = false;
-      if (track.reverseStarted && current < this.first) {
-        track.reverseSeen = true;
-        track.reverseStarted = false;
+      const verified = track.hits >= this.minHits && track.continuousEvidence &&
+        track.scoreSum / track.hits >= this.minMeanScore;
+      // Reverse confirmation is only a transient diagnostic on this track.
+      if (!track.reverseSeen) {
+        if (previous > this.second && current <= this.second) track.reverseArmedAt = now;
+        if (current > this.second + 0.035 ||
+          (track.reverseArmedAt !== null && now - track.reverseArmedAt > 12000)) {
+          track.reverseArmedAt = null; track.reversePending = false;
+        }
+        if (track.reverseArmedAt !== null && previous > this.first && current <= this.first) track.reversePending = true;
+        if (track.reversePending && current <= this.first && verified) {
+          track.reverseSeen = true; track.reverseArmedAt = null; track.reversePending = false;
+        }
       }
       if (!track.counted) {
         if (previous < this.first && current >= this.first) track.armedAt = now;
@@ -106,8 +114,7 @@ export class LineTracker {
         if (track.armedAt !== null && previous < this.second && current >= this.second) track.pending = true;
         // A fast crossing may reach B on its second observation. Confirm on a
         // subsequent frame without losing the completed crossing or counting twice.
-        if (track.pending && current >= this.second && track.hits >= this.minHits && track.continuousEvidence &&
-          track.scoreSum / track.hits >= this.minMeanScore) {
+        if (track.pending && current >= this.second && verified) {
           track.counted = true; track.armedAt = null; track.pending = false;
           this.onCount({ trackId: track.id, at: now });
         }
@@ -123,7 +130,9 @@ export class LineTracker {
       if (pointOwners.has(pi)) return;
       recent.push({ id: this.nextId++, x: point.x, y: point.y, w: point.w || 0, h: point.h || 0,
         vx: 0, vy: 0, hits: 1, streak: 1, scoreSum: point.score ?? 1, lastSeen: now,
-        observation: point, trail: [{x: point.x, y: point.y}], continuousEvidence: false, counted: false, armedAt: null, pending: false });
+        observation: point, trail: [{x: point.x, y: point.y}], continuousEvidence: false,
+        counted: false, armedAt: null, pending: false,
+        reverseSeen: false, reverseArmedAt: null, reversePending: false });
     });
     this.tracks = recent;
     return recent;

@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=10";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=10";
+import { LineTracker } from "./tracker.mjs?v=11";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=11";
 
-import { verifyBodies } from "./body-check.mjs?v=10";
-import { createVisionPipeline } from "./vision.mjs?v=10";
+import { verifyBodies } from "./body-check.mjs?v=11";
+import { createVisionPipeline } from "./vision.mjs?v=11";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=10";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=10";
+import { openRecordStore, totalOf } from "./records.mjs?v=11";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=11";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -143,6 +143,7 @@ const trialAngles = { side: "真横", "25": "斜め25°", "45": "斜め45°" };
 const areaEdges = ["left", "right", "top", "bottom"];
 let trial = null;
 let trialResults = [];
+let testDirections = null;
 
 function renderTrials(showResults = false) {
   $("trialStart").disabled = !running || !!trial;
@@ -151,11 +152,13 @@ function renderTrials(showResults = false) {
   $("trialDiscard").disabled = !trial;
   $("trialAngle").disabled = !!trial;
   $("trialNote").disabled = !!trial;
+  $("reverseDirection").disabled = !!trial;
   $("overlayTarget").disabled = !!trial;
   for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) $(id).disabled = !!trial;
   $("trialStatus").textContent = trial
     ? trialAngles[trial.angle] + " · 自動 " + trial.count + "人" + (trial.ended ? " · 実人数を入力してください" : " · 検証中")
     : "カメラを開始し、設置角度を選んで検証を始めてください。";
+  renderDirectionTest();
   if (!showResults) return;
   $("trialResults").replaceChildren();
   for (const result of trialResults) {
@@ -169,6 +172,7 @@ function renderTrials(showResults = false) {
 function endTrial(interrupted = false) {
   if (!trial || trial.ended) return;
   trial.ended = true;
+  testDirections = null;
   if (interrupted) trial.condition += " ／ カメラ停止で終了";
   resetTracking();
   renderTrials();
@@ -192,6 +196,23 @@ function areaContainsLines() {
 function inArea(point) {
   return point.x * 100 >= settings.left && point.x * 100 <= settings.right &&
     point.y * 100 >= settings.top && point.y * 100 <= settings.bottom;
+}
+const entranceSides = {start: "廊下側", end: "展示室側", action: "入場"};
+const exitSides = {start: "展示室側", end: "廊下側", action: "退場"};
+function directionSides() {
+  return window.counterLedger?.role?.() === "out" ? exitSides : entranceSides;
+}
+function renderDirections() {
+  const {start, end, action} = directionSides();
+  $("directionGuide").textContent = "正方向 A（" + start + "）→ B（" + end + "）は" + action +
+    "を記録。逆方向 B → A は対象外。";
+  drawOverlay([]);
+}
+function renderDirectionTest() {
+  $("directionTest").textContent = testDirections
+    ? "正方向 A→B " + (testDirections.forward ? "確認済み" : "待機") +
+      " ／ 逆方向 B→A " + (testDirections.reverse ? "除外を確認" : "待機")
+    : "";
 }
 function resetTracking() { trackingEpoch++; tracker.reset(); }
 function configureTracker() {
@@ -225,13 +246,14 @@ function configureTracker() {
   $("areaStatus").textContent = areaContainsLines()
     ? "白枠の内側で人物を追跡します。"
     : "白枠にA・Bの両ラインと、その前後を含めてください。";
-  drawOverlay([]);
+  renderDirections();
 }
 const tracker = new LineTracker(({trackId}) => {
   $("lastPassage").textContent = "ID " + trackId + " · A→Bを通過し、人物確認の条件を満たしました。";
   if (!trial) return record(1, "auto");
   if (!trial.ended) {
     trial.count++;
+    testDirections.forward = true;
     renderTrials();
   }
 });
@@ -245,9 +267,10 @@ function drawOverlay(detections, tracks = []) {
   ctx.lineWidth = Math.max(2, w / 350);
   ctx.strokeRect(settings.left * w / 100, settings.top * h / 100,
     (settings.right - settings.left) * w / 100, (settings.bottom - settings.top) * h / 100);
+  const {start, end} = directionSides();
   const lines = [
-    { at: tracker.lineAt(tracker.first), name: "A", color: "#3b82f6" },
-    { at: tracker.lineAt(tracker.second), name: "B", color: "#00b79a" },
+    { at: tracker.lineAt(tracker.first), name: "A " + start, color: "#3b82f6", labelY: 26 },
+    { at: tracker.lineAt(tracker.second), name: "B " + end, color: "#00b79a", labelY: 50 },
   ];
   ctx.lineWidth = Math.max(2, w / 420);
   ctx.font = "bold " + Math.max(16, w / 42) + "px sans-serif";
@@ -261,7 +284,7 @@ function drawOverlay(detections, tracks = []) {
       ctx.moveTo(x, settings.top * h / 100); ctx.lineTo(x, settings.bottom * h / 100);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillText(line.name, Math.min(w - 30, x + 7), 29);
+      ctx.fillText(line.name, Math.min(w - 90, x + 7), line.labelY);
     } else {
       const y = line.at * h;
       ctx.moveTo(settings.left * w / 100, y); ctx.lineTo(settings.right * w / 100, y);
@@ -327,6 +350,7 @@ function stopCamera() {
   startButton.disabled = !initialized;
   $("fps").textContent = "検出速度 —";
   $("diagnostics").textContent = "";
+  $("lastPassage").textContent = "";
   $("tracking").textContent = "検出待ち";
   recentTimes = [];
   resetTracking();
@@ -370,14 +394,19 @@ async function tick(now) {
     const eligible = accepted.filter(inArea);
     const tracks = trial?.ended || !areaContainsLines() ? [] : tracker.update(eligible, now);
     const visibleTracks = tracks.filter(t => t.lastSeen === now);
+    if (testDirections && !testDirections.reverse && visibleTracks.some(t => t.reverseSeen)) {
+      testDirections.reverse = true;
+      renderDirectionTest();
+    }
     drawOverlay(annotated.map(d => d.bodyVerified && !inArea(d) ? {...d, bodyVerified: false} : d), visibleTracks);
     if ($("showTracking").checked) {
       const raw = result.objects.detections?.length ?? 0;
       const states = tracks.map(t => {
         let reason = "Aの手前からの通過を待機";
         if (t.lastSeen !== now) reason = "一時的に見失い中";
-        else if (t.counted) reason = "入場を計上済み";
-        else if (t.reverseSeen) reason = "逆方向の通過（入場には加算しません）";
+        else if (t.counted) reason = "正方向の通過を計上済み";
+        else if (t.reverseSeen) reason = "逆方向 B→A・対象外";
+        else if (t.reverseArmedAt !== null) reason = "B通過・逆方向のA待ち";
         else if (t.pending) reason = "B到達・人物確認待ち";
         else if (t.armedAt !== null) reason = "A通過・B待ち";
         return "ID " + t.id + " " + reason;
@@ -499,8 +528,9 @@ function updateSettings(event) {
     bodyMode: $("bodyMode").value === "legs" ? "legs" : "torso",
     first, second,
   };
-  localSet(OPTIONS_KEY, JSON.stringify(settings));
+  const saved = localSet(OPTIONS_KEY, JSON.stringify(settings));
   configureTracker();
+  if (!saved) message("方向とラインの設定を端末に保存できませんでした。", true);
 }
 function csvCell(value) {
   return '"' + String(value).replaceAll('"', '""') + '"';
@@ -592,6 +622,16 @@ $("resetButton").addEventListener("click", () => void newSession());
 for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) {
   $(id).addEventListener("input", updateSettings);
 }
+$("reverseDirection").addEventListener("click", () => {
+  if (trial) return;
+  const [axis, sign] = settings.movement;
+  $("movement").value = axis + (sign === "+" ? "-" : "+");
+  // Keep both thresholds at the same points in the camera image.
+  $("firstLine").value = String(100 - settings.second);
+  $("secondLine").value = String(100 - settings.first);
+  updateSettings();
+});
+window.addEventListener("counter-role-changed", renderDirections);
 $("cameraFrame").addEventListener("click", event => {
   const target = $("overlayTarget").value;
   if (!running || trial || !["firstLine", "secondLine", ...areaEdges].includes(target)) return;
@@ -623,8 +663,9 @@ $("trialStart").addEventListener("click", () => {
     $("trialNote").value.trim().slice(0, 120),
   ].filter(Boolean).join(" ／ ");
   trial = {angle, condition, count: 0, ended: false};
+  testDirections = {forward: false, reverse: false};
   resetTracking();
-  message("検証中です。専用の人数を記録しています。");
+  message("検証中です。A→Bの通過だけを試験人数に加算します。");
   renderTrials();
 });
 $("trialEnd").addEventListener("click", () => endTrial());
@@ -633,7 +674,7 @@ $("trialSave").addEventListener("click", () => {
   const input = $("trialActual");
   const actual = Number(input.value);
   if (!input.value.trim() || !Number.isSafeInteger(actual) || actual < 0) {
-    $("trialStatus").textContent = "実際に通過した人数を0以上の整数で入力してください。";
+    $("trialStatus").textContent = "正方向に通過した実人数を0以上の整数で入力してください。";
     return;
   }
   trialResults = [{...trial, actual}, ...trialResults].slice(0, 30);
@@ -647,6 +688,7 @@ $("trialSave").addEventListener("click", () => {
 $("trialDiscard").addEventListener("click", () => {
   if (!trial) return;
   trial = null;
+  testDirections = null;
   $("trialActual").value = "";
   resetTracking();
   renderTrials();
