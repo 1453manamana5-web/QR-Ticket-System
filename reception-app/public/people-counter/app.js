@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=8";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=8";
+import { LineTracker } from "./tracker.mjs?v=9";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=9";
 
-import { verifyBodies } from "./body-check.mjs?v=8";
-import { createVisionPipeline } from "./vision.mjs?v=8";
+import { verifyBodies } from "./body-check.mjs?v=9";
+import { createVisionPipeline } from "./vision.mjs?v=9";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=8";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=8";
+import { openRecordStore, totalOf } from "./records.mjs?v=9";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=9";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const $ = id => document.getElementById(id);
@@ -223,7 +223,8 @@ function configureTracker() {
     : "白枠にA・Bの両ラインと、その前後を含めてください。";
   drawOverlay([]);
 }
-const tracker = new LineTracker(() => {
+const tracker = new LineTracker(({trackId}) => {
+  $("lastPassage").textContent = "ID " + trackId + " · A→Bを通過し、人物確認の条件を満たしました。";
   if (!trial) return record(1, "auto");
   if (!trial.ended) {
     trial.count++;
@@ -231,7 +232,7 @@ const tracker = new LineTracker(() => {
   }
 });
 
-function drawOverlay(detections) {
+function drawOverlay(detections, tracks = []) {
   if (!canvas.width || !canvas.height) return;
   const w = canvas.width, h = canvas.height;
   const sx = w / analysisFrame.width, sy = h / analysisFrame.height;
@@ -266,6 +267,8 @@ function drawOverlay(detections) {
     }
   }
   ctx.setLineDash([]);
+  const debug = $("showTracking").checked;
+  const ids = debug ? new Map(tracks.map(track => [track.observation?.box, track.id])) : null;
   for (const d of detections) {
     const color = d.bodyVerified ? "#f9dc72" : "#a8b4c0";
     ctx.strokeStyle = color;
@@ -273,7 +276,7 @@ function drawOverlay(detections) {
     ctx.strokeRect(d.box.originX * sx, d.box.originY * sy, d.box.width * sx, d.box.height * sy);
     ctx.fillStyle = color;
     ctx.font = "bold " + Math.max(13, w / 57) + "px sans-serif";
-    ctx.fillText(d.bodyVerified ? (d.legVerified ? "人物・胴体＋脚足確認" : "人物・胴体確認") : "候補・人数に含めません", d.box.originX * sx + 3, Math.max(15, d.box.originY * sy - 6));
+    ctx.fillText((ids?.has(d.box) ? "ID " + ids.get(d.box) + " · " : "") + (d.bodyVerified ? (d.legVerified ? "人物・胴体＋脚足確認" : "人物・胴体確認") : "候補・人数に含めません"), d.box.originX * sx + 3, Math.max(15, d.box.originY * sy - 6));
     if (d.bodyVerified) {
       ctx.fillStyle = "rgba(249, 220, 114, 0.18)";
       ctx.fillRect(d.body.left * w, d.body.top * h, d.body.width * w, d.body.height * h);
@@ -283,6 +286,15 @@ function drawOverlay(detections) {
       ctx.arc(d.x * w, d.y * h, Math.max(4, w / 160), 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+  if (debug) for (const track of tracks) {
+    ctx.strokeStyle = "#6ee7ff";
+    ctx.beginPath();
+    track.trail.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x * w, point.y * h);
+      else ctx.lineTo(point.x * w, point.y * h);
+    });
+    ctx.stroke();
   }
 }
 function discardDetector(model = detector, pending = inferencePending) {
@@ -310,6 +322,7 @@ function stopCamera() {
   stopButton.disabled = true;
   startButton.disabled = !initialized;
   $("fps").textContent = "検出速度 —";
+  $("diagnostics").textContent = "";
   $("tracking").textContent = "検出待ち";
   recentTimes = [];
   resetTracking();
@@ -346,12 +359,33 @@ async function tick(now) {
     try { result = await withDeadline(work, MAX_INFERENCE_MS, "解析が応答しないため停止しました。もう一度計測を開始してください。"); }
     finally { if (inferencePending === work) inferencePending = null; }
     if (!running || attempt !== startAttempt || epoch !== trackingEpoch || document.hidden) return;
-    if (performance.now() - started >= MAX_INFERENCE_MS) throw new Error("解析が遅いため停止しました。ほかのアプリを閉じて再試行してください。");
+    const inferenceMs = performance.now() - started;
+    if (inferenceMs >= MAX_INFERENCE_MS) throw new Error("解析が遅いため停止しました。ほかのアプリを閉じて再試行してください。");
     const candidates = peopleFromResult(result.objects, analysisFrame.width, analysisFrame.height, settings.profile);
     const { annotated, accepted } = verifyBodies(candidates, result.parts, analysisFrame.width, analysisFrame.height, settings.bodyMode);
     const eligible = accepted.filter(inArea);
     const tracks = trial?.ended || !areaContainsLines() ? [] : tracker.update(eligible, now);
-    drawOverlay(annotated.map(d => d.bodyVerified && !inArea(d) ? {...d, bodyVerified: false} : d));
+    const visibleTracks = tracks.filter(t => t.lastSeen === now);
+    drawOverlay(annotated.map(d => d.bodyVerified && !inArea(d) ? {...d, bodyVerified: false} : d), visibleTracks);
+    if ($("showTracking").checked) {
+      const raw = result.objects.detections?.length ?? 0;
+      const states = tracks.map(t => {
+        let reason = "Aの手前からの通過を待機";
+        if (t.lastSeen !== now) reason = "一時的に見失い中";
+        else if (t.counted) reason = "入場を計上済み";
+        else if (t.reverseSeen) reason = "逆方向の通過（入場には加算しません）";
+        else if (t.pending) reason = "B到達・人物確認待ち";
+        else if (t.armedAt !== null) reason = "A通過・B待ち";
+        return "ID " + t.id + " " + reason;
+      });
+      $("diagnostics").textContent = [
+        "AI " + raw + "人 → 候補 " + candidates.length + "人 → 身体確認 " + accepted.length +
+          "人 → 白枠内 " + eligible.length + "人 → 追跡中 " + tracks.length + "人（映像内 " + visibleTracks.length + "人）",
+        "候補除外 " + (raw - candidates.length) + "件・身体の根拠不足または重複 " + (candidates.length - accepted.length) +
+          "件・白枠外 " + (accepted.length - eligible.length) + "件",
+        ...states,
+      ].join("\n");
+    } else $("diagnostics").textContent = "";
     const confirmed = tracks.filter(t => t.lastSeen === now && t.hits >= tracker.minHits && t.continuousEvidence &&
       t.scoreSum / t.hits >= tracker.minMeanScore).length;
     $("tracking").textContent = candidates.length
@@ -359,7 +393,7 @@ async function tick(now) {
       : "肩〜腰の胴体が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
-    $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " 回/秒";
+    $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " FPS · 推論 " + Math.round(inferenceMs) + " ms";
   } catch (error) {
     if (!running || attempt !== startAttempt) return;
     discardDetector(model, modelWork);
