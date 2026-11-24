@@ -702,3 +702,28 @@ test("pending owner can cancel atomically and reapply, without deleting another 
   approvedCancel.delete(doc(db, "terminalApplications", terminalId));
   await assertFails(approvedCancel.commit());
 });
+
+test("counter operations are event-scoped and immutable for approved terminals", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db,"terminalInstallations","counter-operator"), {authUid:"counter-operator",terminalId:"counter-terminal",approved:true});
+    await setDoc(doc(db,"terminalOwners","counter-terminal"), {ownerUid:"counter-operator",enabled:true});
+    await setDoc(doc(db,"terminals","counter-terminal"), {approved:true,role:"reception"});
+    await setDoc(doc(db,"events","festival","receptionApprovals","counter-terminal"), {status:"approved",requestedByUid:"counter-operator"});
+  });
+  const operator = env.authenticatedContext("counter-operator").firestore();
+  const outsider = env.authenticatedContext("counter-outsider").firestore();
+  const id = "ledger:97da10aa-c291-4e38-94fe-55d87a336b11";
+  const path = ["events","festival","counterRuns","live","operations",id];
+  const ref = doc(operator, ...path);
+  const data = {payload:"{}",receivedAt:serverTimestamp()};
+  await assertFails(setDoc(doc(operator,"events","other","counterRuns","live","operations",id),data));
+  await assertFails(setDoc(doc(operator,"events","festival","counterRuns","unknown","operations",id),data));
+  await assertSucceeds(setDoc(ref,data));
+  await assertSucceeds(getDocs(collection(operator,"events","festival","counterRuns","live","operations")));
+  await assertFails(getDoc(doc(outsider,...path)));
+  await assertFails(updateDoc(ref,{payload:"overwritten"}));
+  await assertFails(deleteDoc(ref));
+  await assertSucceeds(setDoc(doc(operator,"counterClocks","counter-operator"),{at:serverTimestamp()}));
+  await assertFails(setDoc(doc(operator,"counterClocks","counter-outsider"),{at:serverTimestamp()}));
+});

@@ -574,6 +574,14 @@ service cloud.firestore {
 
     // Reception downloads the selected event and its tickets for offline use.
     // Other event data and all management writes remain management-only.
+    match /counterClocks/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && (approvedManagementTerminal() || approvedReceptionTerminal())
+        && request.resource.data.keys().hasOnly(["at"])
+        && request.resource.data.at == request.time;
+    }
+
     match /events/{eventId} {
       // The client query must include where("receptionTarget", "==", true).
       allow get, list: if approvedManagementTerminal()
@@ -631,6 +639,20 @@ service cloud.firestore {
           && get(installationPath(resource.data.requestedByUid)).data.approved == true
           && get(installationPath(resource.data.requestedByUid)).data.terminalId == terminalId;
         allow delete: if approvedManagementTerminal();
+      }
+
+      match /counterRuns/{mode}/operations/{operationId} {
+        function counterAccess() {
+          return mode in ["test", "live"]
+            && (approvedManagementTerminal() || approvedReceptionForEvent(eventId));
+        }
+        allow get, list: if counterAccess();
+        allow create: if counterAccess()
+          && operationId.matches("^(ledger|edit):[0-9a-f-]{36}$")
+          && request.resource.data.keys().hasOnly(["payload", "receivedAt"])
+          && request.resource.data.payload is string
+          && request.resource.data.payload.size() <= 8192
+          && request.resource.data.receivedAt == request.time;
       }
 
       match /analysis/{analysisId} {
