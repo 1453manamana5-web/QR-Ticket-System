@@ -1,5 +1,5 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {createVisionPipeline} from './vision.mjs?v=11';
+import {createVisionPipeline} from './vision.mjs?v=12';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -37,6 +37,7 @@ function renderState() {
       ' · ' + network + ' · 未同期 ' + pending + '件'
     : '運用設定を保存すると通過ごとの記録を始めます。';
   if (syncError) $('ledgerState').textContent += ' · ' + syncError;
+  $('adaptiveSync').textContent = syncError ? network + ' · 未同期 ' + pending + '件' : '';
   $('clockState').textContent = clock && !clockChanged
     ? '時刻補正 ' + Math.round(clock.offset) + ' ms · 通信による誤差の目安 ±' +
       Math.round(clock.uncertainty) + ' ms · 測定 ' + new Date(clock.measured).toLocaleString('ja-JP')
@@ -114,7 +115,7 @@ async function sync() {
   network = '同期中';
   renderState();
   try {
-    const remote = remoteModule ??= await import('./counter-sync.js?v=11&try=' + remoteAttempts++);
+    const remote = remoteModule ??= await import('./counter-sync.js?v=12&try=' + remoteAttempts++);
     if (!clock || clockChanged || Date.now() - clock.measured > 600000) {
       const sent = Date.now(), mono = performance.now();
       try {
@@ -182,6 +183,7 @@ $('restoreLedger').addEventListener('click', () => {
 });
 $('ledgerEdit').addEventListener('submit', async event => {
   event.preventDefault();
+  if (window.counterAdaptive?.isolated()) return error('認識設定の試験を終了してから通過記録を修正してください。');
   if (!store || !settings) return error('先に運用設定を保存してください。');
   const at = new Date($('editAt').value).getTime();
   const reason = $('editReason').value.trim();
@@ -215,6 +217,7 @@ $('ledgerEdit').addEventListener('submit', async event => {
 
 $('ledgerSetup').addEventListener('submit', async event => {
   event.preventDefault();
+  if (window.counterAdaptive?.isolated()) return error('認識設定の試験を終了してから運用設定を変更してください。');
   if ($('startButton').disabled || !$('stopButton').disabled) return error('カメラを停止してから設定してください。');
   const eventId = $('ledgerEvent').value.trim();
   const opened = new Date($('ledgerOpen').value).getTime();
@@ -302,7 +305,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v11') &&
+      ready = (await caches.keys()).includes('counter-v12') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}

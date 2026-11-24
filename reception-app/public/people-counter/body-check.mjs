@@ -88,6 +88,44 @@ function matchingLeg(legs, body, box, width, height) {
   });
 }
 
+function boxOverlap(a, b) {
+  return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+    Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+}
+
+function overlappingGroups(boxes) {
+  const neighbors = boxes.map(() => []);
+  for (let i = 0; i < boxes.length; i++) {
+    const a = boxes[i];
+    for (let j = i + 1; j < boxes.length; j++) {
+      const b = boxes[j], overlap = boxOverlap(a, b);
+      if (!overlap) continue;
+      const smaller = Math.min((a.right - a.left) * (a.bottom - a.top),
+        (b.right - b.left) * (b.bottom - b.top));
+      const duplicate = overlap >= smaller * 0.75;
+      neighbors[i].push({index: j, duplicate});
+      neighbors[j].push({index: i, duplicate});
+    }
+  }
+  const visited = new Set(), groups = [];
+  for (let i = 0; i < boxes.length; i++) {
+    if (visited.has(i) || !neighbors[i].length) continue;
+    const indices = [i];
+    let duplicate = false;
+    visited.add(i);
+    for (const index of indices) {
+      for (const neighbor of neighbors[index]) {
+        duplicate ||= neighbor.duplicate;
+        if (visited.has(neighbor.index)) continue;
+        visited.add(neighbor.index);
+        indices.push(neighbor.index);
+      }
+    }
+    if (!duplicate) groups.push(indices);
+  }
+  return groups;
+}
+
 export function verifyBodies(detections, parts, width, height, mode = 'torso', separate = true) {
   const regions = torsoRegions(parts), legs = mode === 'legs' ? legRegions(parts) : [], candidates = [];
   if (width > 0 && height > 0) detections.forEach((d, di) => {
@@ -133,37 +171,43 @@ export function verifyBodies(detections, parts, width, height, mode = 'torso', s
       top: Math.floor(box.originY / height * parts.height),
       bottom: Math.ceil((box.originY + box.height) / height * parts.height),
     }));
-    // Near-identical boxes must not turn the edges of one torso into two people.
-    let overlapping = false;
-    const duplicate = boxes.some((a, i) => boxes.slice(i + 1).some(b => {
-      const overlap = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
-        Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-      const smaller = Math.min((a.right - a.left) * (a.bottom - a.top), (b.right - b.left) * (b.bottom - b.top));
-      if (overlap > 0) overlapping = true;
-      return overlap >= smaller * 0.75;
-    }));
-    if (duplicate || !overlapping) return { annotated, accepted };
-    const owners = new Uint16Array(parts.data.length);
-    for (const box of boxes) {
-      for (let y = box.top; y < box.bottom; y++) {
-        for (let x = box.left; x < box.right; x++) owners[y * parts.width + x]++;
-      }
-    }
-    const recovered = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const box = boxes[i];
-      const data = new Int32Array(parts.data.length).fill(-1);
-      for (let y = box.top; y < box.bottom; y++) {
-        for (let x = box.left; x < box.right; x++) {
-          const index = y * parts.width + x;
-          if (owners[index] === 1) data[index] = parts.data[index];
+    // Near-duplicate or unsupported boxes invalidate only their connected group.
+    // Keep the original associations unless every member can be verified from
+    // its exclusive pixels and no other group's accepted body uses that area.
+    const groups = overlappingGroups(boxes).filter(group => group.some(index => !annotated[index].bodyVerified));
+    if (!groups.length) return { annotated, accepted };
+    const owners = new Uint16Array(parts.data.length), data = new Int32Array(parts.data.length);
+    let changed = false;
+    for (const group of groups) {
+      owners.fill(0);
+      for (const i of group) {
+        const box = boxes[i];
+        for (let y = box.top; y < box.bottom; y++) {
+          for (let x = box.left; x < box.right; x++) owners[y * parts.width + x]++;
         }
       }
-      const [person] = verifyBodies([detections[i]], {...parts, data}, width, height, mode, false).accepted;
-      if (!person) break;
-      recovered.push(person);
+      const recovered = [];
+      for (const i of group) {
+        const box = boxes[i];
+        data.fill(-1);
+        for (let y = box.top; y < box.bottom; y++) {
+          for (let x = box.left; x < box.right; x++) {
+            const index = y * parts.width + x;
+            if (owners[index] === 1) data[index] = parts.data[index];
+          }
+        }
+        const [person] = verifyBodies([detections[i]], {...parts, data}, width, height, mode, false).accepted;
+        if (!person) break;
+        recovered.push(person);
+      }
+      if (recovered.length !== group.length) continue;
+      const maskBounds = ({left, top, width, height}) => ({left, top, right: left + width, bottom: top + height});
+      if (annotated.some(({body}, index) => body && !group.includes(index) &&
+        recovered.some(({body: other}) => boxOverlap(maskBounds(body), maskBounds(other)) > 1e-9))) continue;
+      group.forEach((index, i) => { annotated[index] = recovered[i]; });
+      changed = true;
     }
-    if (recovered.length === boxes.length) return { annotated: recovered, accepted: recovered };
+    if (changed) return { annotated, accepted: annotated.filter(d => d.bodyVerified) };
   }
   return { annotated, accepted };
 }

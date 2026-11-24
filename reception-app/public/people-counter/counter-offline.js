@@ -1,8 +1,8 @@
-const version = 'counter-v11';
+const version = 'counter-v12';
 const assets = 'counter-model-assets-v1';
-const shell = ['./', 'index.html', 'style.css?v=11', 'app.js?v=11', 'ledger-ui.mjs?v=11',
-  'ledger.mjs', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
-    .map(name => name + '.mjs?v=11')];
+const shell = ['./', 'index.html', 'style.css?v=12', 'app.js?v=12', 'ledger-ui.mjs?v=12',
+  'ledger.mjs', 'adaptive-ui.mjs?v=12', 'adaptive-environment.mjs?v=12', 'adaptive-calibration.mjs?v=12', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
+    .map(name => name + '.mjs?v=12')];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(version).then(cache => cache.addAll(shell)).then(() => self.skipWaiting()));
 });
@@ -34,7 +34,8 @@ self.addEventListener('fetch', event => {
   const scope = new URL(self.registration.scope);
   if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(async () => (await caches.open(version)).match('./')));
+    event.respondWith(fetch(request).then(async response => response.ok ? response : (await (await caches.open(version)).match('./')) || response)
+      .catch(async () => (await caches.open(version)).match('./')));
     return;
   }
   if (shell.includes(url.pathname.slice(scope.pathname.length) + url.search)) {
