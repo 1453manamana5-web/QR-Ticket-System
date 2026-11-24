@@ -1,5 +1,5 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {createVisionPipeline} from './vision.mjs?v=10';
+import {createVisionPipeline} from './vision.mjs?v=11';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -114,7 +114,7 @@ async function sync() {
   network = '同期中';
   renderState();
   try {
-    const remote = remoteModule ??= await import('./counter-sync.js?v=10&try=' + remoteAttempts++);
+    const remote = remoteModule ??= await import('./counter-sync.js?v=11&try=' + remoteAttempts++);
     if (!clock || clockChanged || Date.now() - clock.measured > 600000) {
       const sent = Date.now(), mono = performance.now();
       try {
@@ -231,6 +231,7 @@ $('ledgerSetup').addEventListener('submit', async event => {
     }
     localStorage.setItem(setupKey, JSON.stringify(next));
     settings = next;
+    window.dispatchEvent(new Event("counter-role-changed"));
     lastSuccessfulPull = 0;
     editing = false;
     $('ledgerTarget').value = '';
@@ -289,7 +290,7 @@ function attach(value) {
   changed();
   schedule(500);
 }
-window.counterLedger = {capture, configured: () => !!settings, attach, changed};
+window.counterLedger = {capture, role: () => settings?.role, configured: () => !!settings, attach, changed};
 if (window.counterRecordStore) attach(window.counterRecordStore);
 fillRecord();
 renderState();
@@ -301,7 +302,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v10') &&
+      ready = (await caches.keys()).includes('counter-v11') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}
