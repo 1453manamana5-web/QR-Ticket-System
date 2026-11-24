@@ -1,5 +1,5 @@
-import {EnvironmentMonitor} from './adaptive-environment.mjs?v=12';
-import {createCalibration, restoreProfileState, updateProfileState, chooseRuntimeProfile} from './adaptive-calibration.mjs?v=12';
+import {EnvironmentMonitor} from './adaptive-environment.mjs?v=13';
+import {createCalibration, restoreProfileState, updateProfileState, chooseRuntimeProfile} from './adaptive-calibration.mjs?v=13';
 
 const $ = id => document.getElementById(id);
 const monitor = new EnvironmentMonitor();
@@ -327,6 +327,8 @@ window.counterAdaptive = {
   setup, engine, isolated, count, stopped, frame, observeFault, render:renderWizard,
   due: now => !pixelsUnavailable && now >= nextObservation,
   diagnosticsUnavailable() { pixelsUnavailable = true; },
+  stationStatus: () => ({profile: episode?.profile ?? state.active,
+    alert: lastFault.includes('保存') ? 'storage' : lastFault ? 'camera' : cameraDrift ? 'recalibrate' : 'none'}),
   mayRecover: () => !wizard && !status().trial && state.automatic && !state.pinned &&
     state.verified.includes(state.active) && !cameraDrift,
 };

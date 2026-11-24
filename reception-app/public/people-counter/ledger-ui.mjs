@@ -1,5 +1,5 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {createVisionPipeline} from './vision.mjs?v=12';
+import {createVisionPipeline} from './vision.mjs?v=13';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -27,6 +27,132 @@ let lastClockSample = {wall: Date.now(), mono: performance.now()};
 let clockChanged = false;
 let remoteModule;
 let remoteAttempts = 0;
+let stationState = 'unchecked';
+let assignedRole = loadAssignedRole(settings);
+let deniedStation = loadDeniedStation(settings);
+let stationNote = '';
+let control = loadControl(settings);
+let controlTimer;
+let controlFlight;
+let lastHeartbeat = -Infinity;
+let heartbeatScope;
+let activePending = 0;
+let retainedPending = 0;
+const controlKey = cfg => 'counter-control-v1:' + cfg.eventId + ':' + cfg.mode;
+function loadControl(cfg) {
+  if (!cfg) return null;
+  const cached = load('counter-control-v1:' + cfg.eventId + ':' + cfg.mode);
+  if (!cached || ![cached.opened,cached.closed].every(value => value === null || Number.isSafeInteger(value)) ||
+      typeof cached.paused !== 'boolean' || typeof cached.verified !== 'boolean') return null;
+  return cached;
+}
+function loadAssignedRole(cfg) {
+  if (!cfg) return null;
+  const value = load('counter-role-v1:' + cfg.eventId);
+  return ['in','out'].includes(value) ? value : null;
+}
+function loadDeniedStation(cfg) {
+  if (!cfg) return '';
+  const cached = load('counter-denied-v1:' + cfg.eventId);
+  return ['rejected','revoked','mismatch'].includes(cached) ? cached : '';
+}
+function captureBlockReason() {
+  if (settings?.mode === 'live' && deniedStation) return 'この端末の本番承認を確認してください。管理画面で再承認されるまで計測を待機します。';
+  if (control?.closed != null && control.closed <= Date.now()) return '管理画面で閉場済みです。';
+  if (control?.paused) return '管理画面で計測が一時停止されています。';
+  if (assignedRole && settings?.role !== assignedRole) return '端末の設置区分が管理画面で変更されました。停止中に運用設定とA・Bの方向を確認してください。';
+  return '';
+}
+function renderStation() {
+  const statuses = {
+    unchecked:'端末登録の状態を未確認', missing:'未申請', pending:'承認待ち', approved:'承認済み',
+    rejected:'申請が却下されました', revoked:'端末承認が解除されました', mismatch:'このSafariの登録と端末IDが一致しません',
+  };
+  $('counterStationState').textContent = !settings ? '運用設定を保存すると端末登録を申請できます。'
+    : (statuses[stationState] ?? statuses.unchecked) + (assignedRole ? ' · 管理側の指定 ' + (assignedRole === 'out' ? '出口' : '入口') : '') +
+      (stationNote ? ' · ' + stationNote : '');
+  $('counterStationApply').disabled = !settings || !device || !['unchecked','missing'].includes(stationState);
+  $('counterRemoteControl').textContent = captureBlockReason() || (control ? '管理画面の集計期間を使用しています。' : '');
+}
+async function remoteApi() {
+  return remoteModule ??= await import('./counter-sync.js?v=13&try=' + remoteAttempts++);
+}
+function storeControl(config, next) {
+  if (settings !== config || (!next && (control?.paused || control?.closed != null))) return;
+  if (JSON.stringify(control) === JSON.stringify(next)) return;
+  control = next;
+  try { localStorage.setItem(controlKey(config), JSON.stringify(next)); }
+  catch { error('取得した管理設定を端末に保存できませんでした。'); }
+  window.dispatchEvent(new Event('counter-control-changed'));
+  changed();
+}
+function checkStation(config, remote) {
+  if (controlFlight?.config === config) return controlFlight.promise;
+  const promise = (async () => {
+    const station = await deadline(remote.readCounterStation(config.eventId));
+    if (settings !== config) return false;
+    stationNote = '';
+    if (station && station.device !== device) {
+      stationState = 'mismatch';
+      assignedRole = null;
+    } else {
+      stationState = station?.status ?? 'missing';
+      assignedRole = stationState === 'approved' && ['in','out'].includes(station?.role) ? station.role : null;
+    }
+    if (assignedRole) {
+      try { localStorage.setItem('counter-role-v1:' + config.eventId,JSON.stringify(assignedRole)); } catch {}
+    }
+    const denial = ['rejected','revoked','mismatch'].includes(stationState) ? stationState : '';
+    if (denial || stationState === 'approved') {
+      deniedStation = denial;
+      try { localStorage.setItem('counter-denied-v1:' + config.eventId,JSON.stringify(denial)); } catch {}
+    }
+    renderStation();
+    window.dispatchEvent(new Event('counter-control-changed'));
+    if (stationState !== 'approved') return false;
+    storeControl(config, await deadline(remote.readCounterConfig(config.eventId,config.mode)));
+    const scope = config.eventId + ':' + config.mode;
+    const now = performance.now();
+    if (settings === config && (heartbeatScope !== scope || now - lastHeartbeat >= 30000)) {
+      heartbeatScope = scope;
+      lastHeartbeat = now;
+      const state = window.counterStationCamera?.() ?? {};
+      const metrics = {
+        version:'13', camera:state.camera === true, ai:state.ai === true,
+        profile:['baseline','detail','lighting'].includes(state.profile) ? state.profile : 'unknown',
+        pending:Math.min(activePending,1000000), mode:config.mode,
+        alert:(control?.paused || control?.closed != null) ? 'paused' : captureBlockReason() ? 'setup'
+          : ['recalibrate','camera','storage'].includes(state.alert) ? state.alert
+          : network === '同期エラー' ? 'network' : 'none',
+      };
+      // The bounded heartbeat runs independently from the upload queue.
+      void deadline(remote.heartbeatCounterStation(config.eventId,metrics)).catch(() => {});
+    }
+    return settings === config;
+  })();
+  const flight = {config,promise};
+  controlFlight = flight;
+  void promise.finally(() => { if (controlFlight === flight) controlFlight = null; }).catch(() => {});
+  return promise;
+}
+function scheduleControl(ms = 15000) {
+  clearTimeout(controlTimer);
+  controlTimer = setTimeout(async () => {
+    const config = settings;
+    if (config && device && !document.hidden && navigator.onLine !== false) {
+      try {
+        const approved = await checkStation(config,await deadline(remoteApi()));
+        if (approved && stationState === 'approved' && network === '未承認') schedule(0);
+      } catch {
+        if (settings === config) {
+          stationNote = 'サーバーに接続できません。端末内の記録を保持します。';
+          renderStation();
+        }
+      }
+    }
+    scheduleControl();
+  },ms);
+}
 const iso = ms => Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? new Date(ms).toISOString() : '';
 const minutes = ms => Number.isFinite(ms) ? (ms / 60000).toFixed(2) : '算出不可';
 const localDate = ms => Number.isFinite(ms) ? iso(ms - new Date(ms).getTimezoneOffset() * 60000).slice(0,23) : '';
@@ -37,6 +163,8 @@ function renderState() {
       ' · ' + network + ' · 未同期 ' + pending + '件'
     : '運用設定を保存すると通過ごとの記録を始めます。';
   if (syncError) $('ledgerState').textContent += ' · ' + syncError;
+  if (retainedPending) $('ledgerState').textContent += ' · 同期できない旧端末記録 ' + retainedPending +
+    '件。CSVで確認し、人数カウント管理画面で必要な修正を行ってください。';
   $('adaptiveSync').textContent = syncError ? network + ' · 未同期 ' + pending + '件' : '';
   $('clockState').textContent = clock && !clockChanged
     ? '時刻補正 ' + Math.round(clock.offset) + ' ms · 通信による誤差の目安 ±' +
@@ -70,8 +198,12 @@ async function refresh() {
   const rows = await store.ledger();
   if (config !== settings) return;
   pending = rows.filter(r => !r.synced).length;
-  result = analyze(rows, {...config, verified: config.verified && config.closed != null &&
-    lastSuccessfulPull >= config.closed && network === 'オンライン'});
+  activePending = rows.filter(r => !r.synced && r.eventId === config.eventId && r.mode === config.mode).length;
+  retainedPending = rows.filter(r => !r.synced && r.eventId === config.eventId && r.mode === config.mode &&
+    (!automaticPassage(r) || (assignedRole && r.station !== assignedRole))).length;
+  const windowSettings = control ? {...config,...control} : config;
+  result = analyze(rows, {...windowSettings, verified: windowSettings.verified && windowSettings.closed != null &&
+    lastSuccessfulPull >= windowSettings.closed && network === 'オンライン'});
   const {entries, exits, occupancy, area, sumAverage, integralAverage, estimate, issues} = result;
   $('ledgerSummary').textContent = [
     '入場 ' + entries + '人　退場 ' + exits + '人　滞在人数 ' + occupancy + '人',
@@ -104,22 +236,32 @@ async function deadline(work) {
     })]);
   } finally {clearTimeout(timer);}
 }
+function automaticPassage(row) {
+  return row.kind === 'passage' && row.source === 'auto' && row.person === 'visitor' && row.device === device && row.station === row.direction;
+}
 function schedule(ms) {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => void sync(), ms);
 }
 async function sync() {
-  if (busy || !store || !settings) return;
+  if (busy || !store || !settings || !device) return;
   const config = settings;
   busy = true;
   network = '同期中';
   renderState();
   try {
-    const remote = remoteModule ??= await import('./counter-sync.js?v=12&try=' + remoteAttempts++);
+    if (navigator.onLine === false) throw new Error('インターネットに接続していません。');
+    const remote = await deadline(remoteApi());
+    if (!await checkStation(config,remote)) {
+      network = '未承認';
+      syncError = '';
+      retry = 15000;
+      return;
+    }
     if (!clock || clockChanged || Date.now() - clock.measured > 600000) {
       const sent = Date.now(), mono = performance.now();
       try {
-        const server = await deadline(remote.serverClock());
+        const server = await deadline(remote.serverClock(config.eventId));
         clock = estimateClock(sent, Date.now(), server, performance.now() - mono);
         clockChanged = false;
         lastClockSample = {wall: Date.now(), mono: performance.now()};
@@ -133,7 +275,15 @@ async function sync() {
     let scopeError;
     for (const [scope,[eventId,mode]] of scopes) {
       try {
-        await uploadPending(store, snapshot, eventId, mode, (...args) => deadline(remote.pushOperations(...args)));
+        if (settings !== config) break;
+        let role = assignedRole;
+        if (eventId !== config.eventId) {
+          const other = await deadline(remote.readCounterStation(eventId));
+          if (other?.status !== 'approved' || other.device !== device) continue;
+          role = other.role;
+        }
+        const allowed = snapshot.filter(row => automaticPassage(row) && row.station === role);
+        await uploadPending(store, allowed, eventId, mode, (...args) => deadline(remote.pushOperations(...args)));
         if (scope !== activeScope) continue;
         if (loadedScope !== scope) {activeCursor = undefined; loadedScope = scope;}
         do {
@@ -156,7 +306,7 @@ async function sync() {
   } finally {
     busy = false;
     try {await refresh();} catch (e) {error(e.message);}
-    schedule(network === 'オンライン' ? (pending ? 3000 : 30000) : retry);
+    schedule(network === 'オンライン' ? (activePending > retainedPending ? 3000 : 30000) : retry);
   }
 }
 
@@ -224,6 +374,9 @@ $('ledgerSetup').addEventListener('submit', async event => {
   const closed = $('ledgerClose').value ? new Date($('ledgerClose').value).getTime() : null;
   if (!/^[a-zA-Z0-9_-]{1,160}$/.test(eventId) || !Number.isFinite(opened) ||
       (closed != null && (!Number.isFinite(closed) || closed < opened))) return error('イベントIDと開閉場時刻を確認してください。');
+  if (settings?.eventId === eventId && assignedRole && $('ledgerRole').value !== assignedRole) {
+    return error('管理画面で指定された入口・出口を選び、計測ラインの方向を確認してください。');
+  }
   const next = {eventId, mode: $('ledgerMode').value, role: $('ledgerRole').value,
     opened, closed, verified: closed != null && $('ledgerVerified').checked};
   try {
@@ -233,7 +386,17 @@ $('ledgerSetup').addEventListener('submit', async event => {
       device = id;
     }
     localStorage.setItem(setupKey, JSON.stringify(next));
+    const scopeChanged = !settings || settings.eventId !== next.eventId || settings.mode !== next.mode;
     settings = next;
+    if (scopeChanged) {
+      control = loadControl(settings);
+      stationState = 'unchecked';
+      deniedStation = loadDeniedStation(settings);
+      assignedRole = null;
+      stationNote = '';
+    }
+    renderStation();
+    window.dispatchEvent(new Event('counter-control-changed'));
     window.dispatchEvent(new Event("counter-role-changed"));
     lastSuccessfulPull = 0;
     editing = false;
@@ -242,6 +405,7 @@ $('ledgerSetup').addEventListener('submit', async event => {
     await refresh();
     selectRecord();
     schedule(0);
+    scheduleControl(0);
   } catch (e) {error('運用設定を保存できませんでした。 ' + e.message);}
 });
 
@@ -258,7 +422,7 @@ $('exportLedger').addEventListener('click', async () => {
     edits: () => [['修正ID','元記録ID','直前版ID','修正時刻 UTC','端末','理由','修正前','修正後','同期済み'],
       ...selected.filter(r => r.kind === 'revision').map(r => [r.id,r.target,r.parent,iso(r.rawAt),r.device,r.reason,JSON.stringify(r.before),JSON.stringify(r.after),r.synced])],
     hours: () => [['時刻 JST','入場','退場'], ...hours.map(r => [iso(r.at + 32400000).replace('Z','+09:00'),r.entries,r.exits])],
-    timeline: () => [['日時 UTC','滞在人数'],[iso(settings.opened),0],...timeline.map(r => [iso(r.at),r.occupancy])],
+    timeline: () => [['日時 UTC','滞在人数'],[iso(control ? control.opened : settings.opened),0],...timeline.map(r => [iso(r.at),r.occupancy])],
     average: () => [['イベント','運用','確定時刻差 分','確定積分 分','累積 人分','暫定 分','未同期','異常数'],
       [settings.eventId,settings.mode,minutes(sumAverage),minutes(integralAverage),minutes(area),minutes(estimate),pending,issues.length]],
     issues: () => [['異常','日時 UTC','対象'], ...issues.map(r => [r.code,iso(r.at),r.target])],
@@ -272,9 +436,29 @@ $('exportLedger').addEventListener('click', async () => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 });
+$('counterStationApply').addEventListener('click', async () => {
+  if (!settings || !device || !['unchecked','missing'].includes(stationState)) return;
+  const config = settings;
+  const name = $('counterStationName').value.trim();
+  if (!name || name.length > 40) return error('端末名を1〜40文字で入力してください。');
+  if (navigator.onLine === false) return error('端末登録にはインターネット接続が必要です。');
+  $('counterStationApply').disabled = true;
+  try {
+    const remote = await deadline(remoteApi());
+    await deadline(remote.enrollCounterStation(config.eventId,{name,device,role:config.role}));
+    if (settings === config) {
+      error('');
+      await checkStation(config,remote);
+      schedule(0);
+    }
+  } catch (e) {
+    if (settings === config) error('端末登録を申請できませんでした。 ' + e.message);
+  } finally { renderStation(); }
+});
 $('syncLedger').addEventListener('click', () => schedule(0));
-window.addEventListener('online', () => schedule(500));
-window.addEventListener('focus', () => {changed(); schedule(500);});
+window.addEventListener('online', () => {scheduleControl(0); schedule(500);});
+window.addEventListener('focus', () => {changed(); scheduleControl(0); schedule(500);});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleControl(0); });
 setInterval(() => {
   checkClock(Date.now());
   changed();
@@ -292,11 +476,13 @@ function attach(value) {
   store = value;
   changed();
   schedule(500);
+  scheduleControl(500);
 }
-window.counterLedger = {capture, role: () => settings?.role, configured: () => !!settings, attach, changed};
+window.counterLedger = {capture, role: () => settings?.role, configured: () => !!settings, attach, changed, captureBlockReason};
 if (window.counterRecordStore) attach(window.counterRecordStore);
 fillRecord();
 renderState();
+renderStation();
 
 const offlineState = $('offlineState');
 const preparedKey = 'counter-offline-v10';
@@ -305,7 +491,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v12') &&
+      ready = (await caches.keys()).includes('counter-v13') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}

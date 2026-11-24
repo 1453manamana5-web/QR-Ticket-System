@@ -47,6 +47,93 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/events/$(eventId)/receptionApprovals/$(receptionTerminalId())).data.requestedByUid == request.auth.uid;
     }
 
+    function counterAdministrator() {
+      return approvedManagementTerminal()
+        && get(terminalPath(managementTerminalId())).data.get("admin", false) == true;
+    }
+
+    function counterOperator() {
+      return approvedManagementTerminal()
+        && (get(terminalPath(managementTerminalId())).data.get("admin", false) == true
+          || get(terminalPath(managementTerminalId())).data.get("subAdmin", false) == true);
+    }
+
+    function counterDevicePath(eventId) {
+      return /databases/$(database)/documents/events/$(eventId)/counterDevices/$(request.auth.uid);
+    }
+
+    function approvedCounterDevice(eventId) {
+      return signedIn() && exists(counterDevicePath(eventId))
+        && get(counterDevicePath(eventId)).data.status == "approved";
+    }
+
+    function counterMode(mode) {
+      return mode in ["test", "live"];
+    }
+
+    function counterTime(value) {
+      return value is number && value >= 0 && value <= 8640000000000000;
+    }
+
+    function validCounterConfig(data) {
+      return data.keys().hasAll(["opened", "closed", "paused", "verified", "updatedAt", "updatedByUid"])
+        && data.keys().hasOnly(["opened", "closed", "paused", "verified", "updatedAt", "updatedByUid"])
+        && (data.opened == null || (data.opened is int && counterTime(data.opened)))
+        && (data.closed == null || (data.closed is int && counterTime(data.closed) && data.opened != null && data.closed >= data.opened))
+        && data.paused is bool && data.verified is bool
+        && (!data.verified || (data.opened != null && data.closed != null))
+        && data.updatedAt == request.time && data.updatedByUid == request.auth.uid;
+    }
+
+    function validCounterDeviceName(name) {
+      return name is string && name.size() > 0 && name.size() <= 80;
+    }
+
+    function validCounterDeviceId(id) {
+      return id is string && id.matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    }
+
+    function counterOperationId(id) {
+      return id is string && id.matches("^(ledger|edit):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    }
+
+    function counterRevisionSnapshot(data) {
+      return data is map
+        && data.keys().hasAll(["at", "direction", "person", "invalid", "clockWarning", "clockUncertainty"])
+        && data.keys().hasOnly(["at", "direction", "person", "invalid", "clockWarning", "clockUncertainty"])
+        && counterTime(data.at) && data.direction in ["in", "out"]
+        && data.person in ["visitor", "staff"] && data.invalid is bool
+        && (data.clockWarning == null || (data.clockWarning is string && data.clockWarning.size() <= 80))
+        && (data.clockUncertainty == null || counterTime(data.clockUncertainty));
+    }
+
+    function validCounterPassage(data) {
+      return data.keys().hasAll(["at", "direction", "person", "source", "invalid"])
+        && data.keys().hasOnly(["id", "kind", "eventId", "mode", "device", "actorUid", "rawAt", "at", "createdAt",
+          "station", "direction", "person", "source", "invalid", "clockWarning", "clockUncertainty", "reason", "sequence", "passageId"])
+        && data.id.matches("^ledger:.*$")
+        && counterTime(data.at) && data.direction in ["in", "out"]
+        && data.person in ["visitor", "staff"] && data.source in ["auto", "manual"] && data.invalid == false
+        && (!data.keys().hasAny(["sequence"]) || (data.sequence is int && data.sequence > 0))
+        && (!data.keys().hasAny(["passageId"]) || validCounterDeviceId(data.passageId))
+        && (!data.keys().hasAny(["clockWarning"]) || (data.clockWarning is string && data.clockWarning.size() <= 80))
+        && (!data.keys().hasAny(["clockUncertainty"]) || data.clockUncertainty == null || counterTime(data.clockUncertainty))
+        && (!data.keys().hasAny(["reason"]) || (data.reason is string && data.reason.size() <= 180));
+    }
+
+    function validCounterRevision(data) {
+      return data.keys().hasAll(["target", "parent", "before", "after", "reason", "resolves"])
+        && data.keys().hasOnly(["id", "kind", "eventId", "mode", "device", "actorUid", "rawAt", "at", "createdAt",
+          "station", "source", "target", "parent", "before", "after", "reason", "resolves"])
+        && data.id.matches("^edit:.*$")
+        && counterOperationId(data.target) && counterOperationId(data.parent) && data.target.matches("^ledger:.*$")
+        && data.id != data.parent && data.reason is string && data.reason.size() > 0 && data.reason.size() <= 180
+        && data.resolves is list && data.resolves.size() <= 100
+        && (!data.keys().hasAny(["at"]) || counterTime(data.at))
+        && (!data.keys().hasAny(["source"]) || data.source == "manual")
+        && counterRevisionSnapshot(data.before) && counterRevisionSnapshot(data.after);
+    }
+
     function receptionTerminalId() {
       return get(/databases/$(database)/documents/terminalInstallations/$(request.auth.uid)).data.terminalId;
     }
@@ -577,8 +664,11 @@ service cloud.firestore {
     match /counterClocks/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
       allow create, update: if signedIn() && request.auth.uid == uid
-        && (approvedManagementTerminal() || approvedReceptionTerminal())
-        && request.resource.data.keys().hasOnly(["at"])
+        && request.resource.data.keys().hasAll(["at", "eventId"])
+        && request.resource.data.keys().hasOnly(["at", "eventId"])
+        && request.resource.data.eventId is string && request.resource.data.eventId.size() > 0
+        && request.resource.data.eventId.size() <= 160
+        && (approvedCounterDevice(request.resource.data.eventId) || counterOperator())
         && request.resource.data.at == request.time;
     }
 
@@ -641,18 +731,84 @@ service cloud.firestore {
         allow delete: if approvedManagementTerminal();
       }
 
-      match /counterRuns/{mode}/operations/{operationId} {
-        function counterAccess() {
-          return mode in ["test", "live"]
-            && (approvedManagementTerminal() || approvedReceptionForEvent(eventId));
+      match /counterDevices/{uid} {
+        function ownCounterDevice() {
+          return signedIn() && request.auth.uid == uid;
         }
-        allow get, list: if counterAccess();
-        allow create: if counterAccess()
-          && operationId.matches("^(ledger|edit):[0-9a-f-]{36}$")
+
+        function validCounterHeartbeat(data) {
+          return data.diff(resource.data).affectedKeys().hasOnly([
+              "lastSeen", "version", "camera", "ai", "profile", "pending", "alert", "mode"
+            ])
+            && data.lastSeen == request.time && data.version is string && data.version.matches("^[0-9]{1,6}$")
+            && data.camera is bool && data.ai is bool && counterMode(data.mode)
+            && data.profile in ["baseline", "detail", "lighting", "unknown"]
+            && data.pending is int && data.pending >= 0 && data.pending <= 1000000
+            && data.alert in ["none", "paused", "setup", "recalibrate", "camera", "storage", "network"];
+        }
+
+        function validCounterDeviceDecision(data) {
+          return data.diff(resource.data).affectedKeys().hasOnly(["name", "role", "status", "updatedAt", "updatedByUid"])
+            && validCounterDeviceName(data.name) && data.role in ["in", "out"]
+            && data.status in ["pending", "approved", "rejected", "revoked"]
+            && (data.role == resource.data.role || resource.data.status != "approved"
+              || (resource.data.get("lastSeen", timestamp.date(1970, 1, 1)) > request.time - duration.value(3, "m")
+                && resource.data.get("pending", -1) == 0 && resource.data.get("camera", true) == false))
+            && data.updatedAt == request.time && data.updatedByUid == request.auth.uid;
+        }
+
+        allow get: if ownCounterDevice() || counterOperator();
+        allow list: if counterOperator();
+        allow create: if ownCounterDevice() && exists(/databases/$(database)/documents/events/$(eventId))
+          && request.resource.data.keys().hasAll(["name", "device", "role", "status", "requestedAt"])
+          && request.resource.data.keys().hasOnly(["name", "device", "role", "status", "requestedAt"])
+          && validCounterDeviceName(request.resource.data.name) && validCounterDeviceId(request.resource.data.device)
+          && request.resource.data.role in ["in", "out"] && request.resource.data.status == "pending"
+          && request.resource.data.requestedAt == request.time;
+        allow update: if (ownCounterDevice() && resource.data.status == "approved" && validCounterHeartbeat(request.resource.data))
+          || (counterAdministrator() && validCounterDeviceDecision(request.resource.data));
+      }
+
+      match /counterConfig/{mode} {
+        allow get: if counterMode(mode) && (approvedCounterDevice(eventId) || counterOperator());
+        allow create: if counterMode(mode) && exists(/databases/$(database)/documents/events/$(eventId))
+          && counterAdministrator() && validCounterConfig(request.resource.data);
+        allow update: if counterMode(mode) && validCounterConfig(request.resource.data)
+          && (counterAdministrator() || (counterOperator() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["paused", "updatedAt", "updatedByUid"])));
+      }
+
+      match /counterRuns/{mode}/operations/{operationId} {
+        function validOperation(data) {
+          return data is map
+            && data.keys().hasAll(["id", "kind", "eventId", "mode", "device", "rawAt", "station"])
+            && data.id == operationId && counterOperationId(data.id) && data.eventId == eventId && data.mode == mode
+            && data.device is string && data.device.size() > 0 && data.device.size() <= 160
+            && data.station in ["in", "out"] && counterTime(data.rawAt)
+            && (!data.keys().hasAny(["createdAt"]) || counterTime(data.createdAt));
+        }
+
+        function autoCounterOperation(data) {
+          return approvedCounterDevice(eventId)
+            && data.kind == "passage" && validCounterPassage(data) && data.source == "auto" && data.person == "visitor"
+            && data.device == get(counterDevicePath(eventId)).data.device
+            && data.station == get(counterDevicePath(eventId)).data.role && data.direction == data.station
+            && (!data.keys().hasAny(["actorUid"]) || data.actorUid == request.auth.uid);
+        }
+
+        function manualCounterOperation(data) {
+          return counterOperator() && data.actorUid == request.auth.uid
+            && (data.device == managementTerminalId() || data.device == request.auth.uid)
+            && ((data.kind == "passage" && validCounterPassage(data) && data.source == "manual")
+              || (data.kind == "revision" && validCounterRevision(data)));
+        }
+
+        allow get, list: if counterMode(mode) && (approvedCounterDevice(eventId) || counterOperator());
+        allow create: if counterMode(mode) && exists(/databases/$(database)/documents/events/$(eventId))
           && request.resource.data.keys().hasOnly(["payload", "receivedAt"])
-          && request.resource.data.payload is string
-          && request.resource.data.payload.size() <= 8192
-          && request.resource.data.receivedAt == request.time;
+          && request.resource.data.receivedAt == request.time
+          && validOperation(request.resource.data.payload)
+          && (autoCounterOperation(request.resource.data.payload) || manualCounterOperation(request.resource.data.payload));
       }
 
       match /analysis/{analysisId} {

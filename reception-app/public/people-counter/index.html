@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=12">
+  <link rel="stylesheet" href="./style.css?v=13">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 12</div>
+      <div class="trial-tag">PROTOTYPE 13</div>
     </header>
     <main>
       <div class="intro">
@@ -155,7 +155,7 @@
             <button type="button" id="resetButton" class="button outline full" disabled>新しい試験を開始（0人に戻す）</button>
           </div>
           <div class="notice">
-            <strong>試験用・本番集計には未接続</strong>
+            <strong>端末内保存と同期</strong>
             <p>通過記録はこのiPadに保存します。運用設定を行うと、承認済み端末間で通過時刻などの記録をFirebase経由で同期します。カメラ映像は端末内で解析し、録画・保存・外部送信や顔認証は行いません。アプリを閉じても記録は残りますが、Safariのデータ削除で消える可能性があります。</p>
           </div>
         </aside>
@@ -174,6 +174,14 @@
           <label><input id="ledgerVerified" type="checkbox"> 開閉場時は0人で、入口・出口とも同期完了・記録確認済み</label>
           <button class="button primary">運用設定を保存</button>
         </form>
+        <fieldset class="area-controls">
+          <legend>人数カウント端末の登録</legend>
+          <label>端末名 <input id="counterStationName" maxlength="40" placeholder="例：展示室 入口"></label>
+          <button id="counterStationApply" class="button secondary" type="button" disabled>端末登録を申請</button>
+          <p id="counterStationState" class="hint" role="status"></p>
+          <p id="counterRemoteControl" class="hint" role="status"></p>
+          <a href="../counter-management/">人数カウント管理画面</a>
+        </fieldset>
         <p id="ledgerState" role="status"></p>
         <button id="syncLedger" class="button secondary">今すぐ同期</button>
         <p id="clockState" class="hint"></p>
@@ -245,8 +253,8 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./ledger-ui.mjs?v=12"></script>
-  <script type="module" src="./adaptive-ui.mjs?v=12"></script>
-  <script type="module" src="./app.js?v=12"></script>
+  <script type="module" src="./ledger-ui.mjs?v=13"></script>
+  <script type="module" src="./adaptive-ui.mjs?v=13"></script>
+  <script type="module" src="./app.js?v=13"></script>
 </body>
 </html>

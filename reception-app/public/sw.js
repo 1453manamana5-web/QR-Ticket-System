@@ -1,4 +1,4 @@
-const CACHE_PREFIX = "qr-ticket-reception-shell-v12";
+const CACHE_PREFIX = "qr-ticket-reception-shell-v13";
 const BASE_PATH = new URL("./", self.location.href).pathname;
 const SHELL_CACHE = CACHE_PREFIX;
 
@@ -45,7 +45,7 @@ self.addEventListener("fetch", event => {
   if (url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return;
   // The reception worker also controls the sibling management app. Its HTML
   // must never replace reception's offline entry point.
-  if (["management-app/", "control/"].some(path => url.pathname.startsWith(BASE_PATH + path))) return;
+  if (["management-app/", "control/", "counter-management/"].some(path => url.pathname.startsWith(BASE_PATH + path))) return;
 
   if (request.mode === "navigate") {
     if (url.pathname !== BASE_PATH && url.pathname !== BASE_PATH + "index.html") return;
