@@ -1,13 +1,14 @@
-import { LineTracker } from "./tracker.mjs?v=11";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=11";
+import { LineTracker } from "./tracker.mjs?v=12";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=12";
 
-import { verifyBodies } from "./body-check.mjs?v=11";
-import { createVisionPipeline } from "./vision.mjs?v=11";
+import { verifyBodies } from "./body-check.mjs?v=12";
+import { createVisionPipeline } from "./vision.mjs?v=12";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=11";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=11";
+import { openRecordStore, totalOf } from "./records.mjs?v=12";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=12";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
+const adaptive = window.counterAdaptive;
 const $ = id => document.getElementById(id);
 const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
 const startButton = $("startButton"), stopButton = $("stopButton");
@@ -43,6 +44,8 @@ let lastVideoTime = -1;
 let recentTimes = [];
 let eventQueue = Promise.resolve();
 let settings = { ...defaults };
+let diagnosticFrame, diagnosticCtx;
+let recoveryTimer, recoveryUsed = false;
 
 function uuid() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -87,6 +90,7 @@ async function refreshRecords() {
 }
 function storageFailure(error) {
   stopCamera(); status("保存エラー", "bad");
+  adaptive?.observeFault("保存エラー。計測を停止しました。");
   message("記録を保存・確認できないため計測を停止しました: " + (error?.message || String(error)), true);
 }
 function renderRecords() {
@@ -119,6 +123,7 @@ function renderRecords() {
   }
 }
 function record(delta, type) {
+  if (adaptive?.isolated()) return Promise.resolve();
   const capturedSession = session || null;
   const owner = activeLeaseOwner;
   const at = Date.now();
@@ -146,19 +151,21 @@ let trialResults = [];
 let testDirections = null;
 
 function renderTrials(showResults = false) {
-  $("trialStart").disabled = !running || !!trial;
+  $("trialStart").disabled = !running || !!trial || !!adaptive?.isolated();
   $("trialEnd").disabled = !trial || trial.ended;
   $("trialSave").disabled = !trial?.ended;
   $("trialDiscard").disabled = !trial;
   $("trialAngle").disabled = !!trial;
   $("trialNote").disabled = !!trial;
-  $("reverseDirection").disabled = !!trial;
-  $("overlayTarget").disabled = !!trial;
-  for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) $(id).disabled = !!trial;
+  const lock = !!trial || !!adaptive?.isolated();
+  $("reverseDirection").disabled = lock;
+  $("overlayTarget").disabled = lock;
+  for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine", ...areaEdges]) $(id).disabled = lock;
   $("trialStatus").textContent = trial
     ? trialAngles[trial.angle] + " · 自動 " + trial.count + "人" + (trial.ended ? " · 実人数を入力してください" : " · 検証中")
     : "カメラを開始し、設置角度を選んで検証を始めてください。";
   renderDirectionTest();
+  adaptive?.render();
   if (!showResults) return;
   $("trialResults").replaceChildren();
   for (const result of trialResults) {
@@ -215,6 +222,19 @@ function renderDirectionTest() {
     : "";
 }
 function resetTracking() { trackingEpoch++; tracker.reset(); }
+function suggestCalibrationLines() {
+  const [low, high] = tracker.axis === "x" ? [settings.left, settings.right] : [settings.top, settings.bottom];
+  const [start, end] = tracker.direction === 1 ? [low, high] : [100 - high, 100 - low];
+  const first = Math.max(20,Math.min(48,Math.round(start + (end - start) * .33)));
+  const second = Math.max(52,Math.min(80,Math.round(start + (end - start) * .67)));
+  return start < first && end > second && second - first >= 10 ? {first,second} : null;
+}
+function syncAdaptiveScope() {
+  if (!adaptive) return;
+  const {movement,first,second,left,right,top,bottom,profile,bodyMode} = settings;
+  const role = window.counterLedger?.role?.() ?? null;
+  adaptive.setup(JSON.stringify([12,role,movement,first,second,left,right,top,bottom,profile,bodyMode]));
+}
 function configureTracker() {
   trackingEpoch++;
   const [axis, sign] = settings.movement.split("");
@@ -247,8 +267,10 @@ function configureTracker() {
     ? "白枠の内側で人物を追跡します。"
     : "白枠にA・Bの両ラインと、その前後を含めてください。";
   renderDirections();
+  syncAdaptiveScope();
 }
 const tracker = new LineTracker(({trackId}) => {
+  if (adaptive?.isolated()) return adaptive.count();
   $("lastPassage").textContent = "ID " + trackId + " · A→Bを通過し、人物確認の条件を満たしました。";
   if (!trial) return record(1, "auto");
   if (!trial.ended) {
@@ -331,9 +353,12 @@ function discardDetector(model = detector, pending = inferencePending) {
   else close();
 }
 function stopCamera() {
+  clearTimeout(recoveryTimer);
   endTrial(true);
   startAttempt++;
   running = false;
+  adaptive?.stopped();
+  diagnosticFrame = diagnosticCtx = null;
   renderTrials();
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
@@ -356,15 +381,75 @@ function stopCamera() {
   resetTracking();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
-function cameraFailure(text, discard = false) {
+function scheduleRecovery() {
+  recoveryUsed = true;
+  const attempt = startAttempt;
+  stopButton.disabled = false;
+  recoveryTimer = setTimeout(() => {
+    if (startAttempt !== attempt) return;
+    if (document.hidden || !adaptive?.mayRecover()) stopButton.disabled = true;
+    else void startCamera({automaticRetry:true});
+  },1000);
+}
+function cameraFailure(text, discard = false, retry = true) {
+  const recover = retry && !recoveryUsed && !document.hidden && tracker.tracks.length === 0 && adaptive?.mayRecover();
   if (discard) discardDetector();
   stopCamera(); status("計測停止", "bad"); message(text, true);
+  adaptive?.observeFault(text);
+  if (recover) scheduleRecovery();
 }
 function checkCameraHealth() {
   if (!running || !health) return;
   const ended = stream?.getTracks().some(track => track.readyState === "ended");
   const reason = health.check(performance.now(), { videoTime: video.currentTime, ended, inferenceStarted });
   if (reason) cameraFailure(reason, inferenceStarted !== null);
+}
+function readDiagnostics(now) {
+  if (!adaptive?.due(now)) return null;
+  try {
+    if (!diagnosticFrame) {
+      diagnosticFrame = document.createElement("canvas");
+      diagnosticFrame.width = 48;
+      diagnosticFrame.height = 32;
+      diagnosticCtx = diagnosticFrame.getContext("2d", {willReadFrequently: true});
+    }
+    diagnosticCtx.drawImage(video, 0, 0, 48, 32);
+    return diagnosticCtx.getImageData(0, 0, 48, 32);
+  } catch {
+    adaptive.diagnosticsUnavailable();
+    return null;
+  }
+}
+function frameStats(result, candidates, accepted, tracks, visibleTracks) {
+  const heights = candidates.map(person => person.h).sort((a,b) => a-b);
+  const clipped = candidates.filter(({box}) => box.originX === 0 || box.originY === 0 ||
+    box.originX + box.width >= analysisFrame.width || box.originY + box.height >= analysisFrame.height).length;
+  const overlaps = candidates.reduce((total, {box:a}, i) => total + candidates.slice(i + 1).filter(({box:b}) =>
+    Math.min(a.originX + a.width,b.originX + b.width) > Math.max(a.originX,b.originX) &&
+    Math.min(a.originY + a.height,b.originY + b.height) > Math.max(a.originY,b.originY)).length,0);
+  return {candidates:result.objects.detections?.length ?? 0, verified:accepted.length, trackCount:tracks.length,
+    trackLost:tracks.length-visibleTracks.length, overlaps, clipped, medianHeight:heights[Math.floor(heights.length / 2)],
+    meanConfidence:candidates.length ? candidates.reduce((sum,p) => sum+p.score,0)/candidates.length : null,
+    directionUncertain:tracks.filter(t => t.pending && !t.counted).length,
+    total:counter, bodyRan:result.parts != null, fps:recentTimes.length / 2, sampleMs:PROFILES[settings.profile].sampleMs};
+}
+function drawAnalysis() {
+  const mode = adaptive?.engine();
+  if (mode) {
+    const width = Math.min(mode.width,video.videoWidth);
+    if (analysisFrame.width !== width) {
+      analysisFrame.width = width;
+      analysisFrame.height = Math.max(1,Math.round(video.videoHeight * width/video.videoWidth));
+    }
+  }
+  analysisCtx.drawImage(video, 0, 0, analysisFrame.width, analysisFrame.height);
+  if (mode?.lighting) {
+    analysisCtx.save();
+    analysisCtx.globalCompositeOperation = "screen";
+    analysisCtx.fillStyle = "rgb(20,20,20)";
+    if (analysisCtx.globalCompositeOperation === "screen") analysisCtx.fillRect(0,0,analysisFrame.width,analysisFrame.height);
+    analysisCtx.restore();
+  }
 }
 async function tick(now) {
   if (!running) return;
@@ -380,7 +465,8 @@ async function tick(now) {
   let modelWork = null;
   try {
     inferenceStarted = started;
-    analysisCtx.drawImage(video, 0, 0, analysisFrame.width, analysisFrame.height);
+    const pixels = readDiagnostics(now);
+    drawAnalysis();
     const work = modelWork = Promise.resolve(model.detectForVideo(analysisFrame, now));
     inferencePending = work;
     let result;
@@ -426,13 +512,14 @@ async function tick(now) {
       : "肩〜腰の胴体が映る人物を探しています";
     recentTimes.push(now);
     recentTimes = recentTimes.filter(t => now - t < 2000);
+    if (adaptive) adaptive.frame({now,inferenceMs,pixels,reverseSeen:adaptive.isolated() && visibleTracks.some(t => t.reverseSeen),
+      stats:() => frameStats(result,candidates,accepted,tracks,visibleTracks)});
     $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " FPS · 推論 " + Math.round(inferenceMs) + " ms";
   } catch (error) {
     if (!running || attempt !== startAttempt) return;
     discardDetector(model, modelWork);
-    stopCamera();
+    cameraFailure("映像解析が停止しました: " + error.message, false);
     status("計測エラー", "bad");
-    message("映像解析が停止しました: " + error.message, true);
   } finally {
     if (inferenceStarted === started) inferenceStarted = null;
     if (running && attempt === startAttempt) raf = requestAnimationFrame(tick);
@@ -448,9 +535,11 @@ async function loadDetector() {
     else { try { loaded.close(); } catch {} }
   } finally { if (detectorLoading === pending) detectorLoading = null; }
 }
-async function startCamera() {
+async function startCamera({automaticRetry = false} = {}) {
   if (running || startButton.disabled) return;
   if (!await initialize()) return;
+  clearTimeout(recoveryTimer);
+  if (!automaticRetry) recoveryUsed = false;
   const attempt = ++startAttempt, owner = uuid(), capturedSession = session;
   startButton.disabled = true;
   status("カメラを準備中", "loading"); message("iPadのカメラを確認しています…");
@@ -470,7 +559,7 @@ async function startCamera() {
     activeLeaseOwner = owner;
     leaseTimer = setInterval(() => {
       void recordStore.renewLease(owner, capturedSession).then(ok => {
-        if (!ok && activeLeaseOwner === owner) cameraFailure("別の画面で試験または計測が切り替わったため停止しました。");
+        if (!ok && activeLeaseOwner === owner) cameraFailure("別の画面で試験または計測が切り替わったため停止しました。", false, false);
       }).catch(error => { if (activeLeaseOwner === owner) storageFailure(error); });
     }, 3000);
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("HTTPS接続のSafariから開いてください。");
@@ -494,6 +583,7 @@ async function startCamera() {
     status("AIモデル読込中", "loading");
     await withDeadline(loadDetector(), 45000, "モデル読込が応答しません。ネット接続を確認して画面を再読み込みしてください。");
     if (attempt !== startAttempt) return;
+    adaptive?.observeFault(automaticRetry ? "カメラと認識処理を再開しました。停止中の通過を確認してください。" : "");
     resetTracking(); running = true;
     renderTrials(); lastSample = 0; lastVideoTime = -1; recentTimes = [];
     health = new CameraHealth(performance.now(), video.currentTime);
@@ -509,7 +599,7 @@ async function startCamera() {
   }
 }
 function updateSettings(event) {
-  if (trial) return;
+  if (trial || adaptive?.isolated()) return;
   let first = Number($("firstLine").value), second = Number($("secondLine").value);
   if (second - first < 10) {
     if (event?.target?.id === "secondLine") second = first + 10;
@@ -623,7 +713,7 @@ for (const id of ["viewMode", "bodyMode", "movement", "firstLine", "secondLine",
   $(id).addEventListener("input", updateSettings);
 }
 $("reverseDirection").addEventListener("click", () => {
-  if (trial) return;
+  if (trial || adaptive?.isolated()) return;
   const [axis, sign] = settings.movement;
   $("movement").value = axis + (sign === "+" ? "-" : "+");
   // Keep both thresholds at the same points in the camera image.
@@ -631,10 +721,10 @@ $("reverseDirection").addEventListener("click", () => {
   $("secondLine").value = String(100 - settings.first);
   updateSettings();
 });
-window.addEventListener("counter-role-changed", renderDirections);
+window.addEventListener("counter-role-changed", () => {renderDirections(); syncAdaptiveScope();});
 $("cameraFrame").addEventListener("click", event => {
   const target = $("overlayTarget").value;
-  if (!running || trial || !["firstLine", "secondLine", ...areaEdges].includes(target)) return;
+  if (!running || trial || adaptive?.isolated() || !["firstLine", "secondLine", ...areaEdges].includes(target)) return;
   const bounds = $("cameraFrame").getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
   const line = target === "firstLine" || target === "secondLine";
@@ -646,7 +736,7 @@ $("cameraFrame").addEventListener("click", event => {
   updateSettings({ target: input });
 });
 $("trialStart").addEventListener("click", () => {
-  if (!running || trial) return;
+  if (!running || trial || adaptive?.isolated()) return;
   const angle = $("trialAngle").value;
   if (!Object.hasOwn(trialAngles, angle)) return;
   const a = Math.round(tracker.lineAt(tracker.first) * 100), b = Math.round(tracker.lineAt(tracker.second) * 100);
@@ -707,4 +797,17 @@ try {
     channel.onmessage = () => void refreshRecords();
   }
 } catch {}
+adaptive?.attach({
+  status: () => ({running,trial:!!trial,geometry:areaContainsLines(),role:!!window.counterLedger?.role?.(),
+    thresholds: "物体スコア " + PROFILES[settings.profile].threshold + " ／ 追跡必要フレーム " + tracker.minHits +
+      " ／ 追跡平均スコア " + tracker.minMeanScore + " ／ 推論間隔の下限 " + PROFILES[settings.profile].sampleMs + "ms" +
+      " ／ 確認部位 " + (settings.bodyMode === "legs" ? "胴体・脚" : "胴体") + " ／ " + $("directionGuide").textContent}),
+  suggest: suggestCalibrationLines,
+  applyLines: ({first,second}) => {
+    $("firstLine").value = String(first);
+    $("secondLine").value = String(second);
+    updateSettings();
+  },
+  reset: resetTracking, controls: renderTrials,
+});
 void initialize();

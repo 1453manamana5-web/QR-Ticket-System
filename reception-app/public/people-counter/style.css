@@ -69,3 +69,6 @@ footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
 #ledgerSetup label,#ledgerEdit label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #ledgerSetup input:not([type=checkbox]),#ledgerEdit input:not([type=checkbox]){max-width:100%;padding:8px;font:inherit}
 #ledgerSummary,#editHistory{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+
+#adaptiveMetrics,#adaptiveWarnings,#adaptiveResult,#adaptiveHistory{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+#adaptiveTitle{scroll-margin-top:12px}

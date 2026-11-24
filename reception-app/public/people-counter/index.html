@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=11">
+  <link rel="stylesheet" href="./style.css?v=12">
 </head>
 <body>
   <div class="shell">
@@ -15,7 +15,7 @@
         <div class="brand-title">自動人数計測</div>
         <div class="brand-subtitle">交通研究部 · 2027年文化祭向け試作</div>
       </div></div>
-      <div class="trial-tag">PROTOTYPE 11</div>
+      <div class="trial-tag">PROTOTYPE 12</div>
     </header>
     <main>
       <div class="intro">
@@ -43,13 +43,16 @@
             <div class="camera-actions">
               <button type="button" id="startButton" class="button primary" disabled>計測を開始</button>
               <button type="button" id="stopButton" class="button secondary" disabled>計測を停止</button>
-              <span id="tracking" class="tracking" role="status">検出待ち</span>
-              <span id="fps" class="fps">検出速度 —</span>
             </div>
             <p class="hint">黄色：選択した確認範囲を満たした人物 ／ 灰色：候補（人数に含めません）</p>
+            <details id="trackingDetails"><summary>映像上の追跡診断</summary>
+            <span id="tracking" class="tracking" role="status">検出待ち</span>
+            <span id="fps" class="fps">検出速度 —</span>
             <label><input id="showTracking" type="checkbox"> 検証用の追跡ID・軌跡と判定理由を表示</label>
             <div id="diagnostics" class="hint diagnostics"></div>
             <p id="lastPassage" class="hint"></p>
+            </details>
+            <p class="hint"><a href="#adaptiveTitle">AI診断と設置アシスタント</a></p>
             <p id="message" class="message" role="alert">初回はAIモデルの読込にインターネット接続が必要です。Safariでカメラの使用を許可してください。</p>
           </div>
 
@@ -195,10 +198,55 @@
         </select></label>
         <button id="exportLedger" class="button secondary">CSVを出力</button>
       </section>
+      <section class="card config-card" aria-labelledby="adaptiveTitle">
+        <h2 id="adaptiveTitle">AI診断と設置アシスタント</h2>
+        <p id="adaptiveCamera" role="status"></p>
+        <p id="adaptiveState" class="hint"></p>
+        <p class="hint">EfficientDet-Lite0で人物枠を検出し、候補があるフレームだけBodyPixで胴体・脚の領域を照合します。</p>
+        <details>
+          <summary>映像品質・認識・異常の詳細</summary>
+          <p id="adaptiveThresholds" class="hint"></p>
+          <pre id="adaptiveMetrics" class="diagnostics"></pre>
+          <pre id="adaptiveWarnings" class="diagnostics"></pre>
+          <p id="adaptiveFault" role="status"></p>
+          <p id="adaptiveSync"></p>
+        </details>
+        <h3>通過試験による設定比較</h3>
+        <div class="camera-actions">
+          <button id="adaptiveLineSuggest" class="button secondary" type="button">白枠からライン位置を提案</button>
+          <button id="adaptiveLineApply" class="button secondary" type="button" disabled>ライン案を反映</button>
+        </div>
+        <p id="adaptiveLineText" class="hint"></p>
+        <p class="hint">各回は同じ設置位置で、白枠の外から歩いてください。比較用試験の後、別の通過で再検証します。試験中の人数は本番記録に入りません。</p>
+        <div class="camera-actions">
+          <button id="adaptiveStart" class="button primary" type="button">設置試験を始める</button>
+          <button id="adaptiveCancel" class="button secondary" type="button" disabled>始める前の設定に戻る</button>
+        </div>
+        <p id="adaptiveInstructions" role="status"></p>
+        <label>横並びで正方向に通る人数 <input id="adaptiveActual" type="number" min="2" max="10" step="1" value="2" disabled></label>
+        <div class="camera-actions">
+          <button id="adaptiveBegin" class="button secondary" type="button" disabled>今回の試験を開始</button>
+          <button id="adaptiveFinish" class="button secondary" type="button" disabled>今回の試験を終了</button>
+          <button id="adaptiveAccept" class="button primary" type="button" disabled>検証した設定を保存</button>
+        </div>
+        <p id="adaptiveNotice" role="status"></p>
+        <pre id="adaptiveResult" class="diagnostics"></pre>
+        <details>
+          <summary>設定の固定・復元と変更履歴</summary>
+          <label><input id="adaptiveAuto" type="checkbox"> 検証済みの範囲で自動調整する</label>
+          <label><input id="adaptivePin" type="checkbox"> 現在の設定に固定する</label>
+          <div class="camera-actions">
+            <button id="adaptiveRollback" class="button secondary" type="button" disabled>一つ前の設定に戻す</button>
+            <button id="adaptiveRestore" class="button secondary" type="button" disabled>最後に検証した設定に戻す</button>
+          </div>
+          <pre id="adaptiveHistory" class="diagnostics"></pre>
+        </details>
+      </section>
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./ledger-ui.mjs?v=11"></script>
-  <script type="module" src="./app.js?v=11"></script>
+  <script type="module" src="./ledger-ui.mjs?v=12"></script>
+  <script type="module" src="./adaptive-ui.mjs?v=12"></script>
+  <script type="module" src="./app.js?v=12"></script>
 </body>
 </html>

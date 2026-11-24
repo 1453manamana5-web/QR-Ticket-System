@@ -12,7 +12,7 @@ import {CameraHealth,MAX_INFERENCE_MS,withDeadline} from './reception-app/public
 import {analyze,csv,uploadPending} from './reception-app/public/people-counter/ledger.mjs';
 const source=readFileSync(new URL('./reception-app/public/people-counter/app.js',import.meta.url),'utf8')
  .replace(/^import .*;\n/gm,'').replace('void initialize();','');
-function harness({factory=new IDBFactory(), denyLocal=false, savedOptions=null, pipelineFactory, ledger, online=true}={}) {
+function harness({factory=new IDBFactory(), denyLocal=false, savedOptions=null, pipelineFactory, ledger, adaptive, online=true}={}) {
  const nodes=new Map(), listeners=new Map(), tracks=[], raf=new Map(), timers=new Map(), clock={now:0};
  let modelLoads=0,mediaStarts=0,next=0;
  const ctx=Object.fromEntries(['clearRect','drawImage','setLineDash','beginPath','moveTo','lineTo','stroke','fillText','strokeRect','fillRect','arc','fill'].map(k=>[k,()=>{}]));
@@ -25,7 +25,7 @@ function harness({factory=new IDBFactory(), denyLocal=false, savedOptions=null, 
  const document={hidden:false,getElementById:element,createElement:name=>element(name+'-'+ ++next),addEventListener(name,fn){listeners.set(name,fn)},body:element('body')};
  const map=new Map();if(savedOptions)map.set('koken-counter-options-v1',JSON.stringify(savedOptions));
  const localStorage={getItem:k=>map.get(k)||null,setItem(k,v){if(denyLocal)throw Error('quota');map.set(k,String(v))}};
- const context=vm.createContext({document,window:{indexedDB:factory,counterLedger:ledger,addEventListener(name,fn){listeners.set(name,fn)}},indexedDB:factory,localStorage,
+ const context=vm.createContext({document,window:{indexedDB:factory,counterLedger:ledger,counterAdaptive:adaptive,addEventListener(name,fn){listeners.set(name,fn)}},indexedDB:factory,localStorage,
   navigator:{onLine:online,mediaDevices:{async getUserMedia(){mediaStarts++;const callbacks=new Map();const track={readyState:'live',stop(){this.readyState='ended'},
    addEventListener(name,fn){callbacks.set(name,fn)},end(){this.readyState='ended';callbacks.get('ended')?.()}};tracks.push(track);return{getTracks:()=>[track]}}}},
   crypto:webcrypto,console,Blob,URL,setTimeout,clearTimeout,performance:{now:()=>clock.now},
@@ -311,5 +311,46 @@ test('direction test confirms both paths transiently and reversing keeps the phy
   a.element('trialSave').onclick();
   assert.equal(a.api.state().counter,0);
   assert.equal((await a.api.ledger()).length,0);
+  await a.close();
+});
+
+test('calibration isolation covers complete camera passages and manual count even between episodes', async () => {
+  let index = 0, accepted = 0, captureCalls = 0, diagnosticsFailed = 0, controls;
+  let testing = true;
+  const adaptive = {
+    attach(api) { controls = api; },
+    setup() {}, render() {}, stopped() {}, observeFault() {}, mayRecover() { return false; },
+    isolated() { return testing; }, count() { accepted++; },
+    engine() { return {width:640,lighting:false}; },
+    due() { return diagnosticsFailed === 0; },
+    diagnosticsUnavailable() { diagnosticsFailed++; },
+    frame({stats}) { assert.equal(typeof stats().fps,'number'); },
+  };
+  const ledger = {role:() => 'in',attach() {},capture() { captureCalls++; }};
+  const a = harness({adaptive,ledger,pipelineFactory:async () => ({
+    detectForVideo() { return directionFrame([[forward[index++ % forward.length],.35]]); },
+    close() {},
+  })});
+  await a.api.initialize();
+  await a.api.startCamera();
+  for (let n = 0; n < forward.length; n++) {
+    a.element('video').currentTime = n + 2;
+    await a.api.tick(100 + n * 120);
+  }
+  await a.api.record(1,'manual');
+  assert.equal(accepted,1);
+  assert.equal(captureCalls,0);
+  assert.equal(diagnosticsFailed,1);
+  assert.equal(a.api.state().counter,0);
+  assert.equal((await a.api.ledger()).length,0);
+  testing = false;
+  controls.reset();
+  for (let n = forward.length; n < 2 * forward.length; n++) {
+    a.element('video').currentTime = n + 2;
+    await a.api.tick(100 + n * 120);
+  }
+  await a.api.flush();
+  assert.equal(captureCalls,1);
+  assert.equal(a.api.state().counter,1);
   await a.close();
 });
