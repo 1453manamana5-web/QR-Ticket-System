@@ -31,3 +31,6 @@ Serve this directory using an approved HTTPS static hosting environment. Safari 
 
 ## Next
 After initial device testing, add repeatable benchmark inputs, reviewed same-origin engine packaging, error/ground-truth measurement, and a swappable engine interface. Do not connect this experimental code to the event counter until isolation and performance are verified.
+
+## 0.2.1-dev camera/SLAM separation
+Camera permission and preview start before the recognition engine. A camera-only mode is available, and worker load, initialization or processing failure leaves the preview active with an explicit error. The document CSP does not permit unsafe-eval; SLAM runs in a separate module Worker. Worker scripts have their own CSP context (GitHub Pages does not offer per-file custom CSP headers); this is not a complete security boundary. Review third-party source and network behavior before approved empty-room tests. No image export or upload is implemented by the wrapper. Stop/visibility/permission handling terminates the worker and releases camera tracks. Actual Safari compatibility and CSP error resolution remain to be verified on device.
