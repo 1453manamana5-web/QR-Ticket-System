@@ -17,7 +17,21 @@ self.onmessage=async ({data:m})=>{
    const start=performance.now();
    const pose=engine.findCameraPose({data:m.data,width,height});
    const points=engine.getFramePoints()||[];
-   self.postMessage({type:'result',pose:pose?Array.from(pose):null,points,processingMs:performance.now()-start+(Number.isFinite(m.copyMs)?m.copyMs:0)});
+   const poseArray=pose?Array.from(pose):null;
+   const processingMs=performance.now()-start+(Number.isFinite(m.copyMs)?m.copyMs:0);
+   let plane=null,planeError=null,planeMs=null;
+   if(m.detectPlane){
+    const ps=performance.now();
+    try{
+     if(!poseArray||!poseArray.every(Number.isFinite))throw Error('姿勢が未取得です');
+     if(typeof engine.findPlane!=='function')throw Error('平面推定API非対応');
+     const result=engine.findPlane(100);
+     if(result&&result.length===16&&Array.from(result).every(Number.isFinite))plane=Array.from(result);
+     else planeError='平面候補を取得できませんでした';
+    }catch(e){planeError=e?.message||String(e)}
+    planeMs=performance.now()-ps;
+   }
+   self.postMessage({type:'result',pose:poseArray,points,processingMs,planeRequested:!!m.detectPlane,plane,planeError,planeMs});
   }
  }catch(e){self.postMessage({type:'error',message:e?.message||String(e)});}
 };
