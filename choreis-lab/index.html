@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'none'">
-<title>Choreis Lab 0.2.2-dev</title>
+<title>Choreis Lab 0.2.3-dev</title>
 <style>
 :root{font-family:system-ui,-apple-system,sans-serif;color:#25282d;background:#f3f4f5;color-scheme:light}*{box-sizing:border-box}body{margin:0}header{background:#25282d;color:white;padding:17px 24px;display:flex;align-items:center;gap:12px}header svg{width:36px;height:36px}header strong{font-size:20px;letter-spacing:.4px}header small{margin-left:auto;color:#c5c9ce}main{max-width:1100px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:15px;margin:0 0 12px}p{font-size:14px;line-height:1.65;color:#555c65}section{background:white;border:1px solid #dfe2e5;border-radius:12px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:12px}.grid section{margin:0}canvas{width:100%;height:auto;display:block;background:#e9ebed;border-radius:8px}video{display:none}.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center}button,select{font:inherit;border:1px solid #c8ccd1;border-radius:8px;padding:10px 14px;background:#fff;color:#25282d}button.primary{background:#25282d;color:white;border-color:#25282d}button:disabled,select:disabled{opacity:.45}label{font-size:13px}input{accent-color:#25282d}#status{font-weight:600;font-size:14px;overflow-wrap:anywhere}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.stat{border:1px solid #e3e5e8;border-radius:8px;padding:12px}.stat small{display:block;color:#616971;font-size:12px}.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;margin-top:5px}.muted{font-size:12px;color:#666e75}.mono{font:12px ui-monospace,monospace;overflow-wrap:anywhere}a{color:#374c68}footer{padding:8px 0 20px}@media(max-width:650px){main{padding:14px}.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}header{padding:12px 14px}}
 </style>
 </head>
 <body>
-<header><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-linejoin="round"><path d="M4 12 14 9 14 30 4 34Z" stroke-width="1"/><path d="M12 9 25 5 25 28 12 35Z" stroke-width="1.8"/><path d="M22 10V3L36 9V28L22 36V32" stroke-width="3"/></svg><strong>Choreis Lab</strong><small>0.2.2-dev · Tracking</small></header>
+<header><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-linejoin="round"><path d="M4 12 14 9 14 30 4 34Z" stroke-width="1"/><path d="M12 9 25 5 25 28 12 35Z" stroke-width="1.8"/><path d="M22 10V3L36 9V28L22 36V32" stroke-width="3"/></svg><strong>Choreis Lab</strong><small>0.2.3-dev · Tracking</small></header>
 <main>
 <h1>空間認識テスト</h1><p>研究用の独立した試作。学校の許可を得た無人の場所でのみ使用してください。映像の保存・送信機能はありません。単眼SLAMの座標は実寸ではなく、再初期化により座標系が変わる場合があります。</p>
 <section>
@@ -24,7 +24,7 @@
 </section>
 <div class="grid">
 <section><h2>カメラ・特徴点</h2><video id="video" muted playsinline></video><canvas id="preview" width="480" height="360"></canvas><p id="overlayCount" class="mono">映像上の表示：—</p><p class="muted">緑の点は実際の追跡点です。処理した映像フレームと同期して表示します。録画は行いません。</p></section>
-<section><h2>相対移動軌跡</h2><canvas id="trajectory" width="400" height="340"></canvas><p class="muted">X–Z投影。重力方向への補正なし。スケール未確定。追跡中断の前後は結合しません。</p><p id="pose" class="mono">座標：—</p></section>
+<section><h2>相対移動軌跡</h2><canvas id="trajectory" width="400" height="340"></canvas><div class="controls"><label><input id="rawPath" type="checkbox" checked> 生データ（灰色）</label><label><input id="smoothPath" type="checkbox" checked> 平滑表示（緑色）</label></div><p id="pathInfo" class="mono">表示範囲：—</p><p id="jitterInfo" class="mono">直近2秒の座標の広がり：—</p><p class="muted">X–Z投影・相対単位。表示は初期位置を固定し、範囲は必要時のみ拡大します。平滑表示は誤差の修正ではありません。静止時の広がりは揺れの目安です。重力方向・実寸は未補正。追跡中断の前後は結合しません。</p><p id="pose" class="mono">座標：—</p></section>
 </div>
 <section><h2>実測指標</h2><div class="stats"><div class="stat"><small>処理更新頻度</small><b id="hz">—</b></div><div class="stat"><small>処理時間 中央値</small><b id="ms">—</b></div><div class="stat"><small>特徴点数</small><b id="points">—</b></div><div class="stat"><small>姿勢取得率</small><b id="ratio">—</b></div></div><p class="muted">姿勢取得率は位置精度や信頼度そのものではありません。ログは数値のみ。最大10分・18,000フレーム。</p></section>
 <footer class="muted">研究候補：<a href="https://github.com/alanross/AlvaAR" target="_blank" rel="noopener noreferrer">AlvaAR（GPLv3・ソースコード）</a> · 位置精度・再認識・実寸・3D復元は未検証。</footer>
@@ -35,6 +35,14 @@ const v=$('video'),p=$('preview'),ctx=p.getContext('2d',{willReadFrequently:true
 
 const frameCanvas=document.createElement('canvas'),frameCtx=frameCanvas.getContext('2d',{willReadFrequently:true});
 let stream=null,worker=null,busy=false,engineReady=false,previewOnly=false,watchdog=0,running=false,starting=false,token=0,raf=0,lastVideo=-1,begin=0,lastUI=0,rows=[],paths=[],segment=[],attempts=0,valid=0,wasValid=false,source='',lastSettings={};
+let viewOrigin=null,viewHalfSpan=.05,smooth=[],lastSmoothTime=0,recentPos=[];
+function resetPathView(){viewOrigin=null;viewHalfSpan=.05;smooth=[];lastSmoothTime=0;recentPos=[];}
+function addPathPoint(xyz,now){
+ if(!viewOrigin){viewOrigin=xyz.slice();smooth=[xyz.slice()];lastSmoothTime=now;}
+ else{const a=1-Math.exp(-Math.max(1,now-lastSmoothTime)/220);const prev=smooth[smooth.length-1];smooth.push(prev.map((x,i)=>x+a*(xyz[i]-x)));lastSmoothTime=now;}
+ recentPos.push({xyz:xyz.slice(),now});while(recentPos.length&&recentPos[0].now<now-2000)recentPos.shift();
+ const extent=Math.max(Math.abs(xyz[0]-viewOrigin[0]),Math.abs(xyz[2]-viewOrigin[2]));while(extent>viewHalfSpan*.88&&Number.isFinite(viewHalfSpan))viewHalfSpan*=2;
+}
 const status=s=>{$('status').textContent=s};
 const ready=()=>window.isSecureContext&&!!navigator.mediaDevices?.getUserMedia;
 function buttons(){ $('start').disabled=!ready()||!$('consent').checked||starting||running;$('stop').disabled=!starting&&!running;$('resolution').disabled=starting||running;$('source').disabled=starting||running;$('save').disabled=running||starting||!rows.length; }
@@ -46,21 +54,22 @@ function stop(message='停止しました'){
  ctx.clearRect(0,0,p.width,p.height);ctx.fillStyle='#e9ebed';ctx.fillRect(0,0,p.width,p.height);frameCanvas.width=1;frameCanvas.height=1;
  $('overlayCount').textContent='映像上の表示：—';status(message);buttons();
 }
-function clear(){rows=[];paths=[];segment=[];attempts=valid=0;wasValid=false;lastVideo=-1;lastUI=0;for(const id of ['hz','ms','points','ratio'])$(id).textContent='—';$('pose').textContent='座標：—';drawPath();}
+function clear(){rows=[];paths=[];segment=[];attempts=valid=0;wasValid=false;lastVideo=-1;lastUI=0;resetPathView();for(const id of ['hz','ms','points','ratio'])$(id).textContent='—';$('pose').textContent='座標：—';drawPath();}
 function drawPath(){
  tc.fillStyle='#f0f1f2';tc.fillRect(0,0,t.width,t.height);tc.strokeStyle='#d7dade';tc.lineWidth=1;
- for(let x=20;x<t.width;x+=20){tc.beginPath();tc.moveTo(x,0);tc.lineTo(x,t.height);tc.stroke()}
- for(let y=20;y<t.height;y+=20){tc.beginPath();tc.moveTo(0,y);tc.lineTo(t.width,y);tc.stroke()}
- const all=paths.flat();if(!all.length)return;
- // Display only the most recent continuous tracking segment: origins may change.
- const data=paths[paths.length-1];if(!data.length)return;
- let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
- for(const a of data){minX=Math.min(minX,a[0]);maxX=Math.max(maxX,a[0]);minZ=Math.min(minZ,a[2]);maxZ=Math.max(maxZ,a[2]);}
- const scale=Math.min((t.width-48)/Math.max(.001,maxX-minX),(t.height-48)/Math.max(.001,maxZ-minZ));
- const project=a=>[t.width/2+(a[0]-(maxX+minX)/2)*scale,t.height/2-(a[2]-(maxZ+minZ)/2)*scale];
- tc.strokeStyle='#356d61';tc.lineWidth=2;tc.beginPath();data.forEach((a,i)=>{const [x,y]=project(a);i?tc.lineTo(x,y):tc.moveTo(x,y)});tc.stroke();
- const [x,y]=project(data[data.length-1]);tc.fillStyle='#25282d';tc.beginPath();tc.arc(x,y,5,0,Math.PI*2);tc.fill();
- tc.fillStyle='#555c65';tc.font='12px system-ui';tc.fillText('X–Z / 相対座標',10,17);
+ $('pathInfo').textContent='表示範囲：—';$('jitterInfo').textContent='直近2秒の座標の広がり：—';
+ if(!viewOrigin||!Number.isFinite(viewHalfSpan))return;
+ const data=paths[paths.length-1];if(!data?.length)return;
+ const scale=Math.min(t.width-48,t.height-48)/(2*viewHalfSpan);
+ const project=a=>[t.width/2+(a[0]-viewOrigin[0])*scale,t.height/2-(a[2]-viewOrigin[2])*scale];
+ const gridStep=viewHalfSpan/4*scale;for(let i=-4;i<=4;i++){tc.beginPath();tc.moveTo(t.width/2+i*gridStep,24);tc.lineTo(t.width/2+i*gridStep,t.height-24);tc.stroke();tc.beginPath();tc.moveTo(24,t.height/2+i*gridStep);tc.lineTo(t.width-24,t.height/2+i*gridStep);tc.stroke();}
+ function trace(arr,color,lineWidth){tc.strokeStyle=color;tc.lineWidth=lineWidth;tc.beginPath();arr.forEach((a,i)=>{const [x,y]=project(a);i?tc.lineTo(x,y):tc.moveTo(x,y)});tc.stroke();}
+ if($('rawPath').checked)trace(data,'#8e959c',1.2);
+ if($('smoothPath').checked)trace(smooth,'#356d61',2.5);
+ if($('rawPath').checked||$('smoothPath').checked){const arr=$('smoothPath').checked?smooth:data;const [x,y]=project(arr[arr.length-1]);tc.fillStyle='#25282d';tc.beginPath();tc.arc(x,y,4,0,Math.PI*2);tc.fill();}
+ tc.fillStyle='#555c65';tc.font='12px system-ui';tc.fillText('X–Z / 相対座標',10,17);tc.fillText('開始位置',t.width/2+5,t.height/2-5);
+ $('pathInfo').textContent='表示範囲（短辺）：'+(2*viewHalfSpan).toPrecision(3)+' 相対単位';
+ if(wasValid&&recentPos.length>1){const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const r of recentPos)r.xyz.forEach((x,i)=>{min[i]=Math.min(min[i],x);max[i]=Math.max(max[i],x)});const span=Math.hypot(...max.map((x,i)=>x-min[i]));$('jitterInfo').textContent='直近2秒の座標の広がり：'+span.toPrecision(3)+' 相対単位（'+recentPos.length+'件）';}
 }
 function fallback(message){
  $('overlayCount').textContent='映像上の表示：—';lastVideo=-1;
@@ -102,7 +111,7 @@ function acceptResult(m){
  const now=performance.now(),matrix=m.pose,pts=m.points||[],duration=m.processingMs;
  const ok=matrix?.length===16&&Array.from(matrix).every(Number.isFinite);attempts++;
  let xyz=null;
- if(ok){valid++;xyz=[matrix[12],-matrix[13],-matrix[14]];if(!wasValid){segment=[];paths.push(segment)}segment.push(xyz);}
+ if(ok){valid++;xyz=[matrix[12],-matrix[13],-matrix[14]];if(!wasValid){segment=[];paths.push(segment);resetPathView()}segment.push(xyz);addPathPoint(xyz,now);}
  wasValid=!!ok;
  // Commit the processed frame and its matching feature points together.
  ctx.drawImage(frameCanvas,0,0,p.width,p.height);
@@ -134,6 +143,7 @@ function loop(now){
   raf=requestAnimationFrame(loop);
  }catch(e){stop('処理エラー：'+(e?.message||String(e)))}
 }
+$('rawPath').addEventListener('change',drawPath);$('smoothPath').addEventListener('change',drawPath);
 $('consent').addEventListener('change',()=>{if(!$('consent').checked&&(running||starting))stop('実験を停止しました');buttons()});
 $('start').addEventListener('click',start);$('stop').addEventListener('click',()=>stop());
 $('save').addEventListener('click',()=>{if(running||starting||!rows.length)return;const data={schema:'choreis.lab.tracking.v1',settings:lastSettings,frames:rows};const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='choreis-tracking-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)});
