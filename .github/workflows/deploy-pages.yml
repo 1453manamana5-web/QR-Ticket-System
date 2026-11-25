@@ -53,11 +53,6 @@ jobs:
         run: |
           mkdir -p reception-app/dist/management-app
           cp -R management-app/dist/. reception-app/dist/management-app/
-          if [ -d choreis-lab ]; then
-            mkdir -p reception-app/dist/choreis-lab
-            cp choreis-lab/index.html reception-app/dist/choreis-lab/index.html
-            cp choreis-lab/tracking-worker.js reception-app/dist/choreis-lab/tracking-worker.js
-          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
