@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'">
-<title>Choreis Lab 0.1</title>
+<title>Choreis Lab 0.2-dev</title>
 <style>
 :root{font-family:system-ui,-apple-system,sans-serif;color:#25282d;background:#f3f4f5;color-scheme:light}*{box-sizing:border-box}body{margin:0}header{background:#25282d;color:white;padding:17px 24px;display:flex;align-items:center;gap:12px}header svg{width:36px;height:36px}header strong{font-size:20px;letter-spacing:.4px}header small{margin-left:auto;color:#c5c9ce}main{max-width:1100px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:15px;margin:0 0 12px}p{font-size:14px;line-height:1.65;color:#555c65}section{background:white;border:1px solid #dfe2e5;border-radius:12px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:12px}.grid section{margin:0}canvas{width:100%;height:auto;display:block;background:#e9ebed;border-radius:8px}video{display:none}.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center}button,select{font:inherit;border:1px solid #c8ccd1;border-radius:8px;padding:10px 14px;background:#fff;color:#25282d}button.primary{background:#25282d;color:white;border-color:#25282d}button:disabled,select:disabled{opacity:.45}label{font-size:13px}input{accent-color:#25282d}#status{font-weight:600;font-size:14px;overflow-wrap:anywhere}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.stat{border:1px solid #e3e5e8;border-radius:8px;padding:12px}.stat small{display:block;color:#616971;font-size:12px}.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;margin-top:5px}.muted{font-size:12px;color:#666e75}.mono{font:12px ui-monospace,monospace;overflow-wrap:anywhere}a{color:#374c68}footer{padding:8px 0 20px}@media(max-width:650px){main{padding:14px}.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}header{padding:12px 14px}}
 </style>
 </head>
 <body>
-<header><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-linejoin="round"><path d="M4 12 14 9 14 30 4 34Z" stroke-width="1"/><path d="M12 9 25 5 25 28 12 35Z" stroke-width="1.8"/><path d="M22 10V3L36 9V28L22 36V32" stroke-width="3"/></svg><strong>Choreis Lab</strong><small>0.1 · Tracking</small></header>
+<header><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-linejoin="round"><path d="M4 12 14 9 14 30 4 34Z" stroke-width="1"/><path d="M12 9 25 5 25 28 12 35Z" stroke-width="1.8"/><path d="M22 10V3L36 9V28L22 36V32" stroke-width="3"/></svg><strong>Choreis Lab</strong><small>0.2-dev · Tracking</small></header>
 <main>
 <h1>空間認識テスト</h1><p>研究用の独立した試作。学校の許可を得た無人の場所でのみ使用してください。映像の保存・送信機能はありません。単眼SLAMの座標は実寸ではなく、再初期化により座標系が変わる場合があります。</p>
 <section>
@@ -20,7 +20,7 @@
 <p class="muted">外部配信は固定コミットのプログラム取得に使用します。学校の通信制限で取得できない場合は学校のルールに従ってください。同一サイト版の配布ファイルは未同梱です。</p>
 <label><input type="checkbox" id="consent"> 学校の許可を得た無人の環境で実験します</label>
 <div class="controls" style="margin-top:12px"><button id="start" class="primary" disabled>テスト開始</button><button id="stop" disabled>停止</button><button id="save" disabled>測定ログを保存</button></div>
-<p id="status" role="status" aria-live="polite">開始前</p><p id="cap" class="muted"></p>
+<p id="status" role="status" aria-live="polite">開始前</p><p id="cap" class="muted"></p><button id="diagnose">端末診断</button><pre id="diagnostics" class="mono" style="white-space:pre-wrap"></pre>
 </section>
 <div class="grid">
 <section><h2>カメラ・特徴点</h2><video id="video" muted playsinline></video><canvas id="preview" width="480" height="360"></canvas><p class="muted">緑の点はエンジンの実際の追跡点です。録画は行いません。</p></section>
@@ -112,6 +112,18 @@ $('consent').addEventListener('change',()=>{if(!$('consent').checked&&(running||
 $('start').addEventListener('click',start);$('stop').addEventListener('click',()=>stop());
 $('save').addEventListener('click',()=>{if(running||starting||!rows.length)return;const data={schema:'choreis.lab.tracking.v1',settings:lastSettings,frames:rows};const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='choreis-tracking-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&(running||starting))stop('画面が非表示になったため停止しました')});window.addEventListener('pagehide',()=>stop());
+$('diagnose').addEventListener('click',()=>{
+ const c=document.createElement('canvas');
+ let webgl2=false;try{webgl2=!!c.getContext('webgl2')}catch{}
+ const results={
+  'HTTPS':window.isSecureContext,'カメラAPI':!!navigator.mediaDevices?.getUserMedia,
+  'WebAssembly':!!window.WebAssembly,'WebGL 2':webgl2,'WebGPU API':!!navigator.gpu,
+  '加速度API':typeof window.DeviceMotionEvent!=='undefined',
+  '角度API':typeof window.DeviceOrientationEvent!=='undefined',
+  'Worker':typeof Worker!=='undefined','オンライン（参考）':navigator.onLine,
+ };
+ $('diagnostics').textContent=Object.entries(results).map(([k,v])=>k+'：'+(v?'APIあり / 有効':'なし / 無効')).join('\n')+'\nAPIの有無のみ。権限・実際の動作・性能は別途検証が必要です。';
+});
 clear();buttons();
 </script>
 </body></html>
