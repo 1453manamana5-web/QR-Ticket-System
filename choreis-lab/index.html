@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'">
+<title>Choreis Lab 0.2-dev</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#25282d;background:#f3f4f5;color-scheme:light}*{box-sizing:border-box}body{margin:0}header{background:#25282d;color:white;padding:17px 24px;display:flex;align-items:center;gap:12px}header svg{width:36px;height:36px}header strong{font-size:20px;letter-spacing:.4px}header small{margin-left:auto;color:#c5c9ce}main{max-width:1100px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:15px;margin:0 0 12px}p{font-size:14px;line-height:1.65;color:#555c65}section{background:white;border:1px solid #dfe2e5;border-radius:12px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:12px}.grid section{margin:0}canvas{width:100%;height:auto;display:block;background:#e9ebed;border-radius:8px}video{display:none}.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center}button,select{font:inherit;border:1px solid #c8ccd1;border-radius:8px;padding:10px 14px;background:#fff;color:#25282d}button.primary{background:#25282d;color:white;border-color:#25282d}button:disabled,select:disabled{opacity:.45}label{font-size:13px}input{accent-color:#25282d}#status{font-weight:600;font-size:14px;overflow-wrap:anywhere}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.stat{border:1px solid #e3e5e8;border-radius:8px;padding:12px}.stat small{display:block;color:#616971;font-size:12px}.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;margin-top:5px}.muted{font-size:12px;color:#666e75}.mono{font:12px ui-monospace,monospace;overflow-wrap:anywhere}a{color:#374c68}footer{padding:8px 0 20px}@media(max-width:650px){main{padding:14px}.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}header{padding:12px 14px}}
+</style>
+</head>
+<body>
+<header><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-linejoin="round"><path d="M4 12 14 9 14 30 4 34Z" stroke-width="1"/><path d="M12 9 25 5 25 28 12 35Z" stroke-width="1.8"/><path d="M22 10V3L36 9V28L22 36V32" stroke-width="3"/></svg><strong>Choreis Lab</strong><small>0.2-dev · Tracking</small></header>
+<main>
+<h1>空間認識テスト</h1><p>研究用の独立した試作。学校の許可を得た無人の場所でのみ使用してください。映像の保存・送信機能はありません。単眼SLAMの座標は実寸ではなく、再初期化により座標系が変わる場合があります。</p>
+<section>
+<h2>実験設定</h2>
+<div class="controls"><label>処理解像度 <select id="resolution"><option value="320">320px（軽量）</option><option value="480" selected>480px（標準）</option><option value="640">640px（詳細）</option></select></label><label>エンジン <select id="source"><option value="local">同一サイト内（準備後）</option><option value="cdn" selected>AlvaAR・外部配信（試験用）</option></select></label></div>
+<p class="muted">外部配信は固定コミットのプログラム取得に使用します。学校の通信制限で取得できない場合は学校のルールに従ってください。同一サイト版の配布ファイルは未同梱です。</p>
+<label><input type="checkbox" id="consent"> 学校の許可を得た無人の環境で実験します</label>
+<div class="controls" style="margin-top:12px"><button id="start" class="primary" disabled>テスト開始</button><button id="stop" disabled>停止</button><button id="save" disabled>測定ログを保存</button></div>
+<p id="status" role="status" aria-live="polite">開始前</p><p id="cap" class="muted"></p><button id="diagnose">端末診断</button><pre id="diagnostics" class="mono" style="white-space:pre-wrap"></pre>
+</section>
+<div class="grid">
+<section><h2>カメラ・特徴点</h2><video id="video" muted playsinline></video><canvas id="preview" width="480" height="360"></canvas><p class="muted">緑の点はエンジンの実際の追跡点です。録画は行いません。</p></section>
+<section><h2>相対移動軌跡</h2><canvas id="trajectory" width="400" height="340"></canvas><p class="muted">X–Z投影。重力方向への補正なし。スケール未確定。追跡中断の前後は結合しません。</p><p id="pose" class="mono">座標：—</p></section>
+</div>
+<section><h2>実測指標</h2><div class="stats"><div class="stat"><small>処理更新頻度</small><b id="hz">—</b></div><div class="stat"><small>処理時間 中央値</small><b id="ms">—</b></div><div class="stat"><small>特徴点数</small><b id="points">—</b></div><div class="stat"><small>姿勢取得率</small><b id="ratio">—</b></div></div><p class="muted">姿勢取得率は位置精度や信頼度そのものではありません。ログは数値のみ。最大10分・18,000フレーム。</p></section>
+<footer class="muted">研究候補：<a href="https://github.com/alanross/AlvaAR" target="_blank" rel="noopener noreferrer">AlvaAR（GPLv3・ソースコード）</a> · 位置精度・再認識・実寸・3D復元は未検証。</footer>
+</main>
+<script type="module">
+const $=id=>document.getElementById(id);
+const v=$('video'),p=$('preview'),ctx=p.getContext('2d',{willReadFrequently:true}),t=$('trajectory'),tc=t.getContext('2d');
+const remote='https://cdn.jsdelivr.net/gh/alanross/AlvaAR@7796af500ee92001ac2a9888363ff64d7a3bee75/dist/alva_ar.js';
+let stream=null,engine=null,running=false,starting=false,token=0,raf=0,lastVideo=-1,begin=0,lastUI=0,rows=[],paths=[],segment=[],attempts=0,valid=0,wasValid=false,source='',lastSettings={};
+const status=s=>{$('status').textContent=s};
+const ready=()=>window.isSecureContext&&!!navigator.mediaDevices?.getUserMedia&&!!window.WebAssembly;
+function buttons(){ $('start').disabled=!ready()||!$('consent').checked||starting||running;$('stop').disabled=!starting&&!running;$('resolution').disabled=starting||running;$('source').disabled=starting||running;$('save').disabled=running||starting||!rows.length; }
+$('cap').textContent='HTTPS: '+(window.isSecureContext?'対応':'必要')+' / カメラAPI: '+(navigator.mediaDevices?.getUserMedia?'利用可能':'利用不可')+' / WebAssembly: '+(window.WebAssembly?'対応':'非対応');
+function stop(message='停止しました'){
+ token++;running=false;starting=false;cancelAnimationFrame(raf);
+ if(stream){stream.getTracks().forEach(track=>track.stop());stream=null;}
+ v.pause();v.srcObject=null;try{engine?.reset()}catch{}engine=null;
+ ctx.clearRect(0,0,p.width,p.height);ctx.fillStyle='#e9ebed';ctx.fillRect(0,0,p.width,p.height);
+ status(message);buttons();
+}
+function clear(){rows=[];paths=[];segment=[];attempts=valid=0;wasValid=false;lastVideo=-1;lastUI=0;for(const id of ['hz','ms','points','ratio'])$(id).textContent='—';$('pose').textContent='座標：—';drawPath();}
+function drawPath(){
+ tc.fillStyle='#f0f1f2';tc.fillRect(0,0,t.width,t.height);tc.strokeStyle='#d7dade';tc.lineWidth=1;
+ for(let x=20;x<t.width;x+=20){tc.beginPath();tc.moveTo(x,0);tc.lineTo(x,t.height);tc.stroke()}
+ for(let y=20;y<t.height;y+=20){tc.beginPath();tc.moveTo(0,y);tc.lineTo(t.width,y);tc.stroke()}
+ const all=paths.flat();if(!all.length)return;
+ // Display only the most recent continuous tracking segment: origins may change.
+ const data=paths[paths.length-1];if(!data.length)return;
+ let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+ for(const a of data){minX=Math.min(minX,a[0]);maxX=Math.max(maxX,a[0]);minZ=Math.min(minZ,a[2]);maxZ=Math.max(maxZ,a[2]);}
+ const scale=Math.min((t.width-48)/Math.max(.001,maxX-minX),(t.height-48)/Math.max(.001,maxZ-minZ));
+ const project=a=>[t.width/2+(a[0]-(maxX+minX)/2)*scale,t.height/2-(a[2]-(maxZ+minZ)/2)*scale];
+ tc.strokeStyle='#356d61';tc.lineWidth=2;tc.beginPath();data.forEach((a,i)=>{const [x,y]=project(a);i?tc.lineTo(x,y):tc.moveTo(x,y)});tc.stroke();
+ const [x,y]=project(data[data.length-1]);tc.fillStyle='#25282d';tc.beginPath();tc.arc(x,y,5,0,Math.PI*2);tc.fill();
+ tc.fillStyle='#555c65';tc.font='12px system-ui';tc.fillText('X–Z / 相対座標',10,17);
+}
+async function start(){
+ if(!ready()||!$('consent').checked||starting||running)return;
+ starting=true;const id=++token;clear();buttons();source=$('source').value;
+ try{
+  status('認識エンジンを読み込み中…');
+  const module=await import(source==='local'?'./vendor/alva_ar.js':remote);
+  if(id!==token)return;
+  if(typeof module.AlvaAR?.Initialize!=='function')throw Error('エンジンAPIが利用できません');
+  status('カメラの許可を確認中…');
+  const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}},audio:false});
+  if(id!==token){s.getTracks().forEach(x=>x.stop());return}
+  stream=s;stream.getVideoTracks().forEach(x=>x.addEventListener('ended',()=>{if(id===token)stop('カメラが終了しました')},{once:true}));v.srcObject=s;await v.play();
+  if(id!==token)return;
+  if(!v.videoWidth||!v.videoHeight)throw Error('カメラの映像サイズを取得できません');
+  p.width=Number($('resolution').value);p.height=Math.max(1,Math.round(p.width*v.videoHeight/v.videoWidth));
+  status('SLAMを初期化中…');const e=await module.AlvaAR.Initialize(p.width,p.height);
+  if(id!==token){try{e.reset()}catch{}return}
+  engine=e;lastSettings={width:p.width,height:p.height,source,engineRevision:'7796af500ee92001ac2a9888363ff64d7a3bee75',scale:'unresolved',startedAt:new Date().toISOString()};
+  running=true;starting=false;begin=performance.now();buttons();status('初期化中：周囲をゆっくり撮影してください');raf=requestAnimationFrame(loop);
+ }catch(e){if(id===token)stop('開始できません：'+(e?.message||String(e)));}
+}
+function loop(now){
+ if(!running)return;
+ if(now-begin>600000||rows.length>=18000){stop('測定上限に達しました');return}
+ try{
+ if(v.readyState>=2&&v.currentTime!==lastVideo){
+  lastVideo=v.currentTime;const start=performance.now();
+  ctx.drawImage(v,0,0,p.width,p.height);
+  const frame=ctx.getImageData(0,0,p.width,p.height),matrix=engine.findCameraPose(frame),pts=engine.getFramePoints()||[];
+  const duration=performance.now()-start;
+  const ok=matrix?.length===16&&Array.from(matrix).every(Number.isFinite);attempts++;
+  let xyz=null;
+  if(ok){valid++;xyz=[matrix[12],-matrix[13],-matrix[14]];if(!wasValid){segment=[];paths.push(segment)}segment.push(xyz);}
+  wasValid=!!ok;
+  ctx.fillStyle='#62d8a8';for(const pt of pts){if(Number.isFinite(pt.x)&&Number.isFinite(pt.y))ctx.fillRect(pt.x-1,pt.y-1,3,3);}
+  rows.push({elapsedMs:Math.round(now-begin),processingMs:+duration.toFixed(3),features:pts.length,pose:ok?Array.from(matrix):null,segment:ok?paths.length:null});
+  if(now-lastUI>350){
+   lastUI=now;const recent=rows.filter(r=>r.elapsedMs>=now-begin-2000);const sorted=recent.map(r=>r.processingMs).sort((a,b)=>a-b);
+   const hz=recent.length>1?(recent.length-1)*1000/Math.max(1,recent.at(-1).elapsedMs-recent[0].elapsedMs):0;
+   $('hz').textContent=hz.toFixed(1)+' Hz';$('ms').textContent=sorted[Math.floor(sorted.length/2)].toFixed(1)+' ms';$('points').textContent=String(pts.length);$('ratio').textContent=(valid/attempts*100).toFixed(1)+'%';
+   $('pose').textContent=xyz?'相対 XYZ：'+xyz.map(x=>x.toFixed(3)).join(' / '):'座標：未取得（前回値を現在位置として表示しません）';
+   status(ok?'姿勢を取得中（実寸未確定）':'初期化または追跡喪失：ゆっくり視点を変えてください');drawPath();
+  }
+ }
+ raf=requestAnimationFrame(loop);
+ }catch(e){stop('処理エラー：'+(e?.message||String(e)))}
+}
+$('consent').addEventListener('change',()=>{if(!$('consent').checked&&(running||starting))stop('実験を停止しました');buttons()});
+$('start').addEventListener('click',start);$('stop').addEventListener('click',()=>stop());
+$('save').addEventListener('click',()=>{if(running||starting||!rows.length)return;const data={schema:'choreis.lab.tracking.v1',settings:lastSettings,frames:rows};const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='choreis-tracking-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&(running||starting))stop('画面が非表示になったため停止しました')});window.addEventListener('pagehide',()=>stop());
+$('diagnose').addEventListener('click',()=>{
+ const c=document.createElement('canvas');
+ let webgl2=false;try{webgl2=!!c.getContext('webgl2')}catch{}
+ const results={
+  'HTTPS':window.isSecureContext,'カメラAPI':!!navigator.mediaDevices?.getUserMedia,
+  'WebAssembly':!!window.WebAssembly,'WebGL 2':webgl2,'WebGPU API':!!navigator.gpu,
+  '加速度API':typeof window.DeviceMotionEvent!=='undefined',
+  '角度API':typeof window.DeviceOrientationEvent!=='undefined',
+  'Worker':typeof Worker!=='undefined','オンライン（参考）':navigator.onLine,
+ };
+ $('diagnostics').textContent=Object.entries(results).map(([k,v])=>k+'：'+(v?'APIあり / 有効':'なし / 無効')).join('\n')+'\nAPIの有無のみ。権限・実際の動作・性能は別途検証が必要です。';
+});
+clear();buttons();
+</script>
+</body></html>
