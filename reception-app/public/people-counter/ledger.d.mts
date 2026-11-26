@@ -25,6 +25,7 @@ export type CounterPassage = CounterBase & CounterPassageFields & {
   source: "auto" | "manual";
   passageId?: string;
   sequence?: number;
+  configVersion?: number;
   reason?: string;
 };
 export type CounterRevision = CounterBase & {

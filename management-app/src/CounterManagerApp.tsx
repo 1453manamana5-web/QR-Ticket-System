@@ -4,6 +4,13 @@ import {
   addCounterPassage, analyze, csv, pauseCounterEvent, reviseCounterPassage, saveCounterConfig, saveCounterStation,
   subscribeCounterEvent, type CounterConfig, type CounterMode, type CounterOperation, type CounterSnapshot, type CounterStation,
 } from "./counterManagementData";
+import {createCounterSeries,editCounterSchedule,listCounterSeries,operateCounterDay,watchCounterDay,type SeriesAndDays} from "./counterEvents";
+import {stageLabels,type Day} from "./counterLifecycle";
+import {CounterDayPanel,CounterScheduleEditor,NewCounterEvent,type EventDraft,type LuxnoraEventProvider} from "./CounterEventPanels";
+import {CounterComparison} from "./CounterComparison";
+import {CounterRestorePanel} from "./CounterRestorePanel";
+import {CounterPairPanel,CounterRemotePanel} from "./CounterStationCommands";
+import {CounterAnalysisTools} from "./CounterAnalysisTools";
 import type {EffectiveCounterPassage} from "../../reception-app/public/people-counter/ledger.mjs";
 
 const base = import.meta.env.BASE_URL;
@@ -20,7 +27,7 @@ const roleTitle = {in:"入口",out:"出口"};
 const statusTitle = {pending:"承認待ち",approved:"承認済み",rejected:"拒否",revoked:"解除済み"};
 const alertTitle: Record<string,string> = {paused:"停止指示あり",setup:"設置設定を確認",recalibrate:"再キャリブレーション",camera:"カメラ要確認",storage:"保存エラー",network:"通信要確認"};
 const modeLabels: Record<string,string> = {baseline:"無補正",detail:"細部優先",lighting:"暗部補助",unknown:"未確認"};
-const pages = {home:"ホーム",stations:"受付端末",records:"通過記録",event:"イベント管理",settings:"設定"} as const;
+const pages = {home:"ホーム",analysis:"来場者分析",stations:"受付端末",records:"通過記録",event:"イベント管理",settings:"設定"} as const;
 type Page = keyof typeof pages;
 type AuthState = {kind:"loading"|"ready"|"stale"|"denied"|"error"; manager?:CounterManager; message?:string};
 type DataState = {config:CounterSnapshot<CounterConfig|null>; stations:CounterSnapshot<CounterStation[]>; operations:CounterSnapshot<CounterOperation[]>};
@@ -69,14 +76,14 @@ function useManager(locked: boolean) {
   return {state,retry:() => refresh(n => n + 1),clear:() => setState({kind:"loading"})};
 }
 
-export function CounterManagerApp() {
+export function CounterManagerApp({suggest}: {suggest?:LuxnoraEventProvider} = {}) {
   const [locked,setLocked] = useState(() => {try {return sessionStorage.getItem("counter-manager-lock") === "1";} catch {return false;}});
   const {state,retry,clear} = useManager(locked);
   function lock(value: boolean) {
     clear(); setLocked(value);
     try {sessionStorage.setItem("counter-manager-lock",value ? "1" : "0");} catch { /* browser-only lock */ }
   }
-  if (!locked && state.manager) return <Dashboard key={state.manager.uid} manager={state.manager} authReady={state.kind === "ready"} recheck={retry} lock={() => lock(true)} />;
+  if (!locked && state.manager) return <Dashboard key={state.manager.uid} manager={state.manager} authReady={state.kind === "ready"} suggest={suggest} recheck={retry} lock={() => lock(true)} />;
   return <div className="cm-gate-layout">
     <main className="cm-gate">
       <div className="cm-brand-mark" aria-hidden="true"><i/><i/><i/></div>
@@ -93,12 +100,20 @@ export function CounterManagerApp() {
   </div>;
 }
 
-function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;authReady:boolean;recheck:()=>void;lock:()=>void}) {
+function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterManager;authReady:boolean;recheck:()=>void;lock:()=>void;suggest?:LuxnoraEventProvider}) {
   const [page,setPage] = useState<Page>("home");
   const [mode,setMode] = useState<CounterMode>("live");
   const [eventId,setEventId] = useState("");
   const [events,setEvents] = useState<CounterEvent[]|null>(null);
   const [eventsError,setEventsError] = useState("");
+  const [catalog,setCatalog] = useState<SeriesAndDays|null>(null);
+  const [catalogError,setCatalogError] = useState("");
+  const [create,setCreate] = useState(false);
+  const [createBusy,setCreateBusy] = useState(false);
+  const [search,setSearch] = useState("");
+  const eventMenu=useRef<HTMLDetailsElement>(null);
+  const creating=useRef(false);
+  const [activeDay,setActiveDay] = useState<{id:string;row:Day|null;verified:boolean}|null>(null);
   const [snapshot,setSnapshot] = useState<{key:string;value:DataState} | null>(null);
   const [now,setNow] = useState(Date.now);
   const [notice,setNotice] = useState("");
@@ -109,7 +124,10 @@ function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;aut
   activeScope.current = scope;
   const submitting = useRef(false);
   const admin = manager.role === "admin";
+  const day = activeDay?.id===eventId ? activeDay.row : catalog?.days.find(item=>item.id===eventId);
   const event = events?.find(item => item.id === eventId);
+  const series = catalog?.series.find(item=>item.id===day?.eventId);
+  const eventName = series?.name ?? event?.name ?? "イベントを選ぶ";
   const data = snapshot?.key === scope ? snapshot.value : null;
   const fetchEvents = () => setRevision(n => n + 1);
 
@@ -120,10 +138,31 @@ function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;aut
     void bounded(counterEvents()).then(items => {
       if (!current) return;
       setEvents(items);
-      setEventId(prior => items.some(item => item.id === prior) ? prior : items[0]?.id ?? "");
+      setEventId(prior => prior || items[0]?.id || "");
     }).catch(error => {if (current) setEventsError(permissionDenied(error) ? "イベントを閲覧する権限がありません。" : "イベント一覧を取得できませんでした。");});
     return () => {current = false;};
   },[manager.uid,authReady,revision]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    let current=true;
+    setCatalogError("");
+    void bounded(listCounterSeries()).then(next=>{
+      if (!current) return;
+      setCatalog(next);
+      setEventId(prior=>prior || [...next.days].sort((a,b)=>b.date.localeCompare(a.date))[0]?.id || "");
+    }).catch(()=>{if(current)setCatalogError("人数カウントのイベント一覧を取得できませんでした。");});
+    return ()=>{current=false;};
+  },[authReady,revision,manager.uid]);
+
+  const nativeDay = !!catalog?.days.some(item=>item.id===eventId);
+  useEffect(()=>{
+    if (!nativeDay) return;
+    return watchCounterDay(eventId,(row,verified)=>{
+      if (verified) setActiveDay({id:eventId,row,verified});
+      else setActiveDay(prior=>prior?.id===eventId ? {...prior,verified:false} : null);
+    },()=>setActiveDay(prior=>prior?.id===eventId ? {...prior,verified:false}:null));
+  },[eventId,nativeDay]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -154,7 +193,7 @@ function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;aut
     (["in","out"] as const).every(role => scopeStations.some(station => station.role === role)) &&
     scopeStations.every(station => (station.lastSeen ?? 0) >= config.closed!);
   const analysisTime = config?.closed == null ? now : Math.min(now,config.closed);
-  const analysis = useMemo(() => page === "home" && config?.opened != null && operations
+  const analysis = useMemo(() => (page === "home" || page === "event" || page === "analysis") && config?.opened != null && operations
     ? analyze(operations,{eventId,mode,opened:config.opened,closed:config.closed,now:analysisTime,verified:sealed}) : null,
     [operations,config,eventId,mode,analysisTime,sealed,page]);
   const lastUpdate = denied ? undefined : data?.operations.lastChangeAt;
@@ -170,51 +209,120 @@ function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;aut
     } catch(error) {
       if (activeScope.current === current) setNotice(permissionDenied(error)
         ? "権限が変更されたか、他の端末で先に更新されました。再確認してください。"
+        : error instanceof Error && !("code" in error) ? error.message
         : "更新を確認できませんでした。表示を確認してから再試行してください。");
       if (permissionDenied(error)) recheck();
     } finally {submitting.current=false;setWorking(false);}
   }
-  const choose = (next:string,nextMode=mode) => {setNotice("");setEventId(next);setMode(nextMode);};
+  const choose = (next:string,nextMode=mode) => {
+    setNotice("");setEventId(next);setMode(nextMode);
+    if (eventMenu.current) eventMenu.current.open=false;
+  };
+  const navigate = (next:Page) => {setPage(next);setNotice("");};
+  async function saveNew(draft:EventDraft) {
+    if (!authReady || creating.current) return false;
+    creating.current=true;setCreateBusy(true);setNotice("");
+    try {
+      const dayId=await createCounterSeries(draft);
+      setEventId(dayId);setMode("live");setPage("event");setCreate(false);
+      setNotice("イベントを作成しました。開催準備を確認してください。");fetchEvents();
+      return true;
+    } catch(error) {
+      setNotice(error instanceof Error ? error.message : "イベントを保存できませんでした。");
+      return false;
+    } finally {creating.current=false;setCreateBusy(false);}
+  }
   const pendingRequests = stations.filter(row => row.status === "pending").length;
   const updating = Object.values(data ?? initialData()).some(part => part.source === "pending");
   const status = denied ? "権限を再確認中" : ready ? "接続済み" : updating ? "同期を確認中" : "現在の同期を確認できません";
 
   return <div className="cm-shell">
     <a className="cm-skip" href="#cm-content">内容へ移動</a>
-    <aside className="cm-rail"><div className="cm-brand"><div className="cm-brand-mark" aria-hidden="true"><i/><i/><i/></div>
-      <div><b>人数カウント管理</b><small>交通研究部</small></div></div>
-      <nav aria-label="管理メニュー">{Object.entries(pages).map(([id,title],i) =>
-        <button key={id} className={page === id ? "is-current" : ""} aria-current={page === id ? "page" : undefined}
-          onClick={() => {setPage(id as Page);setNotice("");}}><span className={"cm-nav-icon cm-icon-"+i} aria-hidden="true"/>{title}{id === "stations" && pendingRequests > 0 && <small>{pendingRequests}</small>}</button>)}</nav>
-      <div className="cm-rail-bottom"><a href={base+"people-counter/"}>計測端末を開く <span aria-hidden="true">↗</span></a></div>
-    </aside>
     <div className="cm-main">
-      <header className="cm-bar"><span>{event?.date ? event.date.replaceAll("-"," / ") : "文化祭運営"}</span><div><span className={"cm-health"+(ready ? " is-ready":"")}>{status}</span><button onClick={lock}>ロック</button></div></header>
+      <header className="cm-bar"><div className="cm-brand"><div className="cm-brand-mark" aria-hidden="true"><i/><i/><i/></div><b>人数カウント管理</b></div>
+        <div><span className={"cm-health"+(ready ? " is-ready":"")}>{status}</span><button onClick={lock}>ロック</button></div></header>
       <main id="cm-content" tabIndex={-1}>
-        <div className="cm-title"><div><p>{event?.name ?? "文化祭運営"}</p><h1>{pages[page]}</h1></div>
-          {events && events.length > 0 && <div className="cm-selectors"><label>イベント<select value={eventId} onChange={e => choose(e.target.value)}>
-            {events.map(item => <option key={item.id} value={item.id}>{item.name}{item.date ? " / "+item.date : ""}</option>)}</select></label>
-            <label>運用<select value={mode} onChange={e => choose(eventId,e.target.value as CounterMode)}><option value="live">本番</option><option value="test">試験</option></select></label></div>}</div>
+        <div className="cm-title"><div>
+          <details className="cm-picker" ref={eventMenu}><summary>{eventName}</summary>
+            <div className="cm-picker-menu">
+              <label>イベントを検索<input type="search" value={search} onChange={e=>setSearch(e.target.value)}/></label>
+              <button className="cm-primary" disabled={!authReady} onClick={()=>{setCreate(true);if(eventMenu.current)eventMenu.current.open=false;}}>新規作成</button>
+              {catalog?.series.filter(item=>(item.name+" "+item.venue).includes(search.trim())).map(item=><div className="cm-event-option" key={item.id}>
+                <strong>{item.name}</strong><p>{item.venue}</p>
+                {catalog.days.filter(row=>row.eventId===item.id).sort((a,b)=>a.date.localeCompare(b.date)).map(row=><button
+                  key={row.id} aria-current={eventId===row.id?"true":undefined} onClick={()=>{choose(row.id,"live");navigate("home");}}>
+                  {row.date}　{stageLabels[row.id===day?.id ? day.stage : row.stage]}
+                </button>)}
+              </div>)}
+              {events?.filter(item=>(item.name+" "+item.date).includes(search.trim())).map(item=><div className="cm-event-option" key={item.id}>
+                <button aria-current={eventId===item.id?"true":undefined} onClick={()=>{choose(item.id,"live");navigate("home");}}>
+                  {item.name}　{item.date} <small>従来のイベント</small>
+                </button>
+              </div>)}
+            </div>
+          </details>
+          {series&&<p className="cm-venue">{series.venue} · {day?.date}</p>}
+          <h1>{pages[page]}</h1>
+        </div>
+          <div className="cm-selectors">
+            {eventId&&<label>表示する集計<select value={mode} onChange={e => choose(eventId,e.target.value as CounterMode)}><option value="live">本番</option><option value="test">試験</option></select></label>}
+            <details className="cm-lux"><summary>Luxnora</summary><p>{suggest?"イベント作成の入力欄から設定提案を確認できます。":"設定提案との連携を利用できる状態になったら、イベントの入力欄に表示されます。"}</p></details>
+          </div>
+        </div>
+        <nav aria-label="管理メニュー" className="cm-nav">{Object.entries(pages).map(([id,title]) =>
+          <button key={id} className={page===id?"is-current":""} aria-current={page===id?"page":undefined} onClick={()=>navigate(id as Page)}>
+            {title}{id==="stations"&&pendingRequests>0&&<small>{pendingRequests}</small>}
+          </button>)}</nav>
+        {catalogError&&<p role="alert" className="cm-warning">{catalogError} <button onClick={fetchEvents}>再試行</button></p>}
         {eventsError && <p role="alert" className="cm-warning">{eventsError} <button onClick={fetchEvents}>再試行</button></p>}
         {notice && <p role="status" className="cm-notice">{notice}</p>}
         {!authReady && <p className="cm-warning" role="status">管理端末の権限を現在確認できません。表示済みの情報は古い可能性があります。 <button onClick={recheck}>再確認</button></p>}
-        {page === "settings" ? <section className="cm-section"><h2>この管理端末</h2><dl className="cm-definition"><dt>名称</dt><dd>{manager.name}</dd><dt>権限</dt><dd>{admin ? "管理者" : "副管理者"}</dd><dt>承認先</dt><dd>QR受付の管理端末認証</dd></dl>
+        {create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest}/>
+        : page === "settings" ? <section className="cm-section"><h2>この管理端末</h2><dl className="cm-definition"><dt>名称</dt><dd>{manager.name}</dd><dt>権限</dt><dd>{admin ? "管理者" : "副管理者"}</dd><dt>承認先</dt><dd>QR受付の管理端末認証</dd></dl>
           <p>管理者・副管理者の登録と権限変更は、既存の管理端末設定で行います。</p><a href={base+"management-app/"}>QR受付管理を開く ↗</a></section>
-        : !eventId ? <p className="cm-empty">{events?.length === 0 ? "表示できるイベントがありません。QR受付管理でイベントを登録してください。" : "イベントを読み込んでいます。"}</p>
+        : !eventId ? <p className="cm-empty">{events?.length === 0 && catalog?.days.length === 0 ? "イベント名のメニューから新規作成できます。" : "イベントを読み込んでいます。"}</p>
         : denied ? <p className="cm-warning" role="alert">人数カウントの閲覧権限をサーバーで確認できません。 <button onClick={() => {recheck();fetchEvents();}}>再確認</button></p>
         : <>
           {mode === "test" && <p className="cm-test">試験運用　ここで表示・修正した内容は本番集計に含まれません。</p>}
           {(data?.operations.source === "error" || data?.config.source === "error" || data?.stations.source === "error") &&
             <p className="cm-warning" role="status">イベントの一部を取得できませんでした。 <button onClick={fetchEvents}>再試行</button></p>}
           {invalidRows > 0 && <p className="cm-warning" role="status">読み取れないデータが {invalidRows}件あります。集計を確認してください。</p>}
-          {page === "home" && <Home analysis={analysis} config={config} stations={stations} mode={mode} now={now}
+          {(page === "home" || page === "analysis") && <Home day={day??undefined} navigate={navigate} detailed={page==="analysis"} analysis={analysis} config={config} stations={stations} mode={mode} now={now}
             lastUpdate={lastUpdate} current={ready && !invalidRows && stationsCurrent && pending === 0} waiting={updating} />}
-          {page === "stations" && <StationList stations={stations} mode={mode} now={now} admin={admin} enabled={ready&&!working}
-            loading={data?.stations.source === "pending" || !data} perform={perform} eventId={eventId} />}
+          {page==="analysis"&&analysis&&operations&&config?.opened!=null&&<CounterAnalysisTools key={scope}
+            report={analysis} rows={operations} from={config.opened} to={config.closed??now} mode={mode} scope={eventId}
+            name={eventName} venue={series?.venue} current={ready&&!invalidRows&&stationsCurrent&&pending===0}/>}
+          {page==="analysis"&&catalog&&<CounterComparison key={day?.eventId??"catalog"} catalog={catalog} initialSeriesId={day?.eventId}/>}
+          {page==="stations"&&nativeDay&&<CounterPairPanel key={eventId} day={eventId} enabled={ready&&!working}/>}
+          {page === "stations" && <StationList stations={stations} mode={mode} now={now} admin={admin} dedicated={nativeDay} enabled={ready&&!working}
+            loading={data?.stations.source === "pending" || !data} perform={perform} eventId={eventId} version={day?.version} />}
           {page === "records" && <Records key={scope} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
             loading={data?.operations.source==="pending" || !data} perform={perform} now={now} />}
-          {page === "event" && <EventControls key={scope+"/"+data?.config.serverAt} eventId={eventId} mode={mode} config={config}
-            enabled={ready&&!working} admin={admin} perform={perform} />}
+          {page==="records"&&admin&&config?.verified&&<section className="cm-section">
+            <h2>確定済みの集計を再確認</h2>
+            <p>JSONからの復元前に、集計を確認待ちへ戻してください。開催日と計測端末は閉場したままです。</p>
+            <button disabled={!ready||working||nativeDay&&(activeDay?.id!==eventId||!activeDay.verified)} onClick={()=>{
+              if (!window.confirm("この日の集計を確認待ちに戻しますか？ 復元後に記録を確認し、再度確定できます。")) return;
+              void perform(()=>nativeDay&&day
+                ? operateCounterDay(day.id,day.version,"unverify",{empty:false,synced:false})
+                : saveCounterConfig(eventId,mode,{...config,verified:false},config),"集計を確認待ちに戻しました。");
+            }}>集計確定を取り消す</button>
+          </section>}
+          {page==="records"&&admin&&<CounterRestorePanel key={scope} scope={eventId} mode={mode} name={eventName}
+            config={config} rows={operations??[]} enabled={ready&&!working}/>}
+          {page==="event"&&series&&day&&<CounterScheduleEditor key={day.id+"/"+series.name+"/"+series.venue+"/"+day.start+"/"+day.end}
+            series={series} day={day} enabled={ready&&!working&&activeDay?.id===eventId&&activeDay.verified}
+            onSave={fields=>{void perform(async()=>{await editCounterSchedule(series,day,fields);fetchEvents();},"イベント情報を保存しました。");}}/>}
+          {page === "event" && (nativeDay && day ? <CounterDayPanel key={day.id+"/"+day.version} day={day} now={now}
+            canOperate={ready&&!working&&activeDay?.id===eventId&&activeDay.verified} stations={stations}
+            synced={mode==="live"&&ready&&!invalidRows&&pending===0&&analysis?.occupancy===0&&analysis.issues.length===0&&
+              (["in","out"] as const).every(role=>scopeStations.some(station=>station.role===role))&&
+              scopeStations.every(station=>station.pending===0&&(station.lastSeen??0)>=(day.ended??Infinity))}
+            goStations={()=>navigate("stations")} openTest={()=>{choose(eventId,"test");navigate("analysis");}}
+            onAction={(command,review)=>{void perform(()=>operateCounterDay(day.id,day.version,command,review),
+              "操作を保存しました。端末の通信状況を確認してください。");}}
+          /> : <EventControls key={scope+"/"+data?.config.serverAt} eventId={eventId} mode={mode} config={config}
+            enabled={ready&&!working&&!nativeDay} admin={admin} perform={perform} />)}
         </>}
       </main>
     </div>
@@ -223,28 +331,28 @@ function Dashboard({manager,authReady,recheck,lock}: {manager:CounterManager;aut
 type Analysis = ReturnType<typeof analyze>;
 type Mutation = (task:()=>Promise<unknown>,success:string)=>Promise<void>;
 
-function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting}: {
-  analysis:Analysis|null; config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;
+function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,navigate,detailed}: {
+  analysis:Analysis|null; config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;day?:Day;navigate:(page:Page)=>void;detailed:boolean;
 }) {
   const peak = analysis?.timeline.reduce<{at:number;occupancy:number} | null>((max,row) => row.occupancy > (max?.occupancy ?? 0) ? row : max,null);
   const average = analysis?.sumAverage ?? (current ? analysis?.estimate : null);
   const hasCount = !!analysis;
   const open = config?.opened;
-  const lifecycle = config?.closed != null ? "閉場" : open == null ? "開場時刻未設定" : open > now ? "開場前" : config?.paused ? "受付停止中" : "開場中";
+  const lifecycle = day ? stageLabels[day.stage] : config?.closed != null ? "閉場" : open == null ? "開場時刻未設定" : open > now ? "開場前" : config?.paused ? "受付停止中" : "開場中";
   return <>
-    <div className="cm-event-strip"><strong>{lifecycle}</strong><span>{modeTitle[mode]}運用</span><span>記録の最終更新 {stamp(lastUpdate)}</span></div>
+    <div className="cm-event-strip"><button className="cm-status-action" onClick={()=>navigate("event")}>{lifecycle} <span aria-hidden="true">⌄</span></button><span>{modeTitle[mode]}集計</span><span>記録の最終更新 {stamp(lastUpdate)}</span></div>
     {!current && <p className="cm-warning" role="status">{waiting ? "人数と端末の状況を取得しています。" : "未同期または通信を確認できない端末があります。表示人数は最新とは限りません。"}</p>}
     {open == null && !waiting && <p className="cm-empty">イベント管理で開場時刻を設定すると集計を表示します。</p>}
     <dl className="cm-metrics">
       <Metric title="累計入場" value={hasCount ? count(analysis.entries) : "—"} unit={hasCount ? "回" : ""} detail="再入場を含む"/>
       <Metric title="累計退場" value={hasCount ? count(analysis.exits) : "—"} unit={hasCount ? "回" : ""}/>
-      <Metric title="現在の滞在" value={hasCount ? count(analysis.occupancy) : "—"} unit={hasCount ? "人" : ""} accent/>
+      <Metric title="現在の滞在" value={hasCount ? count(analysis.occupancy) : "—"} unit={hasCount ? "人" : ""} accent drill={!detailed?()=>navigate("analysis"):undefined}/>
       <Metric title="平均滞在" value={average == null ? "—" : (average/60000).toFixed(1)} unit={average == null ? "" : "分"}
         detail={average == null ? "算出不可" : analysis?.sumAverage == null ? "暫定値" : "確定値"}/>
       <Metric title="最大同時滞在" value={peak ? count(peak.occupancy) : "—"} unit={peak ? "人" : ""} detail={peak ? stamp(peak.at) : ""}/>
     </dl>
     <div className="cm-overview">
-      <section className="cm-section"><h2>滞在人数の推移</h2><p className="cm-caption">通過時刻に基づく集計</p>
+      <section className="cm-section"><h2>{detailed?"滞在人数の推移":<button className="cm-text-action" onClick={()=>navigate("analysis")}>滞在人数の推移 <span aria-hidden="true">›</span></button>}</h2><p className="cm-caption">通過時刻に基づく集計</p>
         {analysis?.timeline.length && open != null ? <OccupancyChart rows={analysis.timeline} from={open} to={config?.closed ?? now}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
       </section>
       <section className="cm-section"><h2>時間帯別の入退場</h2><p className="cm-caption"><span className="cm-legend in">入場</span><span className="cm-legend out">退場</span></p>
@@ -253,14 +361,14 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting}: {
     </div>
     <section className="cm-section"><h2>計測端末の稼働状況</h2>
       {!stations.length ? <p className="cm-empty">表示できる端末がありません。</p> : <ul className="cm-status-list">
-        {stations.filter(row => row.status === "approved").map(station => <li key={station.uid}><StationBadge role={station.role}/><b>{station.name}</b><DeviceSignal station={station} now={now}/><span>AI {station.ai == null ? "—" : station.ai ? "稼働" : "停止"} · 未同期 {station.pending ?? "—"}件</span><span>最終通信 {stamp(station.lastSeen)}</span></li>)}
+        {stations.filter(row => row.status === "approved").map(station => <li key={station.uid}><StationBadge role={station.role}/><button className="cm-text-action" onClick={()=>navigate("stations")}>{station.name}</button><DeviceSignal station={station} now={now}/><span>AI {station.ai == null ? "—" : station.ai ? "稼働" : "停止"} · 未同期 {station.pending ?? "—"}件</span><span>最終通信 {stamp(station.lastSeen)}</span></li>)}
         {!stations.some(row => row.status==="approved") && <li>承認済み端末がありません。</li>}</ul>}
       {analysis?.issues.length ? <details><summary>整合性の注意 {analysis.issues.length}件</summary><ul>{[...new Set(analysis.issues.map(row => row.code))].map(label => <li key={label}>{label}</li>)}</ul></details> : null}
     </section>
   </>;
 }
-function Metric({title,value,unit,detail,accent}: {title:string;value:string;unit:string;detail?:string;accent?:boolean}) {
-  return <div className={accent ? "cm-metric cm-feature":"cm-metric"}><dt>{title}</dt><dd>{value}<small>{unit}</small></dd>{detail && <p>{detail}</p>}</div>;
+function Metric({title,value,unit,detail,accent,drill}: {title:string;value:string;unit:string;detail?:string;accent?:boolean;drill?:()=>void}) {
+  return <div className={accent ? "cm-metric cm-feature":"cm-metric"}><dt>{title}</dt><dd>{drill?<button className="cm-text-action" onClick={drill}>{value}<small>{unit}</small></button>:<>{value}<small>{unit}</small></>}</dd>{detail && <p>{detail}</p>}</div>;
 }
 function OccupancyChart({rows,from,to}: {rows:Analysis["timeline"];from:number;to:number}) {
   const chunk = Math.ceil(rows.length/800);
@@ -289,8 +397,8 @@ function DeviceSignal({station,now}:{station:CounterStation;now:number}) {
   const live = station.lastSeen !== undefined && now-station.lastSeen<=freshMs;
   return <span className={live ? "cm-health is-ready":"cm-health"}>{live ? "通信確認済み" : "現在は未確認"}</span>;
 }
-function StationList({stations,mode,now,admin,enabled,loading,perform,eventId}: {
-  stations:CounterStation[];mode:CounterMode;now:number;admin:boolean;enabled:boolean;loading:boolean;perform:Mutation;eventId:string;
+function StationList({stations,mode,now,admin,dedicated,enabled,loading,perform,eventId,version}: {
+  stations:CounterStation[];mode:CounterMode;now:number;admin:boolean;dedicated:boolean;enabled:boolean;loading:boolean;perform:Mutation;eventId:string;version?:number;
 }) {
   return <section className="cm-section"><h2>登録端末</h2><p className="cm-caption">計測画面からこのイベントIDで申請してください。 <code>{eventId}</code></p>
     {loading ? <p className="cm-empty">端末を読み込んでいます。</p> : stations.length === 0 ? <p className="cm-empty">申請された端末がありません。</p> :
@@ -300,17 +408,21 @@ function StationList({stations,mode,now,admin,enabled,loading,perform,eventId}: 
             <span>{station.mode ? modeTitle[station.mode]+"運用" : "運用未確認"}</span>{station.mode && station.mode !== mode && <span>表示中の運用と異なります</span>}</div>
           <dl className="cm-definition cm-telemetry"><dt>カメラ</dt><dd>{station.camera === undefined ? "—" : station.camera ? "稼働" : "停止"}</dd>
             <dt>AI</dt><dd>{station.ai === undefined ? "—" : station.ai ? "稼働" : "停止"}</dd><dt>認識</dt><dd>{modeLabels[station.profile ?? ""] ?? "—"}</dd>
-            <dt>未同期</dt><dd>{station.pending ?? "—"}件</dd><dt>バージョン</dt><dd>{station.version ?? "—"}</dd></dl>
+            <dt>未同期</dt><dd>{station.pending ?? "—"}件</dd><dt>バージョン</dt><dd>{station.version ?? "—"}</dd>
+            {version!==undefined&&<><dt>配信設定</dt><dd>{station.mode===mode&&station.configVersion===version&&station.lastSeen!=null&&now-station.lastSeen<=freshMs
+              ? "端末で確認済み · v"+version : "端末で未確認 · v"+version}</dd></>}</dl>
           {station.lastSeen && now-station.lastSeen>freshMs && <p className="cm-caption">表示は最後に取得した状態です。</p>}
           {alertTitle[station.alert ?? ""] && <p className="cm-caption">端末からの通知　{alertTitle[station.alert ?? ""]}</p>}
-          {admin && <form className="cm-inline-form" key={station.uid+":"+station.name+":"+station.role+":"+station.status} onSubmit={event => {
+          {dedicated&&station.status==="approved"&&<CounterRemotePanel day={eventId} station={station} enabled={enabled} now={now}/>}
+          {dedicated&&station.status!=="approved"&&<p className="cm-caption">計測端末で接続コードを表示し、上のペアリング欄で承認してください。</p>}
+          {((!dedicated&&admin)||(dedicated&&station.status==="approved")) && <form className="cm-inline-form" key={station.uid+":"+station.name+":"+station.role+":"+station.status} onSubmit={event => {
             event.preventDefault();
             const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
             const fields = new FormData(event.currentTarget);
             const name = String(fields.get("name") ?? "").trim(), role = fields.get("role") === "out" ? "out":"in";
             if (!name || !enabled) return;
             const status = button?.value as "approved" | "rejected" | "revoked" | "" | undefined;
-            if (status === "revoked" && !window.confirm("端末の承認を解除しますか？保存済み記録は保持されます。")) return;
+            if (status === "revoked" && !window.confirm("旧端末が現地で停止していることを確認してください。同期済み記録は保持されます。承認を解除しますか？")) return;
             if (role !== station.role && station.status === "approved" &&
                 (station.pending !== 0 || station.camera !== false || station.lastSeen == null || now-station.lastSeen>freshMs)) {
               window.alert("端末を停止して同期を完了し、最終通信状態が更新されてから役割を変更してください。");
@@ -322,7 +434,7 @@ function StationList({stations,mode,now,admin,enabled,loading,perform,eventId}: 
           }}><label>端末名<input name="name" defaultValue={station.name} maxLength={60} required disabled={!enabled}/></label>
             <label>役割<select name="role" defaultValue={station.role} disabled={!enabled}><option value="in">入口</option><option value="out">出口</option></select></label>
             {station.status === "pending" ? <><button className="cm-primary" disabled={!enabled} value="approved">承認</button><button disabled={!enabled} value="rejected">拒否</button></>
-              : station.status === "approved" ? <><button disabled={!enabled}>変更を保存</button><button disabled={!enabled} value="revoked">承認を解除</button></>
+              : station.status === "approved" ? <><button disabled={!enabled}>変更を保存</button>{admin&&<button disabled={!enabled} value="revoked">承認を解除</button>}</>
               : <button disabled={!enabled} value="approved">再承認</button>}
           </form>}
         </li>)}</ul>}

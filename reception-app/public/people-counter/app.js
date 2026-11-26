@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=13";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=13";
+import { LineTracker } from "./tracker.mjs?v=15";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=15";
 
-import { verifyBodies } from "./body-check.mjs?v=13";
-import { createVisionPipeline } from "./vision.mjs?v=13";
+import { verifyBodies } from "./body-check.mjs?v=15";
+import { createVisionPipeline } from "./vision.mjs?v=15";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=13";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=13";
+import { openRecordStore, totalOf } from "./records.mjs?v=15";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=15";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const adaptive = window.counterAdaptive;
@@ -550,6 +550,37 @@ window.counterStationCamera = () => ({
   alert: $("status").textContent.includes("保存") && !initialized ? "storage" :
     adaptive?.stationStatus?.().alert,
 });
+window.counterStationAction = async action => {
+  if (document.hidden) return "local";
+  if (action === "diagnose") {
+    checkCameraHealth();
+    return "ok"; // Current health is published by the normal heartbeat.
+  }
+  if (action === "recalibrate") {
+    message("管理画面から再調整の依頼が届きました。「AI診断と設置アシスタント」を開いて現地で確認してください。", true);
+    return "local";
+  }
+  if (trial || adaptive?.isolated() || tracker.tracks.length > 0 || (stream && !running)) return "busy";
+  if (action === "stop") {
+    if (running || activeLeaseOwner || recoveryTimer) {
+      stopCamera();
+      status("管理画面から計測を停止");
+      message("停止中の通過を確認し、現地で計測を再開してください。");
+    }
+    return "ok";
+  }
+  if (!running || checkRemoteCapture()) return "local";
+  if (action !== "camera" && action !== "engine") return "failed";
+  const started = performance.now();
+  if (action === "engine") discardDetector();
+  stopCamera();
+  await startCamera({automaticRetry:true});
+  if (!running) return "local";
+  const downtimeMs = Math.min(240000, Math.round(performance.now()-started));
+  message("遠隔操作で再開しました。約 " + Math.max(1,Math.round(downtimeMs/1000)) + "秒の停止中に通過した人数を確認してください。");
+  return {result:"ok",downtimeMs};
+};
+
 async function startCamera({automaticRetry = false} = {}) {
   if (running || startButton.disabled || checkRemoteCapture()) return;
   if (!await initialize() || checkRemoteCapture()) return;

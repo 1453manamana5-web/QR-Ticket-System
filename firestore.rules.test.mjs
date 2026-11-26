@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
@@ -847,4 +848,146 @@ test("counter managers can append manual entries and revisions without forging i
   await assertFails(setDoc(counterOperation(station,counterRevisionId),counterData({...revision,actorUid:"counter-station",device:counterIdentity})));
   await assertFails(setDoc(counterOperation(sub,counterRevisionId),counterData({...revision,after:{...before,pose:[]}})));
   await assertSucceeds(setDoc(counterOperation(sub,counterRevisionId),counterData(revision)));
+});
+
+test("dedicated counter series allows multiple dates, requires audited atomic lifecycle and never creates a QR event", async () => {
+  await seedCounterRoles();
+  const sub=counterDb("counter-sub"), stranger=counterDb("stranger");
+  const eventId="81111111-1111-4111-8111-111111111119", id=eventId+"_2026-11-24";
+  const day=doc(sub,"counterDays",id), root=doc(sub,"counterEvents",eventId);
+  const audit={updatedAt:serverTimestamp(),updatedByUid:"counter-sub"};
+  const config=(scope,mode)=>doc(sub,"events",scope,"counterConfig",mode);
+  const blank={stage:"prepare",opened:null,trialOpened:null,closing:null,ended:null,
+    emptyConfirmed:null,finalized:null,version:0,operation:""};
+  const initial={opened:null,closed:null,paused:true,verified:false,version:0,...audit};
+  await assertFails(setDoc(doc(stranger,"counterEvents",eventId),{name:"展示",venue:"会場",...audit}));
+  const register=writeBatch(sub);
+  register.set(root,{name:"展示",venue:"会場",...audit});
+  for(let date=24;date<=30;date++){
+    const dayDate="2026-11-"+date, scope=eventId+"_"+dayDate;
+    register.set(doc(sub,"counterDays",scope),{eventId,date:dayDate,start:"09:00",end:"16:00",...blank,...audit});
+    register.set(config(scope,"live"),initial);
+    register.set(config(scope,"test"),initial);
+  }
+  await assertSucceeds(register.commit());
+  await assertSucceeds(getDoc(day));
+  await assertSucceeds(updateDoc(day,{start:"10:00",...audit}));
+  await assertFails(getDoc(doc(stranger,"counterDays",id)));
+  const lead=counterDb("counter-admin");
+  const legacyParent=await assertSucceeds(getDoc(doc(lead,"events",id)));
+  if(legacyParent.exists())throw new Error("counter series wrote a QR event");
+  const operation="81111111-1111-4111-8111-111111111110", route=doc(sub,"counterDays",id,"actions",operation);
+  const now=Date.now(), opened={stage:"open",opened:now,version:1,operation,...audit};
+  await assertFails(updateDoc(day,opened));
+  await assertFails(setDoc(route,{from:"prepare",to:"open",command:"open",version:1,...audit}));
+  await assertFails(updateDoc(config(id,"live"),{paused:false,...audit}));
+  const update=writeBatch(sub);
+  update.update(day,opened);
+  update.set(route,{from:"prepare",to:"open",command:"open",version:1,...audit});
+  update.set(config(id,"live"),{...initial,opened:now,paused:false,version:1});
+  update.set(config(id,"test"),{...initial,version:1});
+  await assertSucceeds(update.commit());
+  await assertFails(updateDoc(day,{start:"11:00",...audit}));
+  await assertFails(deleteDoc(route));
+  const first=counterDb("counter-station"),second=counterDb("stranger");
+  const pair=(db,code)=>doc(db,"events",id,"counterPairCodes",code);
+  const attempt=(db,code)=>setDoc(doc(db,"events",id,"counterPairAttempts","counter-sub"),{code,at:serverTimestamp()});
+  const reserve=(db,uid,code)=>{
+    const batch=writeBatch(db);
+    batch.set(counterDevice(db,uid,id),{...pendingCounterDevice,requestedAt:serverTimestamp(),pairingIssuedAt:serverTimestamp()});
+    batch.set(pair(db,code),{uid,device:pendingCounterDevice.device,issuedAt:serverTimestamp(),usedAt:null});
+    return batch.commit();
+  };
+  await assertFails(setDoc(counterDevice(first,"counter-station",id),{...pendingCounterDevice,requestedAt:serverTimestamp()}));
+  await assertSucceeds(reserve(first,"counter-station","012345"));
+  await assertFails(reserve(second,"stranger","012345"));
+  await assertSucceeds(reserve(second,"stranger","678901"));
+  await assertFails(getDoc(pair(second,"012345")));
+  await assertFails(getDoc(pair(sub,"012345")));
+  await assertSucceeds(attempt(sub,"012345"));
+  await assertFails(attempt(sub,"678901"));
+  await assertSucceeds(getDoc(pair(sub,"012345")));
+  const assignment=doc(sub,"events",id,"counterAssignments","in");
+  const firstDevice=counterDevice(sub,"counter-station",id),secondDevice=counterDevice(sub,"stranger",id);
+  await assertFails(updateDoc(firstDevice,{status:"approved",...audit}));
+  const approve=writeBatch(sub);
+  approve.update(firstDevice,{status:"approved",pairingConfirmed:"012345",...audit});
+  approve.update(pair(sub,"012345"),{usedAt:serverTimestamp()});
+  approve.set(assignment,{uid:"counter-station",...audit});
+  await assertSucceeds(approve.commit());
+  await assertFails(updateDoc(pair(sub,"012345"),{usedAt:serverTimestamp()}));
+  await assertSucceeds(getDoc(config(id,"live")));
+  await assertSucceeds(updateDoc(counterDevice(first,"counter-station",id),{
+    lastSeen:serverTimestamp(),version:"15",camera:true,ai:true,profile:"baseline",pending:0,alert:"none",mode:"live",configVersion:1
+  }));
+  const command=(db)=>doc(db,"events",id,"counterCommands","counter-station");
+  const assignmentEpoch=(await getDoc(firstDevice)).get("updatedAt");
+  const commandId="81111111-1111-4111-8111-111111111170";
+  const request={id:commandId,device:pendingCounterDevice.device,role:"in",mode:"live",configVersion:1,
+    assignment:assignmentEpoch,action:"sync",state:"issued",issuedAt:serverTimestamp(),issuedBy:"counter-sub"};
+  await assertFails(setDoc(command(sub),{...request,configVersion:0}));
+  await assertSucceeds(setDoc(command(sub),request));
+  await assertFails(getDoc(command(second)));
+  await assertFails(updateDoc(command(sub),{state:"running",startedAt:serverTimestamp()}));
+  await assertSucceeds(updateDoc(command(first),{state:"running",startedAt:serverTimestamp()}));
+  await assertFails(updateDoc(command(first),{state:"running",startedAt:serverTimestamp()}));
+  await assertSucceeds(updateDoc(command(first),{state:"finished",result:"ok",finishedAt:serverTimestamp()}));
+  const saved=(await getDoc(command(sub))).data();
+  const next={...request,id:"81111111-1111-4111-8111-111111111171",issuedAt:serverTimestamp()};
+  await assertFails(setDoc(command(sub),next));
+  const more=writeBatch(sub);
+  more.set(doc(command(sub),"history",saved.id),saved);
+  more.set(command(sub),next);
+  await assertSucceeds(more.commit());
+  const duplicate=writeBatch(sub);
+  duplicate.update(secondDevice,{status:"approved",pairingConfirmed:"012345",...audit});
+  duplicate.set(assignment,{uid:"stranger",...audit});
+  await assertFails(duplicate.commit());
+  const revoke=writeBatch(sub);
+  revoke.update(firstDevice,{status:"revoked",...audit});
+  revoke.set(assignment,{uid:null,...audit});
+  await assertFails(revoke.commit());
+});
+
+test("counter backup restoration preserves original operations and requires administrator audit with unverified settings", async () => {
+  await seedCounterRoles();
+  const admin=counterDb("counter-admin"),sub=counterDb("counter-sub"),station=counterDb("counter-station");
+  await enrollCounterStation(station,admin);
+  const config={opened:wallTime,closed:wallTime+2000,paused:true,verified:false,
+    updatedAt:serverTimestamp(),updatedByUid:"counter-admin"};
+  await assertSucceeds(setDoc(counterConfig(admin),config));
+  const restored=(payload=counterPayload,restoredByUid="counter-admin")=>({...counterData(payload),restoredByUid});
+  await assertFails(setDoc(counterOperation(sub),restored(counterPayload,"counter-sub")));
+  await assertFails(setDoc(counterOperation(station),restored(counterPayload,"counter-station")));
+  await assertFails(setDoc(counterOperation(admin),restored(counterPayload,"counter-sub")));
+  await assertFails(setDoc(counterOperation(admin),restored({...counterPayload,direction:"out"})));
+  await assertFails(setDoc(counterOperation(admin,counterPassageId,"test"),restored(counterPayload)));
+  await assertSucceeds(setDoc(counterOperation(admin),restored({...counterPayload,actorUid:"counter-station"})));
+  assert.equal((await getDoc(counterOperation(station))).get("payload.actorUid"),"counter-station");
+  assert.equal((await getDoc(counterOperation(admin))).get("restoredByUid"),"counter-admin");
+  await assertFails(setDoc(counterOperation(admin),restored()));
+  const after={...counterPayload,id:legacyCounterId};
+  await assertSucceeds(setDoc(counterConfig(admin),{...config,closed:null,paused:false}));
+  await assertFails(setDoc(counterOperation(admin,legacyCounterId),restored(after)));
+  await assertSucceeds(setDoc(counterConfig(admin),{...config,paused:false}));
+  await assertSucceeds(setDoc(counterOperation(admin,legacyCounterId),restored(after)));
+  await assertSucceeds(setDoc(counterConfig(admin),{...config,verified:true}));
+  const afterVerification="ledger:e20d67ad-3e06-483f-bc9a-ffa5044a3f67";
+  await assertFails(setDoc(counterOperation(admin,afterVerification),restored({...counterPayload,id:afterVerification})));
+});
+
+test("counter restore can atomically append an 80-operation chunk with one day and mode",async()=>{
+  await seedCounterRoles();
+  const admin=counterDb("counter-admin");
+  await assertSucceeds(setDoc(counterConfig(admin),{opened:wallTime,closed:null,paused:true,verified:false,
+    updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
+  const chunk=writeBatch(admin);
+  for (let i=0;i<80;i++) {
+    const id="ledger:90697cef-9659-4493-9534-"+String(i).padStart(12,"0");
+    chunk.set(counterOperation(admin,id),{
+      ...counterData({...counterPayload,id,sequence:i+1}),restoredByUid:"counter-admin",
+    });
+  }
+  await assertSucceeds(chunk.commit());
+  assert.equal((await getDocs(counterOperations(admin))).size,80);
 });

@@ -1,14 +1,15 @@
-import { collection, doc, documentId, getDocFromServer, getDocsFromServer, limit, orderBy,
+import { collection, deleteField, doc, documentId, getDocFromServer, getDocsFromServer, limit, orderBy,
   query, runTransaction, serverTimestamp, startAfter, Timestamp, type QueryConstraint } from "firebase/firestore";
+import { pairingCode } from "../public/people-counter/station-command.mjs";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "./firebaseClient";
 
 type Mode = "live" | "test";
 type Role = "in" | "out";
 type StationStatus = "pending" | "approved" | "rejected" | "revoked";
 type Operation = {id: string; eventId: string; mode: string; synced?: boolean};
-type Station = {name: string; device: string; role: Role; status: StationStatus};
-type EventConfig = {opened: number | null; closed: number | null; paused: boolean; verified: boolean};
-type Heartbeat = {version: "13"; camera: boolean; ai: boolean; profile: "baseline" | "detail" | "lighting" | "unknown";
+type Station = {name: string; device: string; role: Role; status: StationStatus; updatedAt?: Timestamp; pairingIssuedAt?: Timestamp};
+type EventConfig = {opened: number | null; closed: number | null; paused: boolean; verified: boolean; version: number | null};
+type Heartbeat = {version: "14" | "15"; camera: boolean; ai: boolean; profile: "baseline" | "detail" | "lighting" | "unknown";
   pending: number; alert: "none" | "paused" | "setup" | "recalibrate" | "camera" | "storage" | "network"; mode: Mode};
 type Cursor = {seconds: number; nanoseconds: number; id: string};
 
@@ -31,28 +32,58 @@ export async function readCounterStation(eventId: string) {
   return snapshot.exists() ? snapshot.data() as Station : null;
 }
 
-export async function enrollCounterStation(eventId: string, station: Pick<Station, "name" | "device" | "role">) {
+export async function enrollCounterStation(eventId: string, station: Pick<Station, "name" | "device" | "role">, pairing = false) {
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
   const ref = doc(db, "events", eventId, "counterDevices", uid);
+  const code = pairing ? pairingCode() : null;
   await runTransaction(db, async tx => {
     const current = await tx.get(ref);
-    if (!current.exists()) tx.set(ref, {...station, status: "pending", requestedAt: serverTimestamp()});
-    else if (current.get("device") !== station.device) throw new Error("このSafariには別の端末登録が紐づいています");
+    if (current.exists() && current.get("device") !== station.device) throw new Error("このSafariには別の端末登録が紐づいています");
+    if (current.exists() && (!code || current.get("status") === "approved")) return;
+    const pairingFields = code ? {pairingIssuedAt:serverTimestamp()} : {};
+    if (current.exists()) tx.update(ref,{...pairingFields,status:"pending",pairingConfirmed:deleteField()});
+    else tx.set(ref,{...station,status:"pending",requestedAt:serverTimestamp(),...pairingFields});
+    if (code) tx.set(doc(db,"events",eventId,"counterPairCodes",code),{uid,device:station.device,issuedAt:serverTimestamp(),usedAt:null});
   }, {maxAttempts: 1});
+  return code;
+}
+
+export async function readStationCommand(eventId: string) {
+  const uid = await getFirebaseUid();
+  const ref = doc(getFirebaseDb(),"events",eventId,"counterCommands",uid);
+  return (await getDocFromServer(ref)).data() ?? null;
+}
+
+export async function updateStationCommand(eventId: string, identifier: string, result?: string, downtimeMs?: number) {
+  const uid = await getFirebaseUid(), db = getFirebaseDb();
+  const ref = doc(db,"events",eventId,"counterCommands",uid);
+  return runTransaction(db, async tx => {
+    const snap = await tx.get(ref);
+    if (snap.get("id") !== identifier) return false;
+    if (result === undefined && snap.get("state") === "issued") {
+      tx.update(ref,{state:"running",startedAt:serverTimestamp()});
+      return true;
+    }
+    if (result !== undefined && snap.get("state") === "running") {
+      tx.update(ref,{state:"finished",result,finishedAt:serverTimestamp(),...(downtimeMs===undefined?{}:{downtimeMs})});
+      return true;
+    }
+    return false;
+  },{maxAttempts:1});
 }
 
 export async function readCounterConfig(eventId: string, mode: Mode) {
   await ensureFirebaseAuth();
   const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "counterConfig", mode));
   if (!snapshot.exists()) return null;
-  const {opened, closed, paused, verified} = snapshot.data();
+  const {opened, closed, paused, verified, version} = snapshot.data();
   if (![opened, closed].every(value => value === null || Number.isSafeInteger(value)) ||
       typeof paused !== "boolean" || typeof verified !== "boolean") throw new Error("管理側の設定を読み込めません");
-  return {opened, closed, paused, verified} as EventConfig;
+  return {opened, closed, paused, verified, version: Number.isSafeInteger(version) ? version : null} as EventConfig;
 }
 
-export async function heartbeatCounterStation(eventId: string, health: Heartbeat) {
+export async function heartbeatCounterStation(eventId: string, health: Heartbeat & {configVersion?:number|null}) {
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
   const ref = doc(db, "events", eventId, "counterDevices", uid);

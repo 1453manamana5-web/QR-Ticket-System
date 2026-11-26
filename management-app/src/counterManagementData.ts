@@ -1,5 +1,5 @@
 import {
-  collection, doc, onSnapshot, runTransaction, serverTimestamp, Timestamp,
+  collection, doc, getDocFromServer, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp,
   type DocumentData, type QueryDocumentSnapshot, type SnapshotMetadata,
 } from "firebase/firestore";
 import { ensureFirebaseAuth, getFirebaseDb, getFirebaseUid } from "../../reception-app/src/firebaseClient";
@@ -28,6 +28,7 @@ export type CounterStation = {
   ai?: boolean;
   profile?: string;
   pending?: number;
+  configVersion?: number;
   alert?: string;
   mode?: CounterMode;
   updatedAt?: number;
@@ -70,7 +71,7 @@ const checkedScope = (eventId: string, mode: CounterMode) => {
   if (!isPathPart(eventId) || !isMode(mode)) throw new Error("人数計測のイベントまたは運用区分が不正です。");
 };
 
-function decodeConfig(data: unknown): CounterConfig | null {
+export function decodeConfig(data: unknown): CounterConfig | null {
   if (!isRecord(data)) return null;
   const {opened, closed, paused, verified} = data;
   if (!(opened === null || isMillis(opened)) || !(closed === null || isMillis(closed)) ||
@@ -87,6 +88,7 @@ function decodeStation(uid: string, data: DocumentData): CounterStation | null {
   return {
     uid, name, device, role, status, requestedAt, lastSeen: optionalMillis(data.lastSeen),
     updatedAt: optionalMillis(data.updatedAt),
+    configVersion: Number.isSafeInteger(data.configVersion) ? data.configVersion : undefined,
     version: typeof version === "string" ? version : undefined,
     camera: typeof camera === "boolean" ? camera : undefined,
     ai: typeof ai === "boolean" ? ai : undefined,
@@ -109,7 +111,7 @@ function passageFields(value: unknown): CounterPassageFields | null {
   };
 }
 
-function decodeOperation(id: string, eventId: string, mode: CounterMode, payload: unknown): CounterOperation | null {
+export function decodeOperation(id: string, eventId: string, mode: CounterMode, payload: unknown): CounterOperation | null {
   if (typeof payload === "string") {
     try { payload = JSON.parse(payload); } catch { return null; }
   }
@@ -124,6 +126,7 @@ function decodeOperation(id: string, eventId: string, mode: CounterMode, payload
     const fields = passageFields(payload);
     if (!fields) return null;
     return {...base,...fields,kind:"passage",source:payload.source,
+      configVersion:Number.isSafeInteger(payload.configVersion) ? Number(payload.configVersion) : undefined,
       sequence:Number.isSafeInteger(payload.sequence) ? Number(payload.sequence) : undefined,
       passageId:typeof payload.passageId === "string" ? payload.passageId : undefined,
       reason:typeof payload.reason === "string" ? payload.reason : undefined};
@@ -257,8 +260,27 @@ export async function pauseCounterEvent(eventId: string, mode: CounterMode, paus
   });
 }
 
+export async function findCounterPair(eventId: string, code: string) {
+  if (!isPathPart(eventId) || !/^[0-9]{6}$/.test(code)) throw new Error("6桁の接続コードを入力してください。");
+  const uid=await getFirebaseUid(),db=getFirebaseDb();
+  await setDoc(doc(db,"events",eventId,"counterPairAttempts",uid),{code,at:serverTimestamp()});
+  let invitation;
+  try {invitation=(await getDocFromServer(doc(db,"events",eventId,"counterPairCodes",code))).data();}
+  catch (error) {
+    if (!isRecord(error)||error.code!=="permission-denied") throw error;
+    throw new Error("コードの期限が切れたか、すでに使用されています。端末で新しいコードを表示してください。");
+  }
+  if (!invitation || invitation.usedAt!=null || !isPathPart(invitation.uid)) throw new Error("有効な接続コードが見つかりません。端末の表示を確認してください。");
+  const snapshot=await getDocFromServer(doc(db,"events",eventId,"counterDevices",invitation.uid));
+  const station=snapshot.exists()?decodeStation(snapshot.id,snapshot.data()):null;
+  if (!station || station.status!=="pending" || station.device!==invitation.device ||
+    snapshot.get("pairingIssuedAt")?.isEqual(invitation.issuedAt)!==true)
+    throw new Error("コードの期限が切れたか、すでに使用されています。端末でコードを確認してください。");
+  return station;
+}
+
 type StationPatch = {status?: Exclude<CounterStationStatus,"pending">; name?: string; role?: CounterDirection};
-export async function saveCounterStation(eventId: string, stationUid: string, patch: StationPatch): Promise<void> {
+export async function saveCounterStation(eventId: string, stationUid: string, patch: StationPatch, code?: string): Promise<void> {
   if (!isPathPart(eventId) || !isPathPart(stationUid)) throw new Error("対象端末を確認してください。");
   const update: StationPatch = {};
   if (patch.status !== undefined) {
@@ -279,8 +301,27 @@ export async function saveCounterStation(eventId: string, stationUid: string, pa
   const db = getFirebaseDb();
   const reference = doc(db,"events",eventId,"counterDevices",stationUid);
   await runTransaction(db, async transaction => {
-    await transaction.get(reference);
-    transaction.update(reference,{...update,updatedAt:serverTimestamp(),updatedByUid:uid});
+    const station=(await transaction.get(reference)).data();
+    const dedicated=(await transaction.get(doc(db,"counterDays",eventId))).exists();
+    if (!station) throw new Error("端末の登録情報が見つかりません。");
+    const pairing=code && /^[0-9]{6}$/.test(code) ? doc(db,"events",eventId,"counterPairCodes",code) : null;
+    if (dedicated && station.status==="pending" && update.status==="approved" && !pairing)
+      throw new Error("計測端末に表示された接続コードを確認してください。");
+    const audit={updatedAt:serverTimestamp(),updatedByUid:uid};
+    if (dedicated) {
+      const role=update.role ?? station.role, status=update.status ?? station.status;
+      const previous=station.status==="approved" ? station.role : null;
+      const next=status==="approved" ? role : null;
+      if (next) {
+        const assignment=doc(db,"events",eventId,"counterAssignments",next);
+        const occupant=(await transaction.get(assignment)).data()?.uid;
+        if (occupant && occupant!==stationUid) throw new Error("この役割は別の端末が使用中です。現地で停止してから、管理者が割り当てを解除してください。");
+        transaction.set(assignment,{uid:stationUid,...audit});
+      }
+      if (previous && previous!==next) transaction.set(doc(db,"events",eventId,"counterAssignments",previous),{uid:null,...audit});
+    }
+    if (pairing) transaction.update(pairing,{usedAt:serverTimestamp()});
+    transaction.update(reference,{...update,...audit,...(pairing?{pairingConfirmed:code}:{})});
   });
 }
 
