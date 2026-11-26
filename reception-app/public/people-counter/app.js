@@ -1,11 +1,12 @@
-import { LineTracker } from "./tracker.mjs?v=15";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=15";
+import {appendActivity,recoveryDecision,signals} from "./luxnora-core.mjs?v=16";
+import { LineTracker } from "./tracker.mjs?v=16";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=16";
 
-import { verifyBodies } from "./body-check.mjs?v=15";
-import { createVisionPipeline } from "./vision.mjs?v=15";
+import { verifyBodies } from "./body-check.mjs?v=16";
+import { createVisionPipeline } from "./vision.mjs?v=16";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=15";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=15";
+import { openRecordStore, totalOf } from "./records.mjs?v=16";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=16";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const adaptive = window.counterAdaptive;
@@ -45,7 +46,34 @@ let recentTimes = [];
 let eventQueue = Promise.resolve();
 let settings = { ...defaults };
 let diagnosticFrame, diagnosticCtx;
-let recoveryTimer, recoveryUsed = false;
+let recoveryTimer, recoveryUsed = false, recoveryProbe = null, recoveryReason = null;
+let stationFps = null, stationInference = null;
+const activityKey="counter-luxnora-activity-v1";
+let stationActivity=[];
+try {
+  const saved=JSON.parse(localGet(activityKey)??"[]");
+  if (Array.isArray(saved)) stationActivity=saved.slice(-40).reduce((rows,item)=>
+    item&&["camera","storage","inference"].includes(item.reason)&&["verified","recovering","failed"].includes(item.state)?appendActivity(rows,item):rows,[]);
+} catch {}
+function luxState(state,reason) {
+  if (state!=="checking") {
+    stationActivity=appendActivity(stationActivity,{state,reason,at:Date.now()});
+    localSet(activityKey,JSON.stringify(stationActivity));
+  }
+  const badge=$("luxStationState");
+  if (!badge) return;
+  const message={checking:"自己診断中",recovering:"自動復旧中",verified:"復旧を確認しました",failed:"現地で端末を確認してください"}[state];
+  badge.dataset.state=state;
+  badge.textContent="Luxnora · "+signals[reason]+" · "+message;
+  badge.hidden=false;
+  if(state==="verified") setTimeout(()=>{if(badge.dataset.state===state) {badge.dataset.state="idle";badge.textContent="Luxnora";}},2500);
+  renderLuxHistory();
+}
+function renderLuxHistory() {
+  const history=$("luxStationHistory");
+  if(history&&stationActivity.length) history.textContent=stationActivity.slice(-6).reverse().map(item=>
+    new Date(item.at).toLocaleTimeString("ja-JP")+" "+signals[item.reason]+" "+({recovering:"復旧を開始",verified:"復旧を確認",failed:"現地確認待ち"})[item.state]).join("\n");
+}
 
 function uuid() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -89,6 +117,7 @@ async function refreshRecords() {
   catch (error) { storageFailure(error); }
 }
 function storageFailure(error) {
+  luxState("failed","storage");
   stopCamera(); status("保存エラー", "bad");
   adaptive?.observeFault("保存エラー。計測を停止しました。");
   message("記録を保存・確認できないため計測を停止しました: " + (error?.message || String(error)), true);
@@ -353,10 +382,16 @@ function discardDetector(model = detector, pending = inferencePending) {
   else close();
 }
 function stopCamera() {
+  if(recoveryProbe || recoveryTimer&&recoveryReason) {
+    luxState("failed",recoveryProbe?.reason??recoveryReason);
+    recoveryReason=null;
+  }
   clearTimeout(recoveryTimer);
   endTrial(true);
   startAttempt++;
   running = false;
+  recoveryProbe = null;
+  stationFps = stationInference = null;
   adaptive?.stopped();
   diagnosticFrame = diagnosticCtx = null;
   renderTrials();
@@ -381,28 +416,46 @@ function stopCamera() {
   resetTracking();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
-function scheduleRecovery() {
+function scheduleRecovery(reason) {
   recoveryUsed = true;
+  recoveryReason = reason;
+  luxState("recovering",reason);
   const attempt = startAttempt;
   stopButton.disabled = false;
-  recoveryTimer = setTimeout(() => {
+  recoveryTimer = setTimeout(async () => {
     if (startAttempt !== attempt) return;
-    if (document.hidden || !adaptive?.mayRecover()) stopButton.disabled = true;
-    else void startCamera({automaticRetry:true});
+    if (document.hidden || !adaptive?.mayRecover()) {
+      stopButton.disabled = true;
+      luxState("failed",reason);
+      recoveryReason = null;
+      return;
+    }
+    recoveryTimer=null;
+    await startCamera({automaticRetry:true,verifyRecovery:true});
+    if (!running&&startAttempt>=attempt) {
+      luxState("failed",reason);
+      recoveryReason = null;
+    }
   },1000);
 }
-function cameraFailure(text, discard = false, retry = true) {
-  const recover = retry && !recoveryUsed && !document.hidden && tracker.tracks.length === 0 && adaptive?.mayRecover();
+function cameraFailure(text, discard = false, retry = true, reason = "camera") {
+  const recover = retry && recoveryDecision({verified:adaptive?.mayRecover()===true,visible:!document.hidden,
+    tracking:tracker.tracks.length,attempts:Number(recoveryUsed),enabled:!trial&&!adaptive?.isolated()});
+  luxState("checking",reason);
   if (discard) discardDetector();
   stopCamera(); status("計測停止", "bad"); message(text, true);
   adaptive?.observeFault(text);
-  if (recover) scheduleRecovery();
+  if (recover) scheduleRecovery(reason);
+  else {luxState("failed",reason);recoveryReason=null;}
 }
 function checkCameraHealth() {
   if (!running || !health) return;
   const ended = stream?.getTracks().some(track => track.readyState === "ended");
   const reason = health.check(performance.now(), { videoTime: video.currentTime, ended, inferenceStarted });
-  if (reason) cameraFailure(reason, inferenceStarted !== null);
+  if (reason) {
+    const stalled=inferenceStarted!==null&&!ended&&performance.now()-inferenceStarted>=MAX_INFERENCE_MS;
+    cameraFailure(reason,stalled,true,stalled?"inference":"camera");
+  }
 }
 function readDiagnostics(now) {
   if (!adaptive?.due(now)) return null;
@@ -514,11 +567,20 @@ async function tick(now) {
     recentTimes = recentTimes.filter(t => now - t < 2000);
     if (adaptive) adaptive.frame({now,inferenceMs,pixels,reverseSeen:adaptive.isolated() && visibleTracks.some(t => t.reverseSeen),
       stats:() => frameStats(result,candidates,accepted,tracks,visibleTracks)});
-    $("fps").textContent = "検出速度 " + (recentTimes.length / 2).toFixed(1) + " FPS · 推論 " + Math.round(inferenceMs) + " ms";
+    stationFps=recentTimes.length/2; stationInference=Math.round(inferenceMs);
+    $("fps").textContent = "検出速度 " + stationFps.toFixed(1) + " FPS · 推論 " + stationInference + " ms";
+    if(recoveryProbe && ++recoveryProbe.frames>=3 && now-recoveryProbe.started>=750) {
+      const reason=recoveryProbe.reason;
+      recoveryProbe=null;
+      recoveryReason=null;
+      luxState("verified",reason);
+      adaptive?.observeFault("");
+      message("映像と認識が連続して更新されたことを確認しました。停止中の通過を確認してください。");
+    }
   } catch (error) {
     if (!running || attempt !== startAttempt) return;
     discardDetector(model, modelWork);
-    cameraFailure("映像解析が停止しました: " + error.message, false);
+    cameraFailure("映像解析が停止しました: " + error.message, false, true, "inference");
     status("計測エラー", "bad");
   } finally {
     if (inferenceStarted === started) inferenceStarted = null;
@@ -547,6 +609,8 @@ window.counterStationCamera = () => ({
   camera: Boolean(stream?.getTracks().some(track => track.readyState === "live")),
   ai: running && Boolean(detector),
   profile: adaptive?.stationStatus?.().profile,
+  fps:stationFps, inferenceMs:stationInference,
+  activity:stationActivity.at(-1)??null,
   alert: $("status").textContent.includes("保存") && !initialized ? "storage" :
     adaptive?.stationStatus?.().alert,
 });
@@ -581,7 +645,7 @@ window.counterStationAction = async action => {
   return {result:"ok",downtimeMs};
 };
 
-async function startCamera({automaticRetry = false} = {}) {
+async function startCamera({automaticRetry = false,verifyRecovery=false} = {}) {
   if (running || startButton.disabled || checkRemoteCapture()) return;
   if (!await initialize() || checkRemoteCapture()) return;
   clearTimeout(recoveryTimer);
@@ -629,7 +693,8 @@ async function startCamera({automaticRetry = false} = {}) {
     status("AIモデル読込中", "loading");
     await withDeadline(loadDetector(), 45000, "モデル読込が応答しません。ネット接続を確認して画面を再読み込みしてください。");
     if (attempt !== startAttempt || checkRemoteCapture()) return;
-    adaptive?.observeFault(automaticRetry ? "カメラと認識処理を再開しました。停止中の通過を確認してください。" : "");
+    adaptive?.observeFault(verifyRecovery?"カメラと認識処理が継続して動くか確認しています。":"");
+    if(verifyRecovery) recoveryProbe={reason:recoveryReason??"camera",frames:0,started:performance.now()};
     resetTracking(); running = true;
     renderTrials(); lastSample = 0; lastVideoTime = -1; recentTimes = [];
     health = new CameraHealth(performance.now(), video.currentTime);
@@ -857,4 +922,5 @@ adaptive?.attach({
   },
   reset: resetTracking, controls: renderTrials,
 });
+renderLuxHistory();
 void initialize();

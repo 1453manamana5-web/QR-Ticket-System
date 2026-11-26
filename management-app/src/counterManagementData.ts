@@ -30,6 +30,7 @@ export type CounterStation = {
   pending?: number;
   configVersion?: number;
   alert?: string;
+  lux?: {fps:number|null;inferenceMs:number|null;activity:{state:string;reason:string;at:number}|null};
   mode?: CounterMode;
   updatedAt?: number;
   updatedByUid?: string;
@@ -95,6 +96,12 @@ function decodeStation(uid: string, data: DocumentData): CounterStation | null {
     profile: typeof profile === "string" ? profile : undefined,
     pending: Number.isSafeInteger(pending) && pending >= 0 ? pending : undefined,
     alert: typeof alert === "string" ? alert : undefined,
+    lux: isRecord(data.lux) ? {
+      fps: typeof data.lux.fps==="number"&&Number.isFinite(data.lux.fps)?data.lux.fps:null,
+      inferenceMs: typeof data.lux.inferenceMs==="number"&&Number.isFinite(data.lux.inferenceMs)?data.lux.inferenceMs:null,
+      activity:isRecord(data.lux.activity)&&isMillis(data.lux.activity.at)&&typeof data.lux.activity.state==="string"&&
+        typeof data.lux.activity.reason==="string"?{state:data.lux.activity.state,reason:data.lux.activity.reason,at:data.lux.activity.at}:null,
+    }:undefined,
     mode: isMode(mode) ? mode : undefined,
     updatedByUid: typeof updatedByUid === "string" ? updatedByUid : undefined,
   };

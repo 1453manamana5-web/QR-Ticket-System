@@ -49,6 +49,9 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: npm run build --workspace management-app
 
+      - name: Prepare Luxnora local model assets
+        run: node scripts/prepare-luxnora-model.mjs reception-app/dist
+
       - name: Prepare Pages artifact
         run: |
           mkdir -p reception-app/dist/management-app

@@ -76,15 +76,28 @@ export function NewCounterEvent({owner,busy,onSave,onClose,provider}:{
     </form>
   </section>;
 }
-export function CounterDayPanel({day,canOperate,stations,synced,now,onAction,goStations,openTest}:{
-  day:Day; canOperate:boolean; stations:CounterStation[]; synced:boolean; now:number;
+export function CounterDayPanel({day,canOperate,stations,synced,now,onAction,goStations,openTest,proposal,proposalId}:{
+  day:Day; proposal?:"open"|"close";proposalId?:number;canOperate:boolean; stations:CounterStation[]; synced:boolean; now:number;
   onAction:(command:Command,review:{empty:boolean;synced:boolean})=>void;goStations:()=>void;openTest:()=>void;
 }) {
   const [requested,setRequested]=useState<Command|null>(null);
   const [empty,setEmpty]=useState(false);
+  const [proposalUnavailable,setProposalUnavailable]=useState(false);
+  const [fromLuxnora,setFromLuxnora]=useState(false);
+  useEffect(()=>{
+    if (!proposal) {
+      if(fromLuxnora) {setRequested(null);setProposalUnavailable(false);setFromLuxnora(false);}
+      return;
+    }
+    setFromLuxnora(true);
+    setEmpty(false);
+    const available=actionsFor(day).includes(proposal);
+    setRequested(available?proposal:null);
+    setProposalUnavailable(!available);
+  },[proposal,proposalId,day.stage,day.finalized,fromLuxnora]);
   const roles=["in","out"] as const;
   const stamp=(value:number|null)=>value===null?"—":new Intl.DateTimeFormat("ja-JP",{timeZone:"Asia/Tokyo",dateStyle:"short",timeStyle:"short"}).format(value);
-  const choose=(action:Command)=>{setEmpty(false);setRequested(action);};
+  const choose=(action:Command)=>{setEmpty(false);setRequested(action);setProposalUnavailable(false);setFromLuxnora(false);};
   return <section className="cm-section cm-operation">
     <div className="cm-section-top"><div><h2>{stageLabels[day.stage]}</h2><p className="cm-caption">開催日 {day.date}　予定 {day.start} – {day.end}</p></div>
       {day.stage==="trial" && <button onClick={openTest}>試験集計を見る</button>}
@@ -106,6 +119,7 @@ export function CounterDayPanel({day,canOperate,stations,synced,now,onAction,goS
       <div><dt>退場・会場の確認</dt><dd>{stamp(day.emptyConfirmed)}</dd></div><div><dt>開催日の終了</dt><dd>{stamp(day.ended)}</dd></div>
       <div><dt>集計確定</dt><dd>{stamp(day.finalized)}</dd></div>
     </dl>
+    {proposalUnavailable&&<p className="cm-warning">現在の開催状態では、その操作を実行できません。</p>}
     {!requested&&<div className="cm-form">{actionsFor(day).map(action=><button key={action} disabled={!canOperate || (action==="verify"&&!synced)} onClick={()=>choose(action)}>{commandLabels[action]}</button>)}</div>}
     {requested&&<div className="cm-confirm" role="group" aria-label={commandLabels[requested]}>
       <strong>{commandLabels[requested]}</strong>
@@ -121,10 +135,25 @@ export function CounterDayPanel({day,canOperate,stations,synced,now,onAction,goS
 }
 
 
-export function CounterScheduleEditor({series,day,enabled,onSave}: {
-  series:CounterSeries;day:Day;enabled:boolean;onSave:(value:{name:string;venue:string;start:string;end:string})=>void;
+export function CounterScheduleEditor({series,day,enabled,onSave,suggestion,suggestionId}: {
+  series:CounterSeries;day:Day;enabled:boolean;suggestion?:{field:"start"|"end";time:string};suggestionId?:number;onSave:(value:{name:string;venue:string;start:string;end:string})=>void;
 }) {
-  return <details className="cm-section"><summary>イベント情報と予定時刻</summary>
+  const [expanded,setExpanded]=useState(false),[start,setStart]=useState(day.start),[end,setEnd]=useState(day.end);
+  const [proposed,setProposed]=useState(false);
+  useEffect(()=>{
+    if(!suggestion) {
+      if(proposed){setProposed(false);setStart(day.start);setEnd(day.end);}
+      return;
+    }
+    setProposed(true);
+    setExpanded(true);
+    if(day.stage==="prepare") {
+      if(suggestion.field==="start") setStart(suggestion.time);
+      else setEnd(suggestion.time);
+    }
+  },[suggestion,suggestionId,day.stage,day.start,day.end,proposed]);
+  return <details className="cm-section" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}><summary>イベント情報と予定時刻</summary>
+    {suggestion&&day.stage!=="prepare"&&<p className="cm-warning">予定時刻は準備中の開催日で変更できます。</p>}
     <form className="cm-form" onSubmit={event=>{
       event.preventDefault();const form=new FormData(event.currentTarget);
       const value = {name:String(form.get("name")).trim(),venue:String(form.get("venue")).trim(),
@@ -133,8 +162,8 @@ export function CounterScheduleEditor({series,day,enabled,onSave}: {
     }}>
       <label>イベント名<input name="name" required maxLength={100} defaultValue={series.name} disabled={!enabled}/></label>
       <label>会場名<input name="venue" required maxLength={100} defaultValue={series.venue} disabled={!enabled}/></label>
-      <label>開場予定<input name="start" type="time" required defaultValue={day.start} disabled={!enabled||day.stage!=="prepare"}/></label>
-      <label>閉場予定<input name="end" type="time" required defaultValue={day.end} disabled={!enabled||day.stage!=="prepare"}/></label>
+      <label>開場予定<input name="start" type="time" required value={start} onChange={e=>setStart(e.target.value)} disabled={!enabled||day.stage!=="prepare"}/></label>
+      <label>閉場予定<input name="end" type="time" required value={end} onChange={e=>setEnd(e.target.value)} disabled={!enabled||day.stage!=="prepare"}/></label>
       <button className="cm-primary" disabled={!enabled}>変更を保存</button>
     </form>
   </details>;

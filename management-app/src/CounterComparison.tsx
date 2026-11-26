@@ -49,10 +49,11 @@ function coverage(row:DisplayRow) {
   return {...summary,state};
 }
 
-export function CounterComparison({catalog,initialSeriesId}:{catalog:SeriesAndDays;initialSeriesId?:string}) {
+export function CounterComparison({catalog,initialSeriesId,initialView}:{catalog:SeriesAndDays;initialSeriesId?:string;initialView?:"day"|"year"}) {
   const events=datasets(catalog);
   const annual=annualDatasets(events);
-  const [view,setView]=useState<"day"|"year">("day");
+  const [view,setView]=useState<"day"|"year">(initialView??"day");
+  useEffect(()=>{if(initialView)setView(initialView);},[initialView]);
   const [eventKey,setEventKey]=useState(initialSeriesId??"");
   const [annualKeys,setAnnualKeys]=useState<[string,string]>(["",""]);
   const [allDays,setAllDays]=useState(false);

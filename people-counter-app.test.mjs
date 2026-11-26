@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {webcrypto} from 'node:crypto';
 import {IDBFactory} from 'fake-indexeddb';
+import {appendActivity,recoveryDecision,signals} from './reception-app/public/people-counter/luxnora-core.mjs';
 import {LineTracker} from './reception-app/public/people-counter/tracker.mjs';
 import {PROFILES,peopleFromResult} from './reception-app/public/people-counter/detection.mjs';
 import {verifyBodies} from './reception-app/public/people-counter/body-check.mjs';
@@ -17,7 +18,7 @@ function harness({factory=new IDBFactory(), denyLocal=false, savedOptions=null, 
  let modelLoads=0,mediaStarts=0,next=0;
  const ctx=Object.fromEntries(['clearRect','drawImage','setLineDash','beginPath','moveTo','lineTo','stroke','fillText','strokeRect','fillRect','arc','fill'].map(k=>[k,()=>{}]));
  const element=id=>{
-  if(!nodes.has(id))nodes.set(id,{width:320,height:240,videoWidth:640,videoHeight:480,readyState:4,currentTime:1,style:{},disabled:false,children:[],
+  if(!nodes.has(id))nodes.set(id,{width:320,height:240,videoWidth:640,videoHeight:480,readyState:4,currentTime:1,style:{},dataset:{},disabled:false,children:[],
    classList:{toggle(){}},getContext:()=>ctx,play:async()=>{},pause(){},addEventListener(name,fn){this['on'+name]=fn},
    append(...xs){this.children.push(...xs)},replaceChildren(...xs){this.children=xs},remove(){}});
   return nodes.get(id);
@@ -31,7 +32,7 @@ function harness({factory=new IDBFactory(), denyLocal=false, savedOptions=null, 
   crypto:webcrypto,console,Blob,URL,setTimeout,clearTimeout,performance:{now:()=>clock.now},
   setInterval:(fn,ms)=>{const id=++next;timers.set(id,{fn,ms});return id},clearInterval:id=>timers.delete(id),
   requestAnimationFrame:fn=>{const id=++next;raf.set(id,fn);return id},cancelAnimationFrame:id=>raf.delete(id),confirm:()=>true,
-  LineTracker,PROFILES,peopleFromResult,verifyBodies,openRecordStore:options=>openRecordStore({...options,indexedDB:factory}),totalOf,CameraHealth,MAX_INFERENCE_MS,withDeadline,
+  appendActivity,recoveryDecision,signals,LineTracker,PROFILES,peopleFromResult,verifyBodies,openRecordStore:options=>openRecordStore({...options,indexedDB:factory}),totalOf,CameraHealth,MAX_INFERENCE_MS,withDeadline,
   createVisionPipeline:async()=>{modelLoads++;return pipelineFactory?pipelineFactory(modelLoads,clock):{async detectForVideo(){return{objects:{detections:[]},parts:null}},close(){}}}
  });
  vm.runInContext(source+`\nglobalThis.api={initialize,record,flush:()=>eventQueue,startCamera,stopCamera,tick,newSession,checkCameraHealth,refreshRecords,
@@ -353,4 +354,25 @@ test('calibration isolation covers complete camera passages and manual count eve
   assert.equal(captureCalls,1);
   assert.equal(a.api.state().counter,1);
   await a.close();
+});
+
+test("Luxnora verifies multiple advancing inferences before reporting recovery and preserves prior records", async()=>{
+ const a=harness({adaptive:{mayRecover:()=>true,attach(){},setup(){},render(){},engine(){},isolated:()=>false,stopped(){},observeFault(){},frame(){},due:()=>false}});
+ await a.api.initialize();
+ await a.api.record(1,'manual');
+ await a.api.startCamera();
+ a.tracks[0].end();
+ assert.equal(a.element('luxStationState').dataset.state,'recovering');
+ assert.equal(a.api.state().running,false);
+ const until=Date.now()+2000;
+ while(!a.api.state().running&&Date.now()<until) await new Promise(resolve=>setTimeout(resolve,20));
+ assert.equal(a.api.state().running,true);
+ assert.equal(a.element('luxStationState').dataset.state,'recovering');
+ for(const [n,stamp] of [100,500,950].entries()){
+   a.clock.now=stamp;a.element('video').currentTime=n+2;
+   await a.api.tick(stamp);
+ }
+ assert.equal(a.element('luxStationState').dataset.state,'verified');
+ assert.equal(a.api.state().counter,1);
+ await a.close();
 });

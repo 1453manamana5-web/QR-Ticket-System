@@ -14,9 +14,10 @@ export function productionBrowserPolicy(): Plugin {
     },
     transformIndexHtml: {
       order: 'pre',
-      handler() {
+      handler(_html,context) {
+        const luxnora=context.path.endsWith("/counter-management/index.html");
         const policy = [
-          "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+          "default-src 'none'", luxnora ? "script-src 'self' 'wasm-unsafe-eval'" : "script-src 'self'", "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob:", "font-src 'self' data:", "media-src 'self' blob:",
           "worker-src 'self' blob:", "manifest-src 'self'",
           `frame-src 'self'${authDomain ? ' https://' + authDomain : ''}`,

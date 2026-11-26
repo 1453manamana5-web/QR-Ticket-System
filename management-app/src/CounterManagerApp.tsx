@@ -1,3 +1,7 @@
+import type {Plan} from "./luxnora/language";
+import {LuxnoraPanel} from "./luxnora/LuxnoraPanel";
+import {diagnose,type Target} from "./luxnora/assistant";
+import {forecast,type Forecast} from "./luxnora/forecast";
 import {useEffect, useMemo, useRef, useState, type FormEvent} from "react";
 import {bounded, counterEvents, permissionDenied, verifyManager, watchCounterAuth, type CounterEvent, type CounterManager} from "./counterAuth";
 import {
@@ -193,9 +197,34 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
     (["in","out"] as const).every(role => scopeStations.some(station => station.role === role)) &&
     scopeStations.every(station => (station.lastSeen ?? 0) >= config.closed!);
   const analysisTime = config?.closed == null ? now : Math.min(now,config.closed);
-  const analysis = useMemo(() => (page === "home" || page === "event" || page === "analysis") && config?.opened != null && operations
+  const analysis = useMemo(() => config?.opened != null && operations
     ? analyze(operations,{eventId,mode,opened:config.opened,closed:config.closed,now:analysisTime,verified:sealed}) : null,
-    [operations,config,eventId,mode,analysisTime,sealed,page]);
+    [operations,config,eventId,mode,analysisTime,sealed]);
+  const current = ready&&!invalidRows&&stationsCurrent&&pending===0;
+  const prediction=useMemo(()=>analysis&&config?.opened!=null?forecast({
+    now,opened:config.opened,
+    ends:day?Date.parse(day.date+"T"+day.end+":00+09:00"):undefined,
+    healthy:current&&mode==="live"&&config.closed==null&&!config.paused&&(!day||["open","restricted"].includes(day.stage))&&
+      !analysis.issues.length&&scopeStations.every(station=>station.camera===true&&station.ai===true&&station.alert==="none"&&station.pending===0),
+    total:analysis.entries,occupancy:analysis.occupancy,events:analysis.effective,
+  }):[],[analysis,config,day,current,mode,now,scopeStations]);
+  const [focusRequest,setFocusRequest]=useState<{target:Target;stamp:number;plan?:Plan}|null>(null);
+  useEffect(()=>{
+    if(!focusRequest) return;
+    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+focusRequest.target+'"]');
+    if(!target) return;
+    target.classList.add("lux-highlight");
+    target.scrollIntoView({block:"center",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
+    const timer=setTimeout(()=>target.classList.remove("lux-highlight"),2400);
+    return ()=>{clearTimeout(timer);target.classList.remove("lux-highlight");};
+  },[focusRequest,page]);
+  const luxFocus=(target:Target,plan?:Plan)=>{
+    if(!eventId||denied||create) return;
+    if(target==="compare"||target==="graph") setPage("analysis");
+    else if(target==="in"||target==="out"||target==="stations") setPage("stations");
+    else setPage(target);
+    setFocusRequest({target,plan,stamp:Date.now()});
+  };
   const lastUpdate = denied ? undefined : data?.operations.lastChangeAt;
 
   async function perform(task: () => Promise<unknown>, success: string) {
@@ -215,10 +244,10 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
     } finally {submitting.current=false;setWorking(false);}
   }
   const choose = (next:string,nextMode=mode) => {
-    setNotice("");setEventId(next);setMode(nextMode);
+    setFocusRequest(null);setNotice("");setEventId(next);setMode(nextMode);
     if (eventMenu.current) eventMenu.current.open=false;
   };
-  const navigate = (next:Page) => {setPage(next);setNotice("");};
+  const navigate = (next:Page) => {setFocusRequest(null);setPage(next);setNotice("");};
   async function saveNew(draft:EventDraft) {
     if (!authReady || creating.current) return false;
     creating.current=true;setCreateBusy(true);setNotice("");
@@ -232,6 +261,13 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
       return false;
     } finally {creating.current=false;setCreateBusy(false);}
   }
+  const eventSuggestions:LuxnoraEventProvider=async draft=>{
+    const last=day??catalog?.days.filter(item=>item.finalized!=null).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const previous=catalog?.series.find(item=>item.id===last?.eventId);
+    if(!last||!previous) return null;
+    return {...(!draft.name.trim()?{name:previous.name}:{}),...(!draft.venue.trim()?{venue:previous.venue}:{}),
+      ...(draft.days[0]?.start!==last.start?{start:last.start}:{}),...(draft.days[0]?.end!==last.end?{end:last.end}:{})};
+  };
   const pendingRequests = stations.filter(row => row.status === "pending").length;
   const updating = Object.values(data ?? initialData()).some(part => part.source === "pending");
   const status = denied ? "権限を再確認中" : ready ? "接続済み" : updating ? "同期を確認中" : "現在の同期を確認できません";
@@ -266,7 +302,6 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         </div>
           <div className="cm-selectors">
             {eventId&&<label>表示する集計<select value={mode} onChange={e => choose(eventId,e.target.value as CounterMode)}><option value="live">本番</option><option value="test">試験</option></select></label>}
-            <details className="cm-lux"><summary>Luxnora</summary><p>{suggest?"イベント作成の入力欄から設定提案を確認できます。":"設定提案との連携を利用できる状態になったら、イベントの入力欄に表示されます。"}</p></details>
           </div>
         </div>
         <nav aria-label="管理メニュー" className="cm-nav">{Object.entries(pages).map(([id,title]) =>
@@ -277,7 +312,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         {eventsError && <p role="alert" className="cm-warning">{eventsError} <button onClick={fetchEvents}>再試行</button></p>}
         {notice && <p role="status" className="cm-notice">{notice}</p>}
         {!authReady && <p className="cm-warning" role="status">管理端末の権限を現在確認できません。表示済みの情報は古い可能性があります。 <button onClick={recheck}>再確認</button></p>}
-        {create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest}/>
+        {create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest??eventSuggestions}/>
         : page === "settings" ? <section className="cm-section"><h2>この管理端末</h2><dl className="cm-definition"><dt>名称</dt><dd>{manager.name}</dd><dt>権限</dt><dd>{admin ? "管理者" : "副管理者"}</dd><dt>承認先</dt><dd>QR受付の管理端末認証</dd></dl>
           <p>管理者・副管理者の登録と権限変更は、既存の管理端末設定で行います。</p><a href={base+"management-app/"}>QR受付管理を開く ↗</a></section>
         : !eventId ? <p className="cm-empty">{events?.length === 0 && catalog?.days.length === 0 ? "イベント名のメニューから新規作成できます。" : "イベントを読み込んでいます。"}</p>
@@ -288,16 +323,16 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
             <p className="cm-warning" role="status">イベントの一部を取得できませんでした。 <button onClick={fetchEvents}>再試行</button></p>}
           {invalidRows > 0 && <p className="cm-warning" role="status">読み取れないデータが {invalidRows}件あります。集計を確認してください。</p>}
           {(page === "home" || page === "analysis") && <Home day={day??undefined} navigate={navigate} detailed={page==="analysis"} analysis={analysis} config={config} stations={stations} mode={mode} now={now}
-            lastUpdate={lastUpdate} current={ready && !invalidRows && stationsCurrent && pending === 0} waiting={updating} />}
+            lastUpdate={lastUpdate} prediction={prediction} current={current} waiting={updating} />}
           {page==="analysis"&&analysis&&operations&&config?.opened!=null&&<CounterAnalysisTools key={scope}
             report={analysis} rows={operations} from={config.opened} to={config.closed??now} mode={mode} scope={eventId}
             name={eventName} venue={series?.venue} current={ready&&!invalidRows&&stationsCurrent&&pending===0}/>}
-          {page==="analysis"&&catalog&&<CounterComparison key={day?.eventId??"catalog"} catalog={catalog} initialSeriesId={day?.eventId}/>}
+          {page==="analysis"&&catalog&&<div data-lux-focus="compare"><CounterComparison key={day?.eventId??"catalog"} catalog={catalog} initialSeriesId={day?.eventId} initialView={focusRequest?.target==="compare"?"year":undefined}/></div>}
           {page==="stations"&&nativeDay&&<CounterPairPanel key={eventId} day={eventId} enabled={ready&&!working}/>}
           {page === "stations" && <StationList stations={stations} mode={mode} now={now} admin={admin} dedicated={nativeDay} enabled={ready&&!working}
             loading={data?.stations.source === "pending" || !data} perform={perform} eventId={eventId} version={day?.version} />}
-          {page === "records" && <Records key={scope} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
-            loading={data?.operations.source==="pending" || !data} perform={perform} now={now} />}
+          {page === "records" && <div data-lux-focus="records"><Records key={scope} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
+            loading={data?.operations.source==="pending" || !data} perform={perform} now={now} /></div>}
           {page==="records"&&admin&&config?.verified&&<section className="cm-section">
             <h2>確定済みの集計を再確認</h2>
             <p>JSONからの復元前に、集計を確認待ちへ戻してください。開催日と計測端末は閉場したままです。</p>
@@ -311,28 +346,31 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
           {page==="records"&&admin&&<CounterRestorePanel key={scope} scope={eventId} mode={mode} name={eventName}
             config={config} rows={operations??[]} enabled={ready&&!working}/>}
           {page==="event"&&series&&day&&<CounterScheduleEditor key={day.id+"/"+series.name+"/"+series.venue+"/"+day.start+"/"+day.end}
+            suggestion={focusRequest?.plan?.schedule} suggestionId={focusRequest?.stamp}
             series={series} day={day} enabled={ready&&!working&&activeDay?.id===eventId&&activeDay.verified}
             onSave={fields=>{void perform(async()=>{await editCounterSchedule(series,day,fields);fetchEvents();},"イベント情報を保存しました。");}}/>}
-          {page === "event" && (nativeDay && day ? <CounterDayPanel key={day.id+"/"+day.version} day={day} now={now}
+          {page === "event" && <div data-lux-focus="event">{nativeDay && day ? <CounterDayPanel key={day.id+"/"+day.version} day={day} now={now}
+            proposal={focusRequest?.plan?.operation} proposalId={focusRequest?.stamp}
             canOperate={ready&&!working&&activeDay?.id===eventId&&activeDay.verified} stations={stations}
             synced={mode==="live"&&ready&&!invalidRows&&pending===0&&analysis?.occupancy===0&&analysis.issues.length===0&&
               (["in","out"] as const).every(role=>scopeStations.some(station=>station.role===role))&&
               scopeStations.every(station=>station.pending===0&&(station.lastSeen??0)>=(day.ended??Infinity))}
             goStations={()=>navigate("stations")} openTest={()=>{choose(eventId,"test");navigate("analysis");}}
-            onAction={(command,review)=>{void perform(()=>operateCounterDay(day.id,day.version,command,review),
+            onAction={(command,review)=>{setFocusRequest(null);void perform(()=>operateCounterDay(day.id,day.version,command,review),
               "操作を保存しました。端末の通信状況を確認してください。");}}
           /> : <EventControls key={scope+"/"+data?.config.serverAt} eventId={eventId} mode={mode} config={config}
-            enabled={ready&&!working&&!nativeDay} admin={admin} perform={perform} />)}
+            enabled={ready&&!working&&!nativeDay} admin={admin} perform={perform} />}</div>}
         </>}
       </main>
     </div>
+    {!denied&&<LuxnoraPanel key={scope} evidence={{name:eventName,mode,now,config,day,stations,analysis,prediction,current}} focus={luxFocus} cancel={()=>setFocusRequest(null)}/>}
   </div>;
 }
 type Analysis = ReturnType<typeof analyze>;
 type Mutation = (task:()=>Promise<unknown>,success:string)=>Promise<void>;
 
-function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,navigate,detailed}: {
-  analysis:Analysis|null; config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;day?:Day;navigate:(page:Page)=>void;detailed:boolean;
+function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,navigate,detailed,prediction}: {
+  analysis:Analysis|null; config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;day?:Day;navigate:(page:Page)=>void;detailed:boolean;prediction:Forecast;
 }) {
   const peak = analysis?.timeline.reduce<{at:number;occupancy:number} | null>((max,row) => row.occupancy > (max?.occupancy ?? 0) ? row : max,null);
   const average = analysis?.sumAverage ?? (current ? analysis?.estimate : null);
@@ -352,8 +390,8 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,
       <Metric title="最大同時滞在" value={peak ? count(peak.occupancy) : "—"} unit={peak ? "人" : ""} detail={peak ? stamp(peak.at) : ""}/>
     </dl>
     <div className="cm-overview">
-      <section className="cm-section"><h2>{detailed?"滞在人数の推移":<button className="cm-text-action" onClick={()=>navigate("analysis")}>滞在人数の推移 <span aria-hidden="true">›</span></button>}</h2><p className="cm-caption">通過時刻に基づく集計</p>
-        {analysis?.timeline.length && open != null ? <OccupancyChart rows={analysis.timeline} from={open} to={config?.closed ?? now}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
+      <section className="cm-section" data-lux-focus="graph"><h2>{detailed?"滞在人数の推移":<button className="cm-text-action" onClick={()=>navigate("analysis")}>滞在人数の推移 <span aria-hidden="true">›</span></button>}</h2><p className="cm-caption">通過時刻に基づく集計</p>
+        {analysis?.timeline.length && open != null ? <OccupancyChart rows={analysis.timeline} from={open} to={config?.closed ?? now} prediction={prediction}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
       </section>
       <section className="cm-section"><h2>時間帯別の入退場</h2><p className="cm-caption"><span className="cm-legend in">入場</span><span className="cm-legend out">退場</span></p>
         {analysis?.hours.length ? <HourlyChart rows={analysis.hours}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
@@ -370,19 +408,28 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,
 function Metric({title,value,unit,detail,accent,drill}: {title:string;value:string;unit:string;detail?:string;accent?:boolean;drill?:()=>void}) {
   return <div className={accent ? "cm-metric cm-feature":"cm-metric"}><dt>{title}</dt><dd>{drill?<button className="cm-text-action" onClick={drill}>{value}<small>{unit}</small></button>:<>{value}<small>{unit}</small></>}</dd>{detail && <p>{detail}</p>}</div>;
 }
-function OccupancyChart({rows,from,to}: {rows:Analysis["timeline"];from:number;to:number}) {
+function OccupancyChart({rows,from,to,prediction}: {rows:Analysis["timeline"];from:number;to:number;prediction:Forecast}) {
   const chunk = Math.ceil(rows.length/800);
   const points = rows.filter((_,i) => i % chunk === 0 || i === rows.length-1);
-  const upper = rows.reduce((max,row) => Math.max(max,row.occupancy),1);
+  const upper = rows.reduce((max,row) => Math.max(max,row.occupancy),Math.max(1,...prediction.map(row=>row.high)));
+  const limit=prediction.at(-1)?.at??to;
+  const last=rows.at(-1)!.occupancy;
   const lower = rows.reduce((min,row) => Math.min(min,row.occupancy),0);
-  const px = (at:number) => 36 + 510 * (at-from)/Math.max(1,to-from);
+  const px = (at:number) => 36 + 510 * (at-from)/Math.max(1,limit-from);
   const py = (people:number) => 156 - (people-lower)*130/(upper-lower);
   const plot = points.map(row => "H"+px(row.at)+"V"+py(row.occupancy)).join("");
+  const projected=[{at:to,occupancy:last,low:last,high:last},...prediction];
+  const projection=(key:"occupancy"|"low"|"high",points:typeof projected)=>points.map(row=>px(row.at)+","+py(row[key])).join(" ");
   return <figure className="cm-plot"><svg viewBox="0 0 572 190" role="img" aria-label={"滞在人数の時系列。現在 "+rows[rows.length-1].occupancy+"人。"}>
     {[upper,lower,...lower<0 ? [0] : []].map(value => <g key={value}><path d={"M36 "+py(value)+"H546"} className="cm-axis"/><text x="4" y={py(value)+4}>{value}</text></g>)}
-    <path d={"M36 "+py(0)+plot+"H546"} className="cm-line"/>
-    <text x="36" y="180">{hour(from)}</text><text x="546" y="180" textAnchor="end">{hour(to)}</text>
-  </svg><details><summary>推移の数値を表示（直近20点）</summary><table><thead><tr><th>時刻</th><th>滞在</th></tr></thead><tbody>
+    <path d={"M36 "+py(0)+plot+"H"+px(to)} className="cm-line"/>
+    {!!prediction.length&&<g aria-label="推計の範囲">
+      <polygon points={projection("high",projected)+" "+projection("low",[...projected].reverse())} className="lux-forecast-band"/>
+      <line x1={px(to)} x2={px(to)} y1="26" y2="156" className="lux-forecast-border"/>
+      <polyline points={projection("occupancy",projected)} className="lux-forecast-line"/>
+    </g>}
+    <text x="36" y="180">{hour(from)}</text><text x="546" y="180" textAnchor="end">{hour(limit)}</text>
+  </svg>{!!prediction.length&&<p className="cm-caption">青紫の破線は滞在人数の予測、帯は直近の変動から算出した目安です。</p>}<details><summary>推移の数値を表示（直近20点）</summary><table><thead><tr><th>時刻</th><th>滞在</th></tr></thead><tbody>
     {rows.slice(-20).map(row => <tr key={row.at}><td>{stamp(row.at)}</td><td>{row.occupancy}人</td></tr>)}</tbody></table></details></figure>;
 }
 function HourlyChart({rows}: {rows:Analysis["hours"]}) {
@@ -400,10 +447,10 @@ function DeviceSignal({station,now}:{station:CounterStation;now:number}) {
 function StationList({stations,mode,now,admin,dedicated,enabled,loading,perform,eventId,version}: {
   stations:CounterStation[];mode:CounterMode;now:number;admin:boolean;dedicated:boolean;enabled:boolean;loading:boolean;perform:Mutation;eventId:string;version?:number;
 }) {
-  return <section className="cm-section"><h2>登録端末</h2><p className="cm-caption">計測画面からこのイベントIDで申請してください。 <code>{eventId}</code></p>
+  return <section className="cm-section" data-lux-focus="stations"><h2>登録端末</h2><p className="cm-caption">計測画面からこのイベントIDで申請してください。 <code>{eventId}</code></p>
     {loading ? <p className="cm-empty">端末を読み込んでいます。</p> : stations.length === 0 ? <p className="cm-empty">申請された端末がありません。</p> :
       <ul className="cm-stations">{[...stations].sort((a,b) => Number(b.status==="pending")-Number(a.status==="pending") || a.name.localeCompare(b.name,"ja")).map(station =>
-        <li key={station.uid}><div className="cm-device-title"><StationBadge role={station.role}/><h3>{station.name}</h3><span>{statusTitle[station.status]}</span></div>
+        <li key={station.uid} data-lux-focus={station.status==="approved"?station.role:undefined}><div className="cm-device-title"><StationBadge role={station.role}/><h3>{station.name}</h3><span>{statusTitle[station.status]}</span></div>
           <div className="cm-device-meta"><DeviceSignal station={station} now={now}/><span>最終通信 {stamp(station.lastSeen)}</span>
             <span>{station.mode ? modeTitle[station.mode]+"運用" : "運用未確認"}</span>{station.mode && station.mode !== mode && <span>表示中の運用と異なります</span>}</div>
           <dl className="cm-definition cm-telemetry"><dt>カメラ</dt><dd>{station.camera === undefined ? "—" : station.camera ? "稼働" : "停止"}</dd>
@@ -413,6 +460,12 @@ function StationList({stations,mode,now,admin,dedicated,enabled,loading,perform,
               ? "端末で確認済み · v"+version : "端末で未確認 · v"+version}</dd></>}</dl>
           {station.lastSeen && now-station.lastSeen>freshMs && <p className="cm-caption">表示は最後に取得した状態です。</p>}
           {alertTitle[station.alert ?? ""] && <p className="cm-caption">端末からの通知　{alertTitle[station.alert ?? ""]}</p>}
+          {station.status==="approved"&&<details><summary>Luxnoraの診断</summary><p>{diagnose(station,now)}</p>
+            {Number(station.version)>=16&&station.lux&&<p>端末からの最終報告　{station.lux.fps??"—"} FPS · 推論 {station.lux.inferenceMs??"—"} ms</p>}
+            {station.lux?.activity&&<p>直近の自己診断・復旧　{stamp(station.lux.activity.at)} ·
+              {({camera:"カメラ",inference:"認識処理",storage:"端末内保存"})[station.lux.activity.reason as "camera"|"inference"|"storage"]??"状態未確認"} ·
+              {({recovering:"復旧開始",verified:"復旧確認",failed:"現地確認待ち"})[station.lux.activity.state as "recovering"|"verified"|"failed"]??"結果未確認"}</p>}
+          </details>}
           {dedicated&&station.status==="approved"&&<CounterRemotePanel day={eventId} station={station} enabled={enabled} now={now}/>}
           {dedicated&&station.status!=="approved"&&<p className="cm-caption">計測端末で接続コードを表示し、上のペアリング欄で承認してください。</p>}
           {((!dedicated&&admin)||(dedicated&&station.status==="approved")) && <form className="cm-inline-form" key={station.uid+":"+station.name+":"+station.role+":"+station.status} onSubmit={event => {
