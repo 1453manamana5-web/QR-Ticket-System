@@ -72,3 +72,11 @@ footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
 
 #adaptiveMetrics,#adaptiveWarnings,#adaptiveResult,#adaptiveHistory{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
 #adaptiveTitle{scroll-margin-top:12px}
+
+.lux-station{font-size:.86rem}
+#luxStationHistory{white-space:pre-line}
+#luxStationState[data-state="recovering"]{animation:lux-station-recovery 1.6s ease-in-out infinite alternate;color:#304b9d}
+#luxStationState[data-state="verified"]{animation:lux-station-recovery .7s ease-out 1;color:#2d7057}
+#luxStationState[data-state="failed"]{color:#a23c32}
+@keyframes lux-station-recovery{from{text-shadow:none}to{text-shadow:0 0 8px #7a90cf}}
+@media(prefers-reduced-motion:reduce){#luxStationState{animation:none!important}}

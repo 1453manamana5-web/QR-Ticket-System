@@ -1,7 +1,7 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {initialConnection,observeConnection} from './connection.mjs?v=15';
-import {sameStationScope,stationResults} from './station-command.mjs?v=15';
-import {createVisionPipeline} from './vision.mjs?v=15';
+import {initialConnection,observeConnection} from './connection.mjs?v=16';
+import {sameStationScope,stationResults} from './station-command.mjs?v=16';
+import {createVisionPipeline} from './vision.mjs?v=16';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -93,7 +93,7 @@ function renderStation() {
   $('counterRemoteControl').textContent = captureBlockReason() || (control ? '管理画面の集計期間を使用しています。' : '');
 }
 async function remoteApi() {
-  return remoteModule ??= await import('./counter-sync.js?v=15&try=' + remoteAttempts++);
+  return remoteModule ??= await import('./counter-sync.js?v=16&try=' + remoteAttempts++);
 }
 function storeControl(config, next) {
   if (settings !== config || (!next && (control?.paused || control?.closed != null))) return;
@@ -186,9 +186,14 @@ function checkStation(config, remote) {
       lastHeartbeat = now;
       const state = window.counterStationCamera?.() ?? {};
       const metrics = {
-        version:'15', camera:state.camera === true, ai:state.ai === true,
+        version:'16', camera:state.camera === true, ai:state.ai === true,
         profile:['baseline','detail','lighting'].includes(state.profile) ? state.profile : 'unknown',
         pending:Math.min(activePending,1000000), mode:config.mode, configVersion:control?.version ?? null,
+        ...(state.activity||state.fps!=null||state.inferenceMs!=null ? {lux:{
+          fps:Number.isFinite(state.fps)?Math.min(240,Math.max(0,state.fps)):null,
+          inferenceMs:Number.isSafeInteger(state.inferenceMs)?Math.min(60000,Math.max(0,state.inferenceMs)):null,
+          activity:state.activity??null,
+        }} : {}),
         alert:(control?.paused || control?.closed != null) ? 'paused' : captureBlockReason() ? 'setup'
           : ['recalibrate','camera','storage'].includes(state.alert) ? state.alert
           : network === '同期エラー' ? 'network' : 'none',
@@ -596,7 +601,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v15') &&
+      ready = (await caches.keys()).includes('counter-v16') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}

@@ -965,12 +965,26 @@ service cloud.firestore {
           return signedIn() && request.auth.uid == uid;
         }
 
+        function validLuxnoraActivity(activity) {
+          return activity == null || (activity is map && activity.keys().hasOnly(["reason","state","at"])
+            && activity.reason in ["camera","inference","storage"]
+            && activity.state in ["recovering","verified","failed"]
+            && activity.at is int && counterTime(activity.at));
+        }
+
+        function validLuxnoraStatus(status) {
+          return status == null || (status is map && status.keys().hasOnly(["fps","inferenceMs","activity"])
+            && (status.fps == null || (status.fps is number && status.fps >= 0 && status.fps <= 240))
+            && (status.inferenceMs == null || (status.inferenceMs is int && status.inferenceMs >= 0 && status.inferenceMs <= 60000))
+            && validLuxnoraActivity(status.activity));
+        }
+
         function validCounterHeartbeat(data) {
           return data.diff(resource.data).affectedKeys().hasOnly([
-              "lastSeen", "version", "camera", "ai", "profile", "pending", "alert", "mode", "configVersion"
+              "lastSeen", "version", "camera", "ai", "profile", "pending", "alert", "mode", "configVersion", "lux"
             ])
             && data.lastSeen == request.time && data.version is string && data.version.matches("^[0-9]{1,6}$")
-            && data.camera is bool && data.ai is bool && counterMode(data.mode)
+            && data.camera is bool && data.ai is bool && counterMode(data.mode) && validLuxnoraStatus(data.get("lux",null))
             && (data.get("configVersion", null) == null || (data.configVersion is int && data.configVersion >= 0
               && data.configVersion <= get(/databases/$(database)/documents/events/$(eventId)/counterConfig/$(data.mode)).data.version))
             && data.profile in ["baseline", "detail", "lighting", "unknown"]

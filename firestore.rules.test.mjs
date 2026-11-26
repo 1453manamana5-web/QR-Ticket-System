@@ -764,6 +764,10 @@ test("counter devices self-enroll only as pending; operators can inspect and onl
   await assertSucceeds(updateDoc(counterDevice(admin,"counter-station"),{status:"approved",updatedAt:serverTimestamp(),updatedByUid:"counter-admin"}));
   const heartbeat = {lastSeen:serverTimestamp(),version:"13",camera:true,ai:true,profile:"detail",pending:2,alert:"none",mode:"live"};
   await assertSucceeds(updateDoc(counterDevice(station,"counter-station"),heartbeat));
+  const lux={fps:4.5,inferenceMs:118,activity:{reason:"camera",state:"verified",at:Date.now()}};
+  await assertSucceeds(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,version:"16",lux}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,lux:{...lux,frame:"raw"}}));
+  await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,lux:{...lux,activity:{...lux.activity,trackId:"1"}}}));
   await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,rawTrackCount:2}));
   await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,alert:"自由入力"}));
   await assertFails(updateDoc(counterDevice(station,"counter-station"),{...heartbeat,status:"revoked"}));
