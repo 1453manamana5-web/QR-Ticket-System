@@ -62,9 +62,19 @@ service cloud.firestore {
       return /databases/$(database)/documents/events/$(eventId)/counterDevices/$(request.auth.uid);
     }
 
+    function counterAssignment(eventId, role) {
+      return /databases/$(database)/documents/events/$(eventId)/counterAssignments/$(role);
+    }
+
+    function ownCounterAssignment(eventId) {
+      let device = get(counterDevicePath(eventId)).data;
+      return get(counterAssignment(eventId, device.role)).data.uid == request.auth.uid;
+    }
+
     function approvedCounterDevice(eventId) {
       return signedIn() && exists(counterDevicePath(eventId))
-        && get(counterDevicePath(eventId)).data.status == "approved";
+        && get(counterDevicePath(eventId)).data.status == "approved"
+        && (!exists(counterDayPath(eventId)) || ownCounterAssignment(eventId));
     }
 
     function counterMode(mode) {
@@ -77,7 +87,8 @@ service cloud.firestore {
 
     function validCounterConfig(data) {
       return data.keys().hasAll(["opened", "closed", "paused", "verified", "updatedAt", "updatedByUid"])
-        && data.keys().hasOnly(["opened", "closed", "paused", "verified", "updatedAt", "updatedByUid"])
+        && data.keys().hasOnly(["opened", "closed", "paused", "verified", "updatedAt", "updatedByUid", "version"])
+        && (!data.keys().hasAny(["version"]) || (data.version is int && data.version >= 0))
         && (data.opened == null || (data.opened is int && counterTime(data.opened)))
         && (data.closed == null || (data.closed is int && counterTime(data.closed) && data.opened != null && data.closed >= data.opened))
         && data.paused is bool && data.verified is bool
@@ -110,10 +121,11 @@ service cloud.firestore {
     function validCounterPassage(data) {
       return data.keys().hasAll(["at", "direction", "person", "source", "invalid"])
         && data.keys().hasOnly(["id", "kind", "eventId", "mode", "device", "actorUid", "rawAt", "at", "createdAt",
-          "station", "direction", "person", "source", "invalid", "clockWarning", "clockUncertainty", "reason", "sequence", "passageId"])
+          "station", "direction", "person", "source", "invalid", "clockWarning", "clockUncertainty", "reason", "sequence", "passageId", "configVersion"])
         && data.id.matches("^ledger:.*$")
         && counterTime(data.at) && data.direction in ["in", "out"]
         && data.person in ["visitor", "staff"] && data.source in ["auto", "manual"] && data.invalid == false
+        && (!data.keys().hasAny(["configVersion"]) || (data.configVersion is int && data.configVersion >= 0))
         && (!data.keys().hasAny(["sequence"]) || (data.sequence is int && data.sequence > 0))
         && (!data.keys().hasAny(["passageId"]) || validCounterDeviceId(data.passageId))
         && (!data.keys().hasAny(["clockWarning"]) || (data.clockWarning is string && data.clockWarning.size() <= 80))
@@ -672,6 +684,110 @@ service cloud.firestore {
         && request.resource.data.at == request.time;
     }
 
+    function counterDayPath(id) {
+      return /databases/$(database)/documents/counterDays/$(id);
+    }
+
+    function counterScopeExists(id) {
+      return exists(counterDayPath(id)) || exists(/databases/$(database)/documents/events/$(id));
+    }
+
+    function counterUuid(id) {
+      return id is string && id.matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    }
+
+    function validCounterAudit(data) {
+      return data.updatedAt == request.time && data.updatedByUid == request.auth.uid;
+    }
+
+    function counterStage(value) {
+      return value in ["prepare", "trial", "open", "restricted", "closing", "finished"];
+    }
+
+    function counterWall(value) {
+      return value == null || (value is int && counterTime(value)
+        && value <= (request.time + duration.value(2, "m")).toMillis());
+    }
+
+    match /counterEvents/{id} {
+      allow get, list: if counterOperator();
+      allow create, update: if counterOperator() && counterUuid(id)
+        && request.resource.data.keys().hasOnly(["name", "venue", "updatedAt", "updatedByUid"])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100
+        && request.resource.data.venue is string && request.resource.data.venue.size() > 0 && request.resource.data.venue.size() <= 100
+        && validCounterAudit(request.resource.data);
+    }
+
+    match /counterDays/{id} {
+      function validDay(data) {
+        return data.keys().hasOnly(["eventId","date","start","end","stage","opened","trialOpened",
+          "closing","ended","emptyConfirmed","finalized","version","operation","updatedAt","updatedByUid"])
+          && counterUuid(data.eventId) && data.date is string && data.date.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+          && id == data.eventId + "_" + data.date
+          && data.start is string && data.start.matches("^([01][0-9]|2[0-3]):[0-5][0-9]$")
+          && data.end is string && data.end.matches("^([01][0-9]|2[0-3]):[0-5][0-9]$")
+          && int(data.start.split(":")[0]) * 60 + int(data.start.split(":")[1])
+            < int(data.end.split(":")[0]) * 60 + int(data.end.split(":")[1]) && counterStage(data.stage)
+          && counterWall(data.opened) && counterWall(data.trialOpened) && counterWall(data.closing)
+          && counterWall(data.ended) && counterWall(data.emptyConfirmed) && counterWall(data.finalized)
+          && data.version is int && validCounterAudit(data);
+      }
+
+      function validStep(old, next, command) {
+        let diff = next.diff(old).affectedKeys();
+        let core = ["stage","version","operation","updatedAt","updatedByUid"];
+        return (command == "trial" && old.stage == "prepare" && next.stage == "trial"
+                && next.trialOpened != null && (old.trialOpened == null || next.trialOpened == old.trialOpened)
+                && diff.hasOnly(core.concat(["trialOpened"])))
+          || (command == "prepare" && old.stage == "trial" && next.stage == "prepare" && diff.hasOnly(core))
+          || (command == "open" && old.stage in ["prepare","trial"] && next.stage == "open"
+                && next.opened != null && diff.hasOnly(core.concat(["opened"])))
+          || (command == "restrict" && old.stage == "open" && next.stage == "restricted" && diff.hasOnly(core))
+          || (command == "unrestrict" && old.stage == "restricted" && next.stage == "open" && diff.hasOnly(core))
+          || (command == "close" && old.stage in ["open","restricted"] && next.stage == "closing"
+                && next.closing != null && next.closing >= old.opened && diff.hasOnly(core.concat(["closing"])))
+          || (command == "reopen" && old.stage == "closing" && next.stage == "open"
+                && next.closing == null && diff.hasOnly(core.concat(["closing"])))
+          || (command == "finish" && old.stage == "closing" && next.stage == "finished"
+                && next.ended != null && next.ended >= old.closing && next.emptyConfirmed == next.ended
+                && next.finalized == null && diff.hasOnly(core.concat(["ended","emptyConfirmed"])))
+          || (command == "verify" && old.stage == "finished" && old.finalized == null && next.stage == "finished"
+                && next.finalized != null && next.finalized >= old.ended && diff.hasOnly(core.concat(["finalized"])));
+      }
+
+      function withCounterAction(next) {
+        let path = /databases/$(database)/documents/counterDays/$(id)/actions/$(next.operation);
+        let action = getAfter(path).data;
+        return counterUuid(next.operation) && !exists(path)
+          && action.from == resource.data.stage && action.to == next.stage && action.version == next.version
+          && validCounterAudit(action) && validStep(resource.data,next,action.command);
+      }
+
+      allow get, list: if counterOperator();
+      allow create: if counterOperator() && validDay(request.resource.data)
+        && existsAfter(/databases/$(database)/documents/counterEvents/$(request.resource.data.eventId))
+        && request.resource.data.stage == "prepare" && request.resource.data.version == 0
+        && request.resource.data.operation == "" && request.resource.data.opened == null
+        && request.resource.data.trialOpened == null && request.resource.data.closing == null
+        && request.resource.data.ended == null && request.resource.data.emptyConfirmed == null
+        && request.resource.data.finalized == null;
+      allow update: if counterOperator() && validDay(request.resource.data)
+        && ((resource.data.stage == "prepare"
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["start","end","updatedAt","updatedByUid"]))
+          || (request.resource.data.version == resource.data.version + 1 && withCounterAction(request.resource.data)
+            && getAfter(/databases/$(database)/documents/events/$(id)/counterConfig/live).data.version == request.resource.data.version
+            && getAfter(/databases/$(database)/documents/events/$(id)/counterConfig/test).data.version == request.resource.data.version));
+
+      match /actions/{operation} {
+        allow get, list: if counterOperator();
+        allow create: if counterOperator() && counterUuid(operation)
+          && request.resource.data.keys().hasOnly(["from","to","command","version","updatedAt","updatedByUid"])
+          && validCounterAudit(request.resource.data)
+          && getAfter(counterDayPath(id)).data.operation == operation
+          && getAfter(counterDayPath(id)).data.version == get(counterDayPath(id)).data.version + 1;
+      }
+    }
+
     match /events/{eventId} {
       // The client query must include where("receptionTarget", "==", true).
       allow get, list: if approvedManagementTerminal()
@@ -731,6 +847,21 @@ service cloud.firestore {
         allow delete: if approvedManagementTerminal();
       }
 
+      match /counterAssignments/{role} {
+        allow get: if counterOperator();
+        allow create, update: if counterOperator() && exists(counterDayPath(eventId)) && role in ["in","out"]
+          && request.resource.data.keys().hasOnly(["uid","updatedAt","updatedByUid"])
+          && validCounterAudit(request.resource.data)
+          && (request.resource.data.uid == null
+            ? (resource != null && resource.data.uid is string &&
+              (getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(resource.data.uid)).data.status != "approved"
+                || getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(resource.data.uid)).data.role != role))
+            : (request.resource.data.uid is string && request.resource.data.uid.size() <= 160
+              && (resource == null || resource.data.uid == null || resource.data.uid == request.resource.data.uid)
+              && getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(request.resource.data.uid)).data.status == "approved"
+              && getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(request.resource.data.uid)).data.role == role));
+      }
+
       match /counterDevices/{uid} {
         function ownCounterDevice() {
           return signedIn() && request.auth.uid == uid;
@@ -738,10 +869,12 @@ service cloud.firestore {
 
         function validCounterHeartbeat(data) {
           return data.diff(resource.data).affectedKeys().hasOnly([
-              "lastSeen", "version", "camera", "ai", "profile", "pending", "alert", "mode"
+              "lastSeen", "version", "camera", "ai", "profile", "pending", "alert", "mode", "configVersion"
             ])
             && data.lastSeen == request.time && data.version is string && data.version.matches("^[0-9]{1,6}$")
             && data.camera is bool && data.ai is bool && counterMode(data.mode)
+            && (data.get("configVersion", null) == null || (data.configVersion is int && data.configVersion >= 0
+              && data.configVersion <= get(/databases/$(database)/documents/events/$(eventId)/counterConfig/$(data.mode)).data.version))
             && data.profile in ["baseline", "detail", "lighting", "unknown"]
             && data.pending is int && data.pending >= 0 && data.pending <= 1000000
             && data.alert in ["none", "paused", "setup", "recalibrate", "camera", "storage", "network"];
@@ -759,23 +892,45 @@ service cloud.firestore {
 
         allow get: if ownCounterDevice() || counterOperator();
         allow list: if counterOperator();
-        allow create: if ownCounterDevice() && exists(/databases/$(database)/documents/events/$(eventId))
+        allow create: if ownCounterDevice() && counterScopeExists(eventId)
           && request.resource.data.keys().hasAll(["name", "device", "role", "status", "requestedAt"])
           && request.resource.data.keys().hasOnly(["name", "device", "role", "status", "requestedAt"])
           && validCounterDeviceName(request.resource.data.name) && validCounterDeviceId(request.resource.data.device)
           && request.resource.data.role in ["in", "out"] && request.resource.data.status == "pending"
           && request.resource.data.requestedAt == request.time;
-        allow update: if (ownCounterDevice() && resource.data.status == "approved" && validCounterHeartbeat(request.resource.data))
-          || (counterAdministrator() && validCounterDeviceDecision(request.resource.data));
+        function assignmentMatches(data) {
+          return (data.status != "approved" || getAfter(counterAssignment(eventId,data.role)).data.uid == uid)
+            && (resource.data.status != "approved" || (data.status == "approved" && data.role == resource.data.role)
+              || getAfter(counterAssignment(eventId,resource.data.role)).data.uid == null);
+        }
+
+        allow update: if (ownCounterDevice() && approvedCounterDevice(eventId) && validCounterHeartbeat(request.resource.data))
+          || (validCounterDeviceDecision(request.resource.data) &&
+            ((!exists(counterDayPath(eventId)) && counterAdministrator())
+              || (exists(counterDayPath(eventId)) && assignmentMatches(request.resource.data)
+                && (counterAdministrator() || (counterOperator() && resource.data.status in ["pending","approved"]
+                  && request.resource.data.status in ["pending","approved","rejected"]
+                  && (resource.data.status != "approved" || request.resource.data.status == "approved"))))));
+
       }
 
       match /counterConfig/{mode} {
         allow get: if counterMode(mode) && (approvedCounterDevice(eventId) || counterOperator());
-        allow create: if counterMode(mode) && exists(/databases/$(database)/documents/events/$(eventId))
-          && counterAdministrator() && validCounterConfig(request.resource.data);
-        allow update: if counterMode(mode) && validCounterConfig(request.resource.data)
-          && (counterAdministrator() || (counterOperator() && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["paused", "updatedAt", "updatedByUid"])));
+        function matchesCounterDay(data) {
+          let day = getAfter(counterDayPath(eventId)).data;
+          return validCounterAudit(day) && data.version == day.version
+            && (mode == "live"
+              ? data.opened == day.opened && data.closed == day.ended && data.verified == (day.finalized != null)
+                && data.paused == !(day.stage in ["open","restricted","closing"])
+              : data.opened == day.trialOpened && data.closed == null && data.verified == false
+                && data.paused == (day.stage != "trial"));
+        }
+        allow create, update: if counterMode(mode) && validCounterConfig(request.resource.data)
+          && ((existsAfter(counterDayPath(eventId)) && counterOperator() && matchesCounterDay(request.resource.data))
+            || (!existsAfter(counterDayPath(eventId)) && exists(/databases/$(database)/documents/events/$(eventId))
+              && (counterAdministrator() || (resource != null && counterOperator()
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["paused","updatedAt","updatedByUid"])))));
+
       }
 
       match /counterRuns/{mode}/operations/{operationId} {
@@ -804,7 +959,7 @@ service cloud.firestore {
         }
 
         allow get, list: if counterMode(mode) && (approvedCounterDevice(eventId) || counterOperator());
-        allow create: if counterMode(mode) && exists(/databases/$(database)/documents/events/$(eventId))
+        allow create: if counterMode(mode) && counterScopeExists(eventId)
           && request.resource.data.keys().hasOnly(["payload", "receivedAt"])
           && request.resource.data.receivedAt == request.time
           && validOperation(request.resource.data.payload)

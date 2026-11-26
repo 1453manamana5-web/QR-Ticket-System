@@ -1,5 +1,6 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {createVisionPipeline} from './vision.mjs?v=13';
+import {initialConnection,observeConnection} from './connection.mjs?v=14';
+import {createVisionPipeline} from './vision.mjs?v=14';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -19,6 +20,7 @@ let retry = 5000;
 let syncTimer;
 let pending = 0;
 let network = '同期未確認';
+let connection = initialConnection;
 let activeCursor;
 let loadedScope;
 let lastSuccessfulPull = 0;
@@ -58,6 +60,8 @@ function loadDeniedStation(cfg) {
 }
 function captureBlockReason() {
   if (settings?.mode === 'live' && deniedStation) return 'この端末の本番承認を確認してください。管理画面で再承認されるまで計測を待機します。';
+  if (settings && /^[a-f0-9-]{36}_[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(settings.eventId) &&
+      (!control || !Number.isSafeInteger(control.version))) return '管理画面からの運用設定をまだ確認できません。';
   if (control?.closed != null && control.closed <= Date.now()) return '管理画面で閉場済みです。';
   if (control?.paused) return '管理画面で計測が一時停止されています。';
   if (assignedRole && settings?.role !== assignedRole) return '端末の設置区分が管理画面で変更されました。停止中に運用設定とA・Bの方向を確認してください。';
@@ -75,7 +79,7 @@ function renderStation() {
   $('counterRemoteControl').textContent = captureBlockReason() || (control ? '管理画面の集計期間を使用しています。' : '');
 }
 async function remoteApi() {
-  return remoteModule ??= await import('./counter-sync.js?v=13&try=' + remoteAttempts++);
+  return remoteModule ??= await import('./counter-sync.js?v=14&try=' + remoteAttempts++);
 }
 function storeControl(config, next) {
   if (settings !== config || (!next && (control?.paused || control?.closed != null))) return;
@@ -89,8 +93,10 @@ function storeControl(config, next) {
 function checkStation(config, remote) {
   if (controlFlight?.config === config) return controlFlight.promise;
   const promise = (async () => {
+    const started=performance.now();
     const station = await deadline(remote.readCounterStation(config.eventId));
     if (settings !== config) return false;
+    connection=observeConnection(connection,{success:true,roundTrip:performance.now()-started});
     stationNote = '';
     if (station && station.device !== device) {
       stationState = 'mismatch';
@@ -118,9 +124,9 @@ function checkStation(config, remote) {
       lastHeartbeat = now;
       const state = window.counterStationCamera?.() ?? {};
       const metrics = {
-        version:'13', camera:state.camera === true, ai:state.ai === true,
+        version:'14', camera:state.camera === true, ai:state.ai === true,
         profile:['baseline','detail','lighting'].includes(state.profile) ? state.profile : 'unknown',
-        pending:Math.min(activePending,1000000), mode:config.mode,
+        pending:Math.min(activePending,1000000), mode:config.mode, configVersion:control?.version ?? null,
         alert:(control?.paused || control?.closed != null) ? 'paused' : captureBlockReason() ? 'setup'
           : ['recalibrate','camera','storage'].includes(state.alert) ? state.alert
           : network === '同期エラー' ? 'network' : 'none',
@@ -143,8 +149,11 @@ function scheduleControl(ms = 15000) {
       try {
         const approved = await checkStation(config,await deadline(remoteApi()));
         if (approved && stationState === 'approved' && network === '未承認') schedule(0);
-      } catch {
+      } catch (error) {
         if (settings === config) {
+          if (!String(error?.code ?? '').includes('permission-denied') && !busy) {
+            connection=observeConnection(connection,{success:false,offline:navigator.onLine===false});renderState();
+          }
           stationNote = 'サーバーに接続できません。端末内の記録を保持します。';
           renderStation();
         }
@@ -160,7 +169,7 @@ const error = message => { $('ledgerError').textContent = message; };
 function renderState() {
   $('ledgerState').textContent = settings
     ? (settings.mode === 'live' ? '本番' : '試験') + ' · ' + (settings.role === 'in' ? '入口' : '出口') +
-      ' · ' + network + ' · 未同期 ' + pending + '件'
+      ' · 通信 ' + connection.label + ' · 同期 ' + network + ' · 未同期 ' + pending + '件'
     : '運用設定を保存すると通過ごとの記録を始めます。';
   if (syncError) $('ledgerState').textContent += ' · ' + syncError;
   if (retainedPending) $('ledgerState').textContent += ' · 同期できない旧端末記録 ' + retainedPending +
@@ -182,6 +191,7 @@ function capture(rawAt, source) {
   checkClock(rawAt);
   const usable = clock && !clockChanged;
   return {eventId: settings.eventId, mode: settings.mode, rawAt,
+    ...(Number.isSafeInteger(control?.version) ? {configVersion:control.version} : {}),
     at: rawAt + (usable ? clock.offset : 0), device, station: settings.role, direction: settings.role,
     person: 'visitor', source, invalid: false, clockUncertainty: usable ? clock.uncertainty : null,
     clockWarning: clockChanged ? '端末の時計が変更された疑い' : !usable ? '時刻未補正'
@@ -300,6 +310,9 @@ async function sync() {
     if (settings === config) lastSuccessfulPull = Date.now() + (clock?.offset ?? 0);
     retry = 5000;
   } catch (e) {
+    if (settings===config && !String(e?.code ?? '').includes('permission-denied')) {
+      connection=observeConnection(connection,{success:false,offline:navigator.onLine===false});
+    }
     network = navigator.onLine === false ? 'オフライン' : '同期エラー';
     syncError = '端末内の記録を保持して再試行します。 ' + e.message;
     retry = Math.min(retry * 2, 120000);
@@ -491,7 +504,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v13') &&
+      ready = (await caches.keys()).includes('counter-v14') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}

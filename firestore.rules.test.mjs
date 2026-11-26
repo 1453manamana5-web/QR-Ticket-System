@@ -848,3 +848,63 @@ test("counter managers can append manual entries and revisions without forging i
   await assertFails(setDoc(counterOperation(sub,counterRevisionId),counterData({...revision,after:{...before,pose:[]}})));
   await assertSucceeds(setDoc(counterOperation(sub,counterRevisionId),counterData(revision)));
 });
+
+test("dedicated counter series allows multiple dates, requires audited atomic lifecycle and never creates a QR event", async () => {
+  await seedCounterRoles();
+  const sub=counterDb("counter-sub"), stranger=counterDb("stranger");
+  const eventId="81111111-1111-4111-8111-111111111119", id=eventId+"_2026-11-24";
+  const day=doc(sub,"counterDays",id), root=doc(sub,"counterEvents",eventId);
+  const audit={updatedAt:serverTimestamp(),updatedByUid:"counter-sub"};
+  const config=(scope,mode)=>doc(sub,"events",scope,"counterConfig",mode);
+  const blank={stage:"prepare",opened:null,trialOpened:null,closing:null,ended:null,
+    emptyConfirmed:null,finalized:null,version:0,operation:""};
+  const initial={opened:null,closed:null,paused:true,verified:false,version:0,...audit};
+  await assertFails(setDoc(doc(stranger,"counterEvents",eventId),{name:"展示",venue:"会場",...audit}));
+  const register=writeBatch(sub);
+  register.set(root,{name:"展示",venue:"会場",...audit});
+  for(let date=24;date<=30;date++){
+    const dayDate="2026-11-"+date, scope=eventId+"_"+dayDate;
+    register.set(doc(sub,"counterDays",scope),{eventId,date:dayDate,start:"09:00",end:"16:00",...blank,...audit});
+    register.set(config(scope,"live"),initial);
+    register.set(config(scope,"test"),initial);
+  }
+  await assertSucceeds(register.commit());
+  await assertSucceeds(getDoc(day));
+  await assertSucceeds(updateDoc(day,{start:"10:00",...audit}));
+  await assertFails(getDoc(doc(stranger,"counterDays",id)));
+  const lead=counterDb("counter-admin");
+  const legacyParent=await assertSucceeds(getDoc(doc(lead,"events",id)));
+  if(legacyParent.exists())throw new Error("counter series wrote a QR event");
+  const operation="81111111-1111-4111-8111-111111111110", route=doc(sub,"counterDays",id,"actions",operation);
+  const now=Date.now(), opened={stage:"open",opened:now,version:1,operation,...audit};
+  await assertFails(updateDoc(day,opened));
+  await assertFails(setDoc(route,{from:"prepare",to:"open",command:"open",version:1,...audit}));
+  await assertFails(updateDoc(config(id,"live"),{paused:false,...audit}));
+  const update=writeBatch(sub);
+  update.update(day,opened);
+  update.set(route,{from:"prepare",to:"open",command:"open",version:1,...audit});
+  update.set(config(id,"live"),{...initial,opened:now,paused:false,version:1});
+  update.set(config(id,"test"),{...initial,version:1});
+  await assertSucceeds(update.commit());
+  await assertFails(updateDoc(day,{start:"11:00",...audit}));
+  await assertFails(deleteDoc(route));
+  const first=counterDb("counter-station"), second=counterDb("stranger");
+  await assertSucceeds(setDoc(counterDevice(first,"counter-station",id),{...pendingCounterDevice,requestedAt:serverTimestamp()}));
+  await assertSucceeds(setDoc(counterDevice(second,"stranger",id),{...pendingCounterDevice,requestedAt:serverTimestamp()}));
+  const assignment=doc(sub,"events",id,"counterAssignments","in");
+  const firstDevice=counterDevice(sub,"counter-station",id),secondDevice=counterDevice(sub,"stranger",id);
+  await assertFails(updateDoc(firstDevice,{status:"approved",...audit}));
+  const approve=writeBatch(sub);
+  approve.update(firstDevice,{status:"approved",...audit});
+  approve.set(assignment,{uid:"counter-station",...audit});
+  await assertSucceeds(approve.commit());
+  await assertSucceeds(getDoc(config(id,"live")));
+  const duplicate=writeBatch(sub);
+  duplicate.update(secondDevice,{status:"approved",...audit});
+  duplicate.set(assignment,{uid:"stranger",...audit});
+  await assertFails(duplicate.commit());
+  const revoke=writeBatch(sub);
+  revoke.update(firstDevice,{status:"revoked",...audit});
+  revoke.set(assignment,{uid:null,...audit});
+  await assertFails(revoke.commit());
+});

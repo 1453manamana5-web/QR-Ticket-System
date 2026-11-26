@@ -7,7 +7,7 @@ type Role = "in" | "out";
 type StationStatus = "pending" | "approved" | "rejected" | "revoked";
 type Operation = {id: string; eventId: string; mode: string; synced?: boolean};
 type Station = {name: string; device: string; role: Role; status: StationStatus};
-type EventConfig = {opened: number | null; closed: number | null; paused: boolean; verified: boolean};
+type EventConfig = {opened: number | null; closed: number | null; paused: boolean; verified: boolean; version: number | null};
 type Heartbeat = {version: "13"; camera: boolean; ai: boolean; profile: "baseline" | "detail" | "lighting" | "unknown";
   pending: number; alert: "none" | "paused" | "setup" | "recalibrate" | "camera" | "storage" | "network"; mode: Mode};
 type Cursor = {seconds: number; nanoseconds: number; id: string};
@@ -46,13 +46,13 @@ export async function readCounterConfig(eventId: string, mode: Mode) {
   await ensureFirebaseAuth();
   const snapshot = await getDocFromServer(doc(getFirebaseDb(), "events", eventId, "counterConfig", mode));
   if (!snapshot.exists()) return null;
-  const {opened, closed, paused, verified} = snapshot.data();
+  const {opened, closed, paused, verified, version} = snapshot.data();
   if (![opened, closed].every(value => value === null || Number.isSafeInteger(value)) ||
       typeof paused !== "boolean" || typeof verified !== "boolean") throw new Error("管理側の設定を読み込めません");
-  return {opened, closed, paused, verified} as EventConfig;
+  return {opened, closed, paused, verified, version: Number.isSafeInteger(version) ? version : null} as EventConfig;
 }
 
-export async function heartbeatCounterStation(eventId: string, health: Heartbeat) {
+export async function heartbeatCounterStation(eventId: string, health: Heartbeat & {configVersion?:number|null}) {
   const uid = await getFirebaseUid();
   const db = getFirebaseDb();
   const ref = doc(db, "events", eventId, "counterDevices", uid);

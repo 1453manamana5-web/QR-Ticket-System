@@ -1,11 +1,11 @@
-import { LineTracker } from "./tracker.mjs?v=13";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=13";
+import { LineTracker } from "./tracker.mjs?v=14";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=14";
 
-import { verifyBodies } from "./body-check.mjs?v=13";
-import { createVisionPipeline } from "./vision.mjs?v=13";
+import { verifyBodies } from "./body-check.mjs?v=14";
+import { createVisionPipeline } from "./vision.mjs?v=14";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=13";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=13";
+import { openRecordStore, totalOf } from "./records.mjs?v=14";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=14";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const adaptive = window.counterAdaptive;

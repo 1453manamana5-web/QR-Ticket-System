@@ -1,8 +1,8 @@
-const version = 'counter-v13';
+const version = 'counter-v14';
 const assets = 'counter-model-assets-v1';
-const shell = ['./', 'index.html', 'style.css?v=13', 'app.js?v=13', 'ledger-ui.mjs?v=13',
-  'ledger.mjs', 'adaptive-ui.mjs?v=13', 'adaptive-environment.mjs?v=13', 'adaptive-calibration.mjs?v=13', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
-    .map(name => name + '.mjs?v=13')];
+const shell = ['./', 'index.html', 'style.css?v=14', 'app.js?v=14', 'ledger-ui.mjs?v=14',
+  'ledger.mjs', 'connection.mjs?v=14', 'adaptive-ui.mjs?v=14', 'adaptive-environment.mjs?v=14', 'adaptive-calibration.mjs?v=14', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
+    .map(name => name + '.mjs?v=14')];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(version).then(cache => cache.addAll(shell)).then(() => self.skipWaiting()));
 });

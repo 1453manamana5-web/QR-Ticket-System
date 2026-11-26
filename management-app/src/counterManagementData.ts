@@ -28,6 +28,7 @@ export type CounterStation = {
   ai?: boolean;
   profile?: string;
   pending?: number;
+  configVersion?: number;
   alert?: string;
   mode?: CounterMode;
   updatedAt?: number;
@@ -87,6 +88,7 @@ function decodeStation(uid: string, data: DocumentData): CounterStation | null {
   return {
     uid, name, device, role, status, requestedAt, lastSeen: optionalMillis(data.lastSeen),
     updatedAt: optionalMillis(data.updatedAt),
+    configVersion: Number.isSafeInteger(data.configVersion) ? data.configVersion : undefined,
     version: typeof version === "string" ? version : undefined,
     camera: typeof camera === "boolean" ? camera : undefined,
     ai: typeof ai === "boolean" ? ai : undefined,
@@ -124,6 +126,7 @@ function decodeOperation(id: string, eventId: string, mode: CounterMode, payload
     const fields = passageFields(payload);
     if (!fields) return null;
     return {...base,...fields,kind:"passage",source:payload.source,
+      configVersion:Number.isSafeInteger(payload.configVersion) ? Number(payload.configVersion) : undefined,
       sequence:Number.isSafeInteger(payload.sequence) ? Number(payload.sequence) : undefined,
       passageId:typeof payload.passageId === "string" ? payload.passageId : undefined,
       reason:typeof payload.reason === "string" ? payload.reason : undefined};
@@ -279,8 +282,23 @@ export async function saveCounterStation(eventId: string, stationUid: string, pa
   const db = getFirebaseDb();
   const reference = doc(db,"events",eventId,"counterDevices",stationUid);
   await runTransaction(db, async transaction => {
-    await transaction.get(reference);
-    transaction.update(reference,{...update,updatedAt:serverTimestamp(),updatedByUid:uid});
+    const station=(await transaction.get(reference)).data();
+    const dedicated=(await transaction.get(doc(db,"counterDays",eventId))).exists();
+    if (!station) throw new Error("端末の登録情報が見つかりません。");
+    const audit={updatedAt:serverTimestamp(),updatedByUid:uid};
+    if (dedicated) {
+      const role=update.role ?? station.role, status=update.status ?? station.status;
+      const previous=station.status==="approved" ? station.role : null;
+      const next=status==="approved" ? role : null;
+      if (next) {
+        const assignment=doc(db,"events",eventId,"counterAssignments",next);
+        const occupant=(await transaction.get(assignment)).data()?.uid;
+        if (occupant && occupant!==stationUid) throw new Error("この役割は別の端末が使用中です。現地で停止してから、管理者が割り当てを解除してください。");
+        transaction.set(assignment,{uid:stationUid,...audit});
+      }
+      if (previous && previous!==next) transaction.set(doc(db,"events",eventId,"counterAssignments",previous),{uid:null,...audit});
+    }
+    transaction.update(reference,{...update,...audit});
   });
 }
 
