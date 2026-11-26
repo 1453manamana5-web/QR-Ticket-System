@@ -25,7 +25,10 @@ function canonical(value) {
     .map(key => [key, canonical(value[key])]));
 }
 function ledgerContent({synced, ...row}) {
-  return JSON.stringify(canonical(row));
+  if (row.kind !== 'revision') return JSON.stringify(canonical(row));
+  const {at,source,direction,person,invalid,clockWarning,clockUncertainty,configVersion,...revision} = row;
+  const snapshot = fields => fields && {...fields,clockWarning:fields.clockWarning ?? '',clockUncertainty:fields.clockUncertainty ?? null};
+  return JSON.stringify(canonical({...revision,before:snapshot(revision.before),after:snapshot(revision.after),resolves:revision.resolves ?? []}));
 }
 export async function openRecordStore({ indexedDB = globalThis.indexedDB,
   uuid = () => globalThis.crypto.randomUUID(), legacySession = null, onClose = () => {} } = {}) {

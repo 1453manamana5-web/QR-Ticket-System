@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=14">
+  <link rel="stylesheet" href="./style.css?v=15">
 </head>
 <body>
   <div class="shell">
@@ -178,6 +178,7 @@
           <legend>人数カウント端末の登録</legend>
           <label>端末名 <input id="counterStationName" maxlength="40" placeholder="例：展示室 入口"></label>
           <button id="counterStationApply" class="button secondary" type="button" disabled>端末登録を申請</button>
+          <p id="counterPairCode" class="hint" aria-live="polite"></p>
           <p id="counterStationState" class="hint" role="status"></p>
           <p id="counterRemoteControl" class="hint" role="status"></p>
           <a href="../counter-management/">人数カウント管理画面</a>
@@ -205,6 +206,7 @@
           <option value="average">滞在時間分析</option><option value="issues">整合性検証</option>
         </select></label>
         <button id="exportLedger" class="button secondary">CSVを出力</button>
+        <button id="exportPendingJson" type="button" class="button secondary">未同期記録のJSONを保存</button>
       </section>
       <section class="card config-card" aria-labelledby="adaptiveTitle">
         <h2 id="adaptiveTitle">AI診断と設置アシスタント</h2>
@@ -253,8 +255,8 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./ledger-ui.mjs?v=14"></script>
-  <script type="module" src="./adaptive-ui.mjs?v=14"></script>
-  <script type="module" src="./app.js?v=14"></script>
+  <script type="module" src="./ledger-ui.mjs?v=15"></script>
+  <script type="module" src="./adaptive-ui.mjs?v=15"></script>
+  <script type="module" src="./app.js?v=15"></script>
 </body>
 </html>

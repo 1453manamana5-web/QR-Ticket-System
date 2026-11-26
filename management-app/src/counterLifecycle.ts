@@ -1,5 +1,5 @@
 export type Stage = "prepare" | "trial" | "open" | "restricted" | "closing" | "finished";
-export type Command = "trial" | "prepare" | "open" | "restrict" | "unrestrict" | "close" | "reopen" | "finish" | "verify";
+export type Command = "trial" | "prepare" | "open" | "restrict" | "unrestrict" | "close" | "reopen" | "finish" | "verify" | "unverify";
 export type DaySchedule = {date:string;start:string;end:string};
 export type DayState = {
   stage:Stage; opened:number|null; trialOpened:number|null; closing:number|null; ended:number|null;
@@ -13,7 +13,7 @@ export const stageLabels: Record<Stage,string> = {
 };
 export const commandLabels: Record<Command,string> = {
   trial:"試験運用を開始",prepare:"準備に戻る",open:"開場する",restrict:"入場を一時制限",unrestrict:"入場制限を解除",
-  close:"閉場処理へ進む",reopen:"閉場処理を取り消す",finish:"開催日を終了",verify:"集計を確定",
+  close:"閉場処理へ進む",reopen:"閉場処理を取り消す",finish:"開催日を終了",verify:"集計を確定",unverify:"集計確定を取り消す",
 };
 const available: Record<Stage,Command[]> = {
   prepare:["trial","open"],trial:["prepare","open"],open:["restrict","close"],restricted:["unrestrict","close"],
@@ -31,7 +31,7 @@ export function scheduleValid(day:DaySchedule) {
 }
 
 export function transition(day:DayState, command:Command, now:number, review={empty:false,synced:false}): DayState {
-  if (!Number.isSafeInteger(now) || now < 0 || !actionsFor(day).includes(command)) throw new Error("現在の運用状態では実行できません。");
+  if (!Number.isSafeInteger(now) || now < 0 || !(command==="unverify" ? day.stage==="finished"&&day.finalized!==null : actionsFor(day).includes(command))) throw new Error("現在の運用状態では実行できません。");
   if (now < Math.max(day.opened ?? 0,day.trialOpened ?? 0,day.closing ?? 0,day.ended ?? 0)) throw new Error("管理端末の時刻を確認してください。");
   switch (command) {
     case "trial": return {...day,stage:"trial",trialOpened:day.trialOpened ?? now};
@@ -44,6 +44,7 @@ export function transition(day:DayState, command:Command, now:number, review={em
     case "finish":
       if (!review.empty) throw new Error("会場内を確認してから開催日を終了してください。");
       return {...day,stage:"finished",ended:now,emptyConfirmed:now};
+    case "unverify": return {...day,finalized:null};
     case "verify":
       if (!review.empty || !review.synced) throw new Error("会場が空で、記録の回収と整合性確認を終えてから確定してください。");
       return {...day,finalized:now};

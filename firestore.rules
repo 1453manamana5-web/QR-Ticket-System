@@ -752,7 +752,9 @@ service cloud.firestore {
                 && next.ended != null && next.ended >= old.closing && next.emptyConfirmed == next.ended
                 && next.finalized == null && diff.hasOnly(core.concat(["ended","emptyConfirmed"])))
           || (command == "verify" && old.stage == "finished" && old.finalized == null && next.stage == "finished"
-                && next.finalized != null && next.finalized >= old.ended && diff.hasOnly(core.concat(["finalized"])));
+                && next.finalized != null && next.finalized >= old.ended && diff.hasOnly(core.concat(["finalized"])))
+          || (command == "unverify" && counterAdministrator() && old.stage == "finished" && old.finalized != null
+                && next.stage == "finished" && next.finalized == null && diff.hasOnly(core.concat(["finalized"])));
       }
 
       function withCounterAction(next) {
@@ -862,6 +864,102 @@ service cloud.firestore {
               && getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(request.resource.data.uid)).data.role == role));
       }
 
+      // Pairing reservations are addressed only by a six-digit code. Only the
+      // issuing device or an operator with a recent lookup can read a reservation.
+      match /counterPairAttempts/{uid} {
+        allow create, update: if counterOperator() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(["code","at"])
+          && request.resource.data.code is string && request.resource.data.code.matches("^[0-9]{6}$")
+          && request.resource.data.at == request.time
+          && (resource == null || resource.data.at + duration.value(3,"s") <= request.time);
+      }
+
+      match /counterPairCodes/{code} {
+        function attemptedCode(seconds) {
+          let attempt = get(/databases/$(database)/documents/events/$(eventId)/counterPairAttempts/$(request.auth.uid)).data;
+          return attempt.code == code && attempt.at + duration.value(seconds,"s") > request.time;
+        }
+        function validReservation(data) {
+          let station = getAfter(counterDevicePath(eventId)).data;
+          return code.matches("^[0-9]{6}$") && data.keys().hasOnly(["uid","device","issuedAt","usedAt"])
+            && data.uid == request.auth.uid && data.device == station.device
+            && data.issuedAt == request.time && data.usedAt == null
+            && station.status == "pending" && station.pairingIssuedAt == request.time
+            && (resource == null || resource.data.issuedAt + duration.value(5,"m") <= request.time);
+        }
+        function consumeReservation() {
+          let station = getAfter(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(resource.data.uid)).data;
+          return counterOperator() && attemptedCode(300) && resource.data.usedAt == null
+            && resource.data.issuedAt + duration.value(5,"m") > request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usedAt"])
+            && request.resource.data.usedAt == request.time
+            && station.status == "approved" && station.pairingConfirmed == code
+            && station.pairingIssuedAt == resource.data.issuedAt && station.device == resource.data.device;
+        }
+        allow get: if (signedIn() && resource != null && request.auth.uid == resource.data.uid)
+          || (counterOperator() && attemptedCode(30)
+            && (resource == null || (resource.data.usedAt == null
+              && resource.data.issuedAt + duration.value(5,"m") > request.time)));
+        allow create: if signedIn() && exists(counterDayPath(eventId)) && validReservation(request.resource.data);
+        allow update: if (signedIn() && exists(counterDayPath(eventId)) && validReservation(request.resource.data))
+          || consumeReservation();
+      }
+
+      match /counterCommands/{uid} {
+        function currentStation() {
+          return get(/databases/$(database)/documents/events/$(eventId)/counterDevices/$(uid)).data;
+        }
+        function commandMatchesStation(data) {
+          let station = currentStation();
+          return station.status == "approved" && station.device == data.device && station.role == data.role
+            && station.updatedAt == data.assignment && station.mode == data.mode
+            && get(counterAssignment(eventId,data.role)).data.uid == uid
+            && get(/databases/$(database)/documents/events/$(eventId)/counterConfig/$(data.mode)).data.version == data.configVersion;
+        }
+        function validIssuedCommand(data) {
+          return exists(counterDayPath(eventId)) && data.keys().hasOnly([
+              "id","device","role","mode","configVersion","assignment","action","state","issuedAt","issuedBy"
+            ]) && data.id is string && data.id.matches("^[a-f0-9-]{36}$")
+            && data.role in ["in","out"] && counterMode(data.mode) && data.configVersion is int
+            && data.action in ["diagnose","sync","stop","camera","engine","recalibrate"]
+            && data.state == "issued" && data.issuedAt == request.time && data.issuedBy == request.auth.uid
+            && commandMatchesStation(data);
+        }
+        function recordStarted(data) {
+          return resource.data.state == "issued" && data.state == "running"
+            && resource.data.issuedAt + duration.value(2,"m") > request.time
+            && data.diff(resource.data).affectedKeys().hasOnly(["state","startedAt"])
+            && data.startedAt == request.time && commandMatchesStation(resource.data);
+        }
+        function recordFinished(data) {
+          return resource.data.state == "running" && data.state == "finished"
+            && data.diff(resource.data).affectedKeys().hasOnly(["state","result","finishedAt","downtimeMs"])
+            && data.result in ["ok","busy","local","interrupted","stale","failed"]
+            && (!("downtimeMs" in data) || (data.action in ["camera","engine"] && data.result == "ok"
+              && data.downtimeMs is int && data.downtimeMs >= 0 && data.downtimeMs <= 240000))
+            && data.finishedAt == request.time;
+        }
+        function replaceCommand(data) {
+          return data.id != resource.data.id &&
+            (resource.data.state == "finished"
+              || (resource.data.state == "issued" && resource.data.issuedAt + duration.value(2,"m") <= request.time)
+              || (resource.data.state == "running" && resource.data.startedAt + duration.value(4,"m") <= request.time))
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/counterCommands/$(uid)/history/$(resource.data.id)).data == resource.data;
+        }
+        allow get: if counterOperator() || (signedIn() && request.auth.uid == uid && approvedCounterDevice(eventId));
+        allow create: if counterOperator() && validIssuedCommand(request.resource.data);
+        allow update: if (counterOperator() && validIssuedCommand(request.resource.data) && replaceCommand(request.resource.data))
+          || (signedIn() && request.auth.uid == uid && approvedCounterDevice(eventId)
+            && (recordStarted(request.resource.data) || recordFinished(request.resource.data)));
+        match /history/{commandId} {
+          allow get, list: if counterOperator();
+          allow create: if counterOperator()
+            && commandId == get(/databases/$(database)/documents/events/$(eventId)/counterCommands/$(uid)).data.id
+            && request.resource.data == get(/databases/$(database)/documents/events/$(eventId)/counterCommands/$(uid)).data
+            && getAfter(/databases/$(database)/documents/events/$(eventId)/counterCommands/$(uid)).data.id != commandId;
+        }
+      }
+
       match /counterDevices/{uid} {
         function ownCounterDevice() {
           return signedIn() && request.auth.uid == uid;
@@ -881,7 +979,7 @@ service cloud.firestore {
         }
 
         function validCounterDeviceDecision(data) {
-          return data.diff(resource.data).affectedKeys().hasOnly(["name", "role", "status", "updatedAt", "updatedByUid"])
+          return data.diff(resource.data).affectedKeys().hasOnly(["name", "role", "status", "updatedAt", "updatedByUid", "pairingConfirmed"])
             && validCounterDeviceName(data.name) && data.role in ["in", "out"]
             && data.status in ["pending", "approved", "rejected", "revoked"]
             && (data.role == resource.data.role || resource.data.status != "approved"
@@ -890,11 +988,20 @@ service cloud.firestore {
             && data.updatedAt == request.time && data.updatedByUid == request.auth.uid;
         }
 
+        function matchesPairing(data) {
+          let code = data.get("pairingConfirmed", "");
+          let pairing = getAfter(/databases/$(database)/documents/events/$(eventId)/counterPairCodes/$(code)).data;
+          return code.matches("^[0-9]{6}$") && pairing.uid == uid && pairing.device == resource.data.device
+            && pairing.usedAt == request.time && pairing.issuedAt == resource.data.pairingIssuedAt;
+        }
+
         allow get: if ownCounterDevice() || counterOperator();
         allow list: if counterOperator();
         allow create: if ownCounterDevice() && counterScopeExists(eventId)
           && request.resource.data.keys().hasAll(["name", "device", "role", "status", "requestedAt"])
-          && request.resource.data.keys().hasOnly(["name", "device", "role", "status", "requestedAt"])
+          && request.resource.data.keys().hasOnly(["name", "device", "role", "status", "requestedAt", "pairingIssuedAt"])
+          && (exists(counterDayPath(eventId))
+            ? request.resource.data.pairingIssuedAt == request.time : !("pairingIssuedAt" in request.resource.data))
           && validCounterDeviceName(request.resource.data.name) && validCounterDeviceId(request.resource.data.device)
           && request.resource.data.role in ["in", "out"] && request.resource.data.status == "pending"
           && request.resource.data.requestedAt == request.time;
@@ -905,6 +1012,11 @@ service cloud.firestore {
         }
 
         allow update: if (ownCounterDevice() && approvedCounterDevice(eventId) && validCounterHeartbeat(request.resource.data))
+          || (ownCounterDevice() && exists(counterDayPath(eventId)) && resource.data.status in ["pending","rejected","revoked"] && request.resource.data.status == "pending"
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["pairingIssuedAt","pairingConfirmed","status"])
+            && !("pairingConfirmed" in request.resource.data)
+            && request.resource.data.pairingIssuedAt == request.time
+            && resource.data.get("pairingIssuedAt", timestamp.date(1970,1,1)) + duration.value(30,"s") <= request.time)
           || (validCounterDeviceDecision(request.resource.data) &&
             ((!exists(counterDayPath(eventId)) && counterAdministrator())
               || (exists(counterDayPath(eventId)) && assignmentMatches(request.resource.data)
@@ -958,12 +1070,25 @@ service cloud.firestore {
               || (data.kind == "revision" && validCounterRevision(data)));
         }
 
+        function restoreCounterOperation(data) {
+          let config = /databases/$(database)/documents/events/$(eventId)/counterConfig/$(mode);
+          return counterAdministrator() && request.resource.data.restoredByUid == request.auth.uid
+            && exists(config) && get(config).data.verified == false
+            && (get(config).data.paused == true || (get(config).data.closed is number
+              && get(config).data.closed <= request.time.toMillis()))
+            && (!("actorUid" in data) || (data.actorUid is string && data.actorUid.matches("^[A-Za-z0-9_-]{1,160}$")))
+            && ((data.kind == "passage" && validCounterPassage(data)
+              && (data.source == "manual" || (data.person == "visitor" && data.direction == data.station)))
+              || (data.kind == "revision" && validCounterRevision(data)));
+        }
         allow get, list: if counterMode(mode) && (approvedCounterDevice(eventId) || counterOperator());
         allow create: if counterMode(mode) && counterScopeExists(eventId)
-          && request.resource.data.keys().hasOnly(["payload", "receivedAt"])
           && request.resource.data.receivedAt == request.time
           && validOperation(request.resource.data.payload)
-          && (autoCounterOperation(request.resource.data.payload) || manualCounterOperation(request.resource.data.payload));
+          && ((request.resource.data.keys().hasOnly(["payload","receivedAt"])
+            && (autoCounterOperation(request.resource.data.payload) || manualCounterOperation(request.resource.data.payload)))
+            || (request.resource.data.keys().hasOnly(["payload","receivedAt","restoredByUid"])
+              && restoreCounterOperation(request.resource.data.payload)));
       }
 
       match /analysis/{analysisId} {

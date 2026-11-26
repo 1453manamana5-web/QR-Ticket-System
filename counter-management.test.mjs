@@ -5,11 +5,12 @@ import {readFileSync} from "node:fs";
 import {IDBFactory} from "fake-indexeddb";
 import {initialConnection,observeConnection} from "./reception-app/public/people-counter/connection.mjs";
 import {openRecordStore} from "./reception-app/public/people-counter/records.mjs";
+import {sameStationScope,stationResults} from "./reception-app/public/people-counter/station-command.mjs";
 import {analyze,csv,estimateClock,uploadPending} from "./reception-app/public/people-counter/ledger.mjs";
 
 const source = readFileSync(new URL("./reception-app/public/people-counter/ledger-ui.mjs",import.meta.url),"utf8")
   .replace(/^import .*;\n/gm,"")
-  .replace("await import('./counter-sync.js?v=14&try=' + remoteAttempts++)","fakeServer");
+  .replace(/await import\('\.\/counter-sync\.js\?v=\d+&try=' \+ remoteAttempts\+\+\)/,"fakeServer");
 
 function station(initial = {}) {
   const settings = {eventId:"festival",mode:"live",role:"in",opened:0,closed:null,verified:false};
@@ -21,7 +22,8 @@ function station(initial = {}) {
   const nodes = new Map(), notices = [], timers = new Set();
   let info = {status:"approved",role:"in",device:JSON.parse(values.get("counter-device-v1"))};
   let config = {opened:0,closed:null,paused:false,verified:false};
-  const heartbeats = [];
+  const heartbeats = [], executions = [];
+  let remoteCommand = null, abortAcknowledgment = false;
   const element = id => {
     if (!nodes.has(id)) nodes.set(id,{addEventListener(){},replaceChildren(){},textContent:"",value:"",checked:false});
     return nodes.get(id);
@@ -29,18 +31,29 @@ function station(initial = {}) {
   const fakeServer = {
     async readCounterStation() {if (info instanceof Error) throw info;return info;},
     async readCounterConfig() {return config;},
+    async readStationCommand() {return remoteCommand;},
+    async updateStationCommand(_eventId,id,result) {
+      if (remoteCommand?.id!==id) return false;
+      if (result===undefined && remoteCommand.state==="issued") {remoteCommand.state="running";return true;}
+      if (result!==undefined && remoteCommand.state==="running") {
+        if (abortAcknowledgment) throw new Error("network disconnected");
+        remoteCommand.state="finished";remoteCommand.result=result;return true;
+      }
+      return false;
+    },
     async heartbeatCounterStation(_eventId,health) {heartbeats.push(health);},
   };
-  const context = vm.createContext({analyze,csv,estimateClock,uploadPending,initialConnection,observeConnection,performance,console,Event,
+  const context = vm.createContext({analyze,csv,estimateClock,uploadPending,initialConnection,observeConnection,sameStationScope,stationResults,performance,console,Event,
     fakeServer,document:{getElementById:element,hidden:false,addEventListener(){}},navigator:{onLine:true},
     setTimeout(fn,ms) {const id={fn,ms};timers.add(id);return id;},clearTimeout:id=>timers.delete(id),
-    setInterval:()=>0,window:{addEventListener(){},dispatchEvent(e){notices.push(e.type);}},
+    setInterval:()=>0,window:{addEventListener(){},dispatchEvent(e){notices.push(e.type);},counterStationAction:async action=>{executions.push(action);return "ok";}},
     localStorage:{getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)},
   });
-  vm.runInContext(source+"\nglobalThis.check=()=>checkStation(settings,fakeServer);",context);
+  vm.runInContext(source+"\nglobalThis.check=()=>checkStation(settings,fakeServer);\nglobalThis.commandCheck=async()=>{lastCommandPoll=-Infinity;await checkStation(settings,fakeServer);await stationCommandFlight?.catch(()=>{});};",context);
   return {
     get gate() {return context.window.counterLedger.captureBlockReason();},
-    check:context.check, element, values, heartbeats, notices,
+    check:context.check, commandCheck:context.commandCheck, element, values, heartbeats, notices, executions,
+    command(value) {remoteCommand=value;}, disconnectAck(value) {abortAcknowledgment=value;},
     station(next) {info = {...info,...next};},
     control(next) {config={...config,...next};},
   };
@@ -114,4 +127,28 @@ test("connection indicator debounces a brief failure and requires stable recover
   state=observeConnection(state,{success:true,roundTrip:3000,now:6});
   assert.equal(state.label,"遅延");
   assert.equal(state.lastSeen,6);
+});
+
+
+test("station keeps a remote result across a dropped acknowledgment without repeating the action", async ()=>{
+  const id="81111111-1111-4111-8111-111111111119_2026-11-24";
+  const app=station({"counter-ledger-settings-v1":JSON.stringify({eventId:id,mode:"live",role:"in",opened:0,closed:null})});
+  const command={id:"remote-operation",device:"12345678-1234-1234-1234-123456789abc",role:"in",mode:"live",
+    configVersion:2,assignment:{isEqual:value=>value===15},action:"stop",state:"issued"};
+  app.station({updatedAt:15});
+  app.control({version:1});
+  app.command(command);
+  await app.commandCheck();
+  assert.equal(command.state,"issued");
+  assert.deepEqual(app.executions,[]);
+  app.control({version:2});
+  app.disconnectAck(true);
+  await app.commandCheck();
+  assert.equal(command.state,"running");
+  assert.deepEqual(app.executions,["stop"]);
+  app.disconnectAck(false);
+  await app.commandCheck();
+  assert.equal(command.state,"finished");
+  assert.equal(command.result,"ok");
+  assert.deepEqual(app.executions,["stop"]);
 });

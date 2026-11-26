@@ -7,6 +7,9 @@ import {
 import {createCounterSeries,editCounterSchedule,listCounterSeries,operateCounterDay,watchCounterDay,type SeriesAndDays} from "./counterEvents";
 import {stageLabels,type Day} from "./counterLifecycle";
 import {CounterDayPanel,CounterScheduleEditor,NewCounterEvent,type EventDraft,type LuxnoraEventProvider} from "./CounterEventPanels";
+import {CounterComparison} from "./CounterComparison";
+import {CounterRestorePanel} from "./CounterRestorePanel";
+import {CounterPairPanel,CounterRemotePanel} from "./CounterStationCommands";
 import {CounterAnalysisTools} from "./CounterAnalysisTools";
 import type {EffectiveCounterPassage} from "../../reception-app/public/people-counter/ledger.mjs";
 
@@ -289,10 +292,24 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
           {page==="analysis"&&analysis&&operations&&config?.opened!=null&&<CounterAnalysisTools key={scope}
             report={analysis} rows={operations} from={config.opened} to={config.closed??now} mode={mode} scope={eventId}
             name={eventName} venue={series?.venue} current={ready&&!invalidRows&&stationsCurrent&&pending===0}/>}
+          {page==="analysis"&&catalog&&<CounterComparison key={day?.eventId??"catalog"} catalog={catalog} initialSeriesId={day?.eventId}/>}
+          {page==="stations"&&nativeDay&&<CounterPairPanel key={eventId} day={eventId} enabled={ready&&!working}/>}
           {page === "stations" && <StationList stations={stations} mode={mode} now={now} admin={admin} dedicated={nativeDay} enabled={ready&&!working}
             loading={data?.stations.source === "pending" || !data} perform={perform} eventId={eventId} version={day?.version} />}
           {page === "records" && <Records key={scope} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
             loading={data?.operations.source==="pending" || !data} perform={perform} now={now} />}
+          {page==="records"&&admin&&config?.verified&&<section className="cm-section">
+            <h2>確定済みの集計を再確認</h2>
+            <p>JSONからの復元前に、集計を確認待ちへ戻してください。開催日と計測端末は閉場したままです。</p>
+            <button disabled={!ready||working||nativeDay&&(activeDay?.id!==eventId||!activeDay.verified)} onClick={()=>{
+              if (!window.confirm("この日の集計を確認待ちに戻しますか？ 復元後に記録を確認し、再度確定できます。")) return;
+              void perform(()=>nativeDay&&day
+                ? operateCounterDay(day.id,day.version,"unverify",{empty:false,synced:false})
+                : saveCounterConfig(eventId,mode,{...config,verified:false},config),"集計を確認待ちに戻しました。");
+            }}>集計確定を取り消す</button>
+          </section>}
+          {page==="records"&&admin&&<CounterRestorePanel key={scope} scope={eventId} mode={mode} name={eventName}
+            config={config} rows={operations??[]} enabled={ready&&!working}/>}
           {page==="event"&&series&&day&&<CounterScheduleEditor key={day.id+"/"+series.name+"/"+series.venue+"/"+day.start+"/"+day.end}
             series={series} day={day} enabled={ready&&!working&&activeDay?.id===eventId&&activeDay.verified}
             onSave={fields=>{void perform(async()=>{await editCounterSchedule(series,day,fields);fetchEvents();},"イベント情報を保存しました。");}}/>}
@@ -396,7 +413,9 @@ function StationList({stations,mode,now,admin,dedicated,enabled,loading,perform,
               ? "端末で確認済み · v"+version : "端末で未確認 · v"+version}</dd></>}</dl>
           {station.lastSeen && now-station.lastSeen>freshMs && <p className="cm-caption">表示は最後に取得した状態です。</p>}
           {alertTitle[station.alert ?? ""] && <p className="cm-caption">端末からの通知　{alertTitle[station.alert ?? ""]}</p>}
-          {(admin||dedicated&&(station.status==="pending"||station.status==="approved")) && <form className="cm-inline-form" key={station.uid+":"+station.name+":"+station.role+":"+station.status} onSubmit={event => {
+          {dedicated&&station.status==="approved"&&<CounterRemotePanel day={eventId} station={station} enabled={enabled} now={now}/>}
+          {dedicated&&station.status!=="approved"&&<p className="cm-caption">計測端末で接続コードを表示し、上のペアリング欄で承認してください。</p>}
+          {((!dedicated&&admin)||(dedicated&&station.status==="approved")) && <form className="cm-inline-form" key={station.uid+":"+station.name+":"+station.role+":"+station.status} onSubmit={event => {
             event.preventDefault();
             const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
             const fields = new FormData(event.currentTarget);

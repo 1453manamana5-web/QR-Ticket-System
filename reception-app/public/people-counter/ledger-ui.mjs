@@ -1,6 +1,7 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {initialConnection,observeConnection} from './connection.mjs?v=14';
-import {createVisionPipeline} from './vision.mjs?v=14';
+import {initialConnection,observeConnection} from './connection.mjs?v=15';
+import {sameStationScope,stationResults} from './station-command.mjs?v=15';
+import {createVisionPipeline} from './vision.mjs?v=15';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -40,6 +41,12 @@ let lastHeartbeat = -Infinity;
 let heartbeatScope;
 let activePending = 0;
 let retainedPending = 0;
+let stationCommandFlight;
+let lastCommandPoll = -Infinity;
+let lastCommandScope;
+const dedicatedDay = cfg => /^[a-f0-9-]{36}_[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(cfg?.eventId ?? '');
+const pairingKey = cfg => 'counter-pair-v1:' + cfg.eventId;
+const commandResultKey = cfg => 'counter-command-result-v1:' + cfg.eventId;
 const controlKey = cfg => 'counter-control-v1:' + cfg.eventId + ':' + cfg.mode;
 function loadControl(cfg) {
   if (!cfg) return null;
@@ -59,8 +66,8 @@ function loadDeniedStation(cfg) {
   return ['rejected','revoked','mismatch'].includes(cached) ? cached : '';
 }
 function captureBlockReason() {
-  if (settings?.mode === 'live' && deniedStation) return 'この端末の本番承認を確認してください。管理画面で再承認されるまで計測を待機します。';
-  if (settings && /^[a-f0-9-]{36}_[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(settings.eventId) &&
+  if ((settings?.mode === 'live' || dedicatedDay(settings)) && deniedStation) return 'この端末の本番承認を確認してください。管理画面で再承認されるまで計測を待機します。';
+  if (dedicatedDay(settings) &&
       (!control || !Number.isSafeInteger(control.version))) return '管理画面からの運用設定をまだ確認できません。';
   if (control?.closed != null && control.closed <= Date.now()) return '管理画面で閉場済みです。';
   if (control?.paused) return '管理画面で計測が一時停止されています。';
@@ -75,11 +82,18 @@ function renderStation() {
   $('counterStationState').textContent = !settings ? '運用設定を保存すると端末登録を申請できます。'
     : (statuses[stationState] ?? statuses.unchecked) + (assignedRole ? ' · 管理側の指定 ' + (assignedRole === 'out' ? '出口' : '入口') : '') +
       (stationNote ? ' · ' + stationNote : '');
-  $('counterStationApply').disabled = !settings || !device || !['unchecked','missing'].includes(stationState);
+  const paired = dedicatedDay(settings);
+  const invitation = paired ? load(pairingKey(settings)) : null;
+  const remaining = invitation && device === invitation.device ? Math.max(0,300000 - (Date.now() - invitation.displayedAt)) : 0;
+  $('counterStationApply').textContent = paired ? '接続コードを表示' : '端末登録を申請';
+  $('counterStationApply').disabled = !settings || !device || !['unchecked','missing',...(paired ? ['pending','rejected','revoked'] : [])].includes(stationState) || remaining > 270000;
+  $('counterPairCode').textContent = stationState === 'pending' && remaining > 0 ?
+    '管理画面に入力する接続コード　' + invitation.code + '　残り約 ' + Math.ceil(remaining/60000) + '分' :
+    stationState === 'pending' && paired ? '接続コードを再発行できます。' : '';
   $('counterRemoteControl').textContent = captureBlockReason() || (control ? '管理画面の集計期間を使用しています。' : '');
 }
 async function remoteApi() {
-  return remoteModule ??= await import('./counter-sync.js?v=14&try=' + remoteAttempts++);
+  return remoteModule ??= await import('./counter-sync.js?v=15&try=' + remoteAttempts++);
 }
 function storeControl(config, next) {
   if (settings !== config || (!next && (control?.paused || control?.closed != null))) return;
@@ -90,6 +104,53 @@ function storeControl(config, next) {
   window.dispatchEvent(new Event('counter-control-changed'));
   changed();
 }
+function pollStationCommand(config, remote, station) {
+  if (!dedicatedDay(config) || !Number.isSafeInteger(control?.version) || stationCommandFlight) return;
+  const scope = config.eventId + ':' + config.mode;
+  const now = performance.now();
+  if (lastCommandScope === scope && now - lastCommandPoll < 12000) return;
+  lastCommandScope = scope;
+  lastCommandPoll = now;
+
+  const run = async () => {
+    const command = await deadline(remote.readStationCommand(config.eventId));
+    if (!command || settings !== config || document.hidden) return;
+    const saved = load(commandResultKey(config));
+    if (command.state === 'running' && saved?.id === command.id &&
+        saved.device === device && Object.prototype.hasOwnProperty.call(stationResults,saved.result)) {
+      await deadline(remote.updateStationCommand(config.eventId,command.id,saved.result,saved.downtimeMs));
+      return;
+    }
+    if (command.state !== 'issued' || !sameStationScope(command,station,config.mode,control?.version) ||
+        !await deadline(remote.updateStationCommand(config.eventId,command.id))) return;
+    let outcome = 'failed', downtimeMs;
+    try {
+      if (settings !== config || !sameStationScope(command,station,config.mode,control?.version)) outcome = 'stale';
+      else if (document.hidden) outcome = 'interrupted';
+      else if (command.action === 'sync') {
+        const until = performance.now()+20000;
+        while (busy && settings === config && performance.now() < until) {
+          await new Promise(resolve => setTimeout(resolve,250));
+        }
+        if (settings !== config || document.hidden) outcome = 'stale';
+        else outcome = busy ? 'busy' : await sync() ? 'ok' : 'failed';
+      } else {
+        const result = await window.counterStationAction?.(command.action);
+        outcome = typeof result === 'string' ? result : result?.result ?? 'local';
+        downtimeMs = result?.downtimeMs;
+      }
+    } catch {}
+    try {localStorage.setItem(commandResultKey(config),JSON.stringify({id:command.id,device,result:outcome,downtimeMs}));}
+    catch {error('遠隔操作の結果を端末に保存できませんでした。');}
+    await deadline(remote.updateStationCommand(config.eventId,command.id,outcome,downtimeMs));
+    lastHeartbeat = -Infinity;
+    scheduleControl(500);
+  };
+  const flight = run();
+  stationCommandFlight = flight;
+  void flight.catch(() => {}).finally(() => {if (stationCommandFlight === flight) stationCommandFlight = null;});
+}
+
 function checkStation(config, remote) {
   if (controlFlight?.config === config) return controlFlight.promise;
   const promise = (async () => {
@@ -117,6 +178,7 @@ function checkStation(config, remote) {
     window.dispatchEvent(new Event('counter-control-changed'));
     if (stationState !== 'approved') return false;
     storeControl(config, await deadline(remote.readCounterConfig(config.eventId,config.mode)));
+    if (settings === config) pollStationCommand(config,remote,station);
     const scope = config.eventId + ':' + config.mode;
     const now = performance.now();
     if (settings === config && (heartbeatScope !== scope || now - lastHeartbeat >= 30000)) {
@@ -124,7 +186,7 @@ function checkStation(config, remote) {
       lastHeartbeat = now;
       const state = window.counterStationCamera?.() ?? {};
       const metrics = {
-        version:'14', camera:state.camera === true, ai:state.ai === true,
+        version:'15', camera:state.camera === true, ai:state.ai === true,
         profile:['baseline','detail','lighting'].includes(state.profile) ? state.profile : 'unknown',
         pending:Math.min(activePending,1000000), mode:config.mode, configVersion:control?.version ?? null,
         alert:(control?.paused || control?.closed != null) ? 'paused' : captureBlockReason() ? 'setup'
@@ -321,6 +383,7 @@ async function sync() {
     try {await refresh();} catch (e) {error(e.message);}
     schedule(network === 'オンライン' ? (activePending > retainedPending ? 3000 : 30000) : retry);
   }
+  return network === 'オンライン' && settings === config;
 }
 
 function fillRecord(row) {
@@ -449,8 +512,35 @@ $('exportLedger').addEventListener('click', async () => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 });
+$('exportPendingJson').addEventListener('click', async () => {
+  if (!settings || !store) return error('先に運用設定を保存してください。');
+  const scope = settings;
+  try {
+    const rows = (await store.ledger()).filter(row => row.eventId === scope.eventId && row.mode === scope.mode && !row.synced);
+    if (settings !== scope) return;
+    if (!rows.length) return error('選択中のイベント・運用区分に未同期記録はありません。');
+    const clip = row => {
+      if (row.kind !== 'revision') return row;
+      // Old local drafts carry additional fields copied from the automatic passage.
+      const {direction,person,invalid,clockWarning,clockUncertainty,configVersion,...revision} = row;
+      return revision;
+    };
+    const window = control ?? scope;
+    const savedAt = Date.now();
+    const from = window.opened ?? 0;
+    const blob = new Blob([JSON.stringify({schema:'counter-day-backup',version:1,scope:scope.eventId,mode:scope.mode,
+      name:'未同期記録',savedAt,window:{from,to:window.closed ?? Math.max(from,savedAt)},operations:rows.map(clip)},null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'counter-' + scope.eventId + '-' + scope.mode + '-pending.json';
+    document.body.append(link);link.click();link.remove();
+    setTimeout(() => URL.revokeObjectURL(url),30000);
+    error('');
+  } catch (cause) {error('未同期記録を出力できませんでした。 ' + cause.message);}
+});
 $('counterStationApply').addEventListener('click', async () => {
-  if (!settings || !device || !['unchecked','missing'].includes(stationState)) return;
+  if (!settings || !device || $('counterStationApply').disabled) return;
   const config = settings;
   const name = $('counterStationName').value.trim();
   if (!name || name.length > 40) return error('端末名を1〜40文字で入力してください。');
@@ -458,7 +548,8 @@ $('counterStationApply').addEventListener('click', async () => {
   $('counterStationApply').disabled = true;
   try {
     const remote = await deadline(remoteApi());
-    await deadline(remote.enrollCounterStation(config.eventId,{name,device,role:config.role}));
+    const code = await deadline(remote.enrollCounterStation(config.eventId,{name,device,role:config.role},dedicatedDay(config)));
+    if (code && settings === config) localStorage.setItem(pairingKey(config),JSON.stringify({code,displayedAt:Date.now(),device}));
     if (settings === config) {
       error('');
       await checkStation(config,remote);
@@ -472,6 +563,7 @@ $('syncLedger').addEventListener('click', () => schedule(0));
 window.addEventListener('online', () => {scheduleControl(0); schedule(500);});
 window.addEventListener('focus', () => {changed(); scheduleControl(0); schedule(500);});
 document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleControl(0); });
+setInterval(() => {if (stationState === 'pending') renderStation();},5000);
 setInterval(() => {
   checkClock(Date.now());
   changed();
@@ -504,7 +596,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v14') &&
+      ready = (await caches.keys()).includes('counter-v15') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}
