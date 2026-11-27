@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e243c">
   <meta name="description" content="交通研究部 2027年文化祭に向けた自動人数計測の独立試作。映像は保存・送信しません。">
   <title>自動人数計測 | 試作アプリ</title>
-  <link rel="stylesheet" href="./style.css?v=16">
+  <link rel="stylesheet" href="./style.css?v=17">
 </head>
 <body>
   <div class="shell">
@@ -212,7 +212,8 @@
         <h2 id="adaptiveTitle">AI診断と設置アシスタント</h2>
         <p id="adaptiveCamera" role="status"></p>
         <div class="lux-station">
-          <p id="luxStationState" aria-live="polite">Luxnora</p>
+          <div class="lux-station-heading"><img id="luxStationMark" src="./luxnora-mark.svg?v=17#idle" alt="" width="31" height="28"><p id="luxStationState" aria-live="polite">Luxnora</p></div>
+          <button class="button secondary" id="luxStationCheck" type="button">稼働状態を診断</button>
           <details><summary>最近の復旧記録</summary><p id="luxStationHistory">このセッションで表示できる復旧記録はありません。</p></details>
         </div>
         <p id="adaptiveState" class="hint"></p>
@@ -259,8 +260,8 @@
       <footer>2027年の文化祭に向けた検証版 · 入退場の正確さは実機テストで確認してください。</footer>
     </main>
   </div>
-  <script type="module" src="./ledger-ui.mjs?v=16"></script>
-  <script type="module" src="./adaptive-ui.mjs?v=16"></script>
-  <script type="module" src="./app.js?v=16"></script>
+  <script type="module" src="./ledger-ui.mjs?v=17"></script>
+  <script type="module" src="./adaptive-ui.mjs?v=17"></script>
+  <script type="module" src="./app.js?v=17"></script>
 </body>
 </html>

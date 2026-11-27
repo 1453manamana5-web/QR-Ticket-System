@@ -4,7 +4,7 @@ import type {CounterSeries} from "./counterEvents";
 import type {CounterStation} from "./counterManagementData";
 
 export type EventDraft = {name:string;venue:string;days:DaySchedule[]};
-export type LuxnoraSuggestion = {name?:string;venue?:string;start?:string;end?:string};
+export type LuxnoraSuggestion = {name?:string;venue?:string;start?:string;end?:string;sourceDate?:string};
 export type LuxnoraEventProvider = (draft:EventDraft) => Promise<LuxnoraSuggestion | null>;
 const blank = ():DaySchedule => ({date:"",start:"09:00",end:"16:00"});
 const initial = ():EventDraft => ({name:"",venue:"",days:[blank()]});
@@ -34,7 +34,7 @@ export function NewCounterEvent({owner,busy,onSave,onClose,provider}:{
   function dayField(index:number,key:keyof DaySchedule,value:string) {
     setDraft(prior => ({...prior,days:prior.days.map((day,i)=>i===index ? {...day,[key]:value} : day)}));
   }
-  function take(field:keyof LuxnoraSuggestion,index?:number) {
+  function take(field:Exclude<keyof LuxnoraSuggestion,"sourceDate">,index?:number) {
     if (!suggestion || !suggestion[field]) return;
     if (field==="name" || field==="venue") setDraft(prior=>({...prior,[field]:suggestion[field]}));
     else dayField(index ?? 0,field,suggestion[field]);
@@ -49,7 +49,7 @@ export function NewCounterEvent({owner,busy,onSave,onClose,provider}:{
     setNote("");
     if (await onSave(draft)) { try { sessionStorage.removeItem(key); } catch { /* storage optional */ } }
   }
-  const suggest=(field:keyof LuxnoraSuggestion,index?:number)=> suggestion?.[field] && <p className="cm-caption">
+  const suggest=(field:Exclude<keyof LuxnoraSuggestion,"sourceDate">,index?:number)=> suggestion?.[field] && <p className="cm-caption">
     Luxnoraの提案 {suggestion[field]} <button type="button" onClick={()=>take(field,index)}>適用</button>{" "}
     <button type="button" onClick={()=>setSuggestion(prior=>({...prior,[field]:undefined}))}>使わない</button>
   </p>;
@@ -67,10 +67,13 @@ export function NewCounterEvent({owner,busy,onSave,onClose,provider}:{
         <label>閉場予定<input required type="time" value={day.end} onChange={e=>dayField(index,"end",e.target.value)}/>{index===0&&suggest("end",index)}</label>
         {draft.days.length>1&&<button type="button" onClick={()=>setDraft(prior=>({...prior,days:prior.days.filter((_,i)=>i!==index)}))}>この日を外す</button>}
       </fieldset>)}
+      {suggestion?.sourceDate&&<p className="cm-caption">参考にした開催日 {suggestion.sourceDate}</p>}
       {note&&<p className="cm-warning" role="alert">{note}</p>}
       <div className="cm-form">
         <button type="button" disabled={draft.days.length>=7} onClick={()=>setDraft(prior=>({...prior,days:[...prior.days,blank()]}))}>開催日を追加</button>
-        {provider&&<button type="button" onClick={()=>{void provider(structuredClone(draft)).then(setSuggestion).catch(()=>setNote("Luxnoraの提案を受け取れませんでした。"));}}>Luxnoraの提案を確認</button>}
+        {provider&&<button type="button" onClick={()=>{void provider(structuredClone(draft)).then(value=>{
+          setSuggestion(value);setNote(value?"":"該当する確定済みの開催実績がありません。");
+        }).catch(()=>setNote("Luxnoraの提案を受け取れませんでした。"));}}>Luxnoraの提案を確認</button>}
         <button className="cm-primary" disabled={busy}>{busy?"保存中":"イベントを作成"}</button>
       </div>
     </form>

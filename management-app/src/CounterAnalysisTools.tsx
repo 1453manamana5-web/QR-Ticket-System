@@ -1,3 +1,5 @@
+import {luxRange} from "./luxnora/assistant";
+import type {Plan} from "./luxnora/language";
 import {useEffect,useRef,useState} from "react";
 import {createPortal} from "react-dom";
 import {analyze,csv,type CounterOperation,type CounterMode} from "./counterManagementData";
@@ -14,9 +16,9 @@ function download(contents:Blob,name:string) {
   setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 
-export function CounterAnalysisTools({report,rows,from,to,mode,scope,name,venue,current}: {
+export function CounterAnalysisTools({report,rows,from,to,mode,scope,name,venue,current,luxPeriod,luxStamp}: {
   report:Analysis; rows:CounterOperation[]; from:number;to:number;mode:CounterMode;scope:string;
-  name:string;venue?:string;current:boolean;
+  name:string;venue?:string;current:boolean;luxPeriod?:Plan["period"];luxStamp?:number;
 }) {
   const [period,setPeriod]=useState("all");
   const [custom,setCustom]=useState<Range|null>(null);
@@ -27,12 +29,17 @@ export function CounterAnalysisTools({report,rows,from,to,mode,scope,name,venue,
     document.body.classList.add("cm-report-ready");
     return ()=>document.body.classList.remove("cm-report-ready");
   },[]);
-  const start=period==="15"?Math.max(from,to-15*60000):period==="60"?Math.max(from,to-3600000):period==="custom"?Math.max(from,custom?.start??from):from;
-  const end=period==="custom"?Math.min(to,custom?.end??to):to;
+  useEffect(()=>{
+    if(luxPeriod!==undefined){setPeriod("lux");setCursor(0);}
+  },[luxPeriod,luxStamp]);
+  const requested=luxPeriod!==undefined&&period==="lux"?luxRange(luxPeriod,from,to):null;
+  const start=requested?.from??(period==="15"?Math.max(from,to-15*60000):period==="60"?Math.max(from,to-3600000):period==="custom"?Math.max(from,custom?.start??from):from);
+  const end=requested?.to??(period==="custom"?Math.min(to,custom?.end??to):to);
+  const within=(at:number)=>at>=start&&at<=end&&(!requested?.untilExclusive||at!==end);
   const valid=end>start;
-  const series=valid? report.timeline.filter(point=>point.at>=start&&point.at<=end):[];
+  const series=valid? report.timeline.filter(point=>within(point.at)):[];
   const first=report.timeline.reduce((value,point)=>point.at<start?point.occupancy:value,0);
-  const records=valid?report.effective.filter(row=>row.at>=start&&row.at<=end&&!row.invalid&&row.person==="visitor"):[];
+  const records=valid?report.effective.filter(row=>within(row.at)&&!row.invalid&&row.person==="visitor"):[];
   const entries=records.filter(row=>row.direction==="in").length;
   const exits=records.filter(row=>row.direction==="out").length;
   const peak=series.reduce((state,point)=>point.occupancy>state.occupancy?point:state,{at:start,occupancy:first});
@@ -76,9 +83,9 @@ export function CounterAnalysisTools({report,rows,from,to,mode,scope,name,venue,
     ctx.fillStyle="#20272b";ctx.fillText(dateText(start),90,515);ctx.textAlign="right";ctx.fillText(dateText(end),1040,515);
     canvas.toBlob(blob=>blob?download(blob,key+".png"):setNotice("グラフ画像を保存できませんでした。"),"image/png");
   }
-  return <section className="cm-section cm-analysis-tools">
+  return <section className="cm-section cm-analysis-tools" data-lux-focus="range">
     <div className="cm-section-top"><div><h2>期間別の集計</h2><p className="cm-caption">{valid?dateText(start)+" – "+dateText(end):"集計期間がありません"}</p></div>
-      <label>表示期間 <select value={period} onChange={e=>{setPeriod(e.target.value);setCursor(0);}}><option value="all">選択中の開催日</option><option value="15">直近15分</option><option value="60">直近1時間</option><option value="custom">任意期間</option></select></label></div>
+      <label>表示期間 <select value={period} onChange={e=>{setPeriod(e.target.value);setCursor(0);}}><option value="all">選択中の開催日</option><option value="15">直近15分</option><option value="60">直近1時間</option><option value="custom">任意期間</option>{luxPeriod!==undefined&&<option value="lux">Luxnoraの指定期間</option>}</select></label></div>
     {period==="custom"&&<form className="cm-form" onSubmit={e=>{
       e.preventDefault();const fields=new FormData(e.currentTarget);
       const a=Date.parse(String(fields.get("start"))+":00+09:00"),b=Date.parse(String(fields.get("end"))+":00+09:00");

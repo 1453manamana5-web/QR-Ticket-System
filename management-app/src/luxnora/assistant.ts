@@ -23,6 +23,16 @@ export function diagnose(station:CounterStation,now:number) {
   if(station.camera==null||station.ai==null) return "カメラと認識の状態は未取得です。";
   return "カメラ"+(station.camera?"稼働":"停止")+"、AI"+(station.ai?"稼働":"停止")+"、未同期"+(station.pending??"未確認")+"件です。";
 }
+export function luxRange(period:Plan["period"],opened:number,end:number) {
+  const midnight=Math.floor((opened+32400000)/86400000)*86400000-32400000;
+  const boundary=midnight+43200000;
+  const range=typeof period==="object"?period:undefined;
+  const from=range?Math.max(opened,midnight+range.from*60000):period==="pm"?Math.max(opened,boundary):
+    typeof period==="number"?Math.max(opened,end-period*60000):opened;
+  const to=range?Math.min(end,midnight+range.to*60000):period==="am"?Math.min(end,boundary):end;
+  const untilExclusive=(range!==undefined&&to===midnight+range.to*60000)||(period==="am"&&to===boundary);
+  return {from,to,untilExclusive,midnight,range};
+}
 export function answer(plan:Plan,data:Evidence):Answer {
   const {analysis,stations,now,config,day,prediction}=data;
   const known=stations.filter(station=>station.mode===data.mode&&station.status==="approved");
@@ -51,21 +61,21 @@ export function answer(plan:Plan,data:Evidence):Answer {
   if(plan.intent==="forecast") return {target:"graph",text:prediction.length?
     prediction.map(point=>jst(point.at)+"頃の滞在 約"+point.occupancy+"人（目安 "+point.low+"〜"+point.high+"人）、累計入場 約"+point.entries+"回。").join("\n")
     :"予測を表示できません。開場中で安定した両端末の通信と、直近20分の通過記録が必要です。"};
-  if(plan.intent==="graph") return {target:"graph",text:"選択中の開催日のグラフを表示します。"};
+  if(plan.intent==="graph") return {target:"graph",plan,text:plan.period!==undefined?
+    "指定した時間帯のグラフを表示します。":"選択中の開催日のグラフを表示します。"};
   if(!analysis||config?.opened==null) return {text:"集計できる開催日の記録をまだ取得できていません。イベントと試験・本番の区分を確認してください。"};
   if(plan.intent==="issues") return {text:scopeName(data)+"の整合性の指摘 "+analysis.issues.length+"件。"+
     (analysis.issues.length?[...new Set(analysis.issues.map(row=>row.code))].join("、")+"。":" ") + confidence};
-  const boundary=Math.floor((config.opened+32400000)/86400000)*86400000-32400000+43200000;
-  const end=Math.min(now,config.closed??Infinity);
-  const from=plan.period==="pm"?Math.max(config.opened,boundary):typeof plan.period==="number"?Math.max(config.opened,end-plan.period*60000):config.opened;
-  const to=plan.period==="am"?Math.min(end,boundary):end;
-  const period=plan.period==="am"?"午前":plan.period==="pm"?"午後":typeof plan.period==="number"?"直近"+plan.period+"分":"";
+  const {from,to,untilExclusive,midnight,range}=luxRange(plan.period,config.opened,Math.min(now,config.closed??Infinity));
+  const included=(at:number)=>at<=to&&!(untilExclusive&&at===to);
+  const period=range?jst(midnight+range.from*60000)+"〜"+jst(midnight+range.to*60000):
+    plan.period==="am"?"午前":plan.period==="pm"?"午後":typeof plan.period==="number"?"直近"+plan.period+"分":"";
   if(period&&from>=to) return {text:"指定時間と開場時間が重なっていません。"};
   if(period&&plan.intent==="dwell") return {text:"時間帯だけの平均滞在時間は、個別の入退場を対応付けていないため算出できません。開催日全体の平均を確認できます。"};
-  const value=analysis.effective.filter(row=>row.at>=from&&row.at<=to&&!(plan.period==="am"&&row.at===boundary)&&row.person==="visitor"&&!row.invalid);
+  const value=analysis.effective.filter(row=>row.at>=from&&included(row.at)&&row.person==="visitor"&&!row.invalid);
   const entries=period?value.filter(row=>row.direction==="in").length:analysis.entries;
   const exits=period?value.filter(row=>row.direction==="out").length:analysis.exits;
-  const occupancy=period?(analysis.timeline.filter(row=>row.at<=to&&!(plan.period==="am"&&row.at===boundary)).at(-1)?.occupancy??0):analysis.occupancy;
+  const occupancy=period?(analysis.timeline.filter(row=>included(row.at)).at(-1)?.occupancy??0):analysis.occupancy;
   const average=analysis.sumAverage??(data.current?analysis.estimate:null);
   const messages={occupancy:(period?"期間終了時の":"現在の")+"滞在 "+occupancy+"人。",
     entries:"入場 "+entries+"回（再入場を含む）。",exits:"退場 "+exits+"回。",

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 136">
+  <defs>
+    <linearGradient id="front" x1=".15" y1="1" x2=".78" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#9cffff"/><stop offset=".36" stop-color="#36bfff"/><stop offset=".73" stop-color="#626bf7"/><stop offset="1" stop-color="#a998ff"/>
+    </linearGradient>
+    <linearGradient id="rear" x1="0" y1="1" x2=".86" y2=".13" gradientUnits="objectBoundingBox">
+      <stop stop-color="#60e6ff"/><stop offset=".43" stop-color="#747fff"/><stop offset=".78" stop-color="#a964ed"/><stop offset="1" stop-color="#ffccff"/>
+    </linearGradient>
+    <linearGradient id="glass" x2=".65" y2="1">
+      <stop stop-color="#8c95ff" stop-opacity=".28"/><stop offset="1" stop-color="#152b69" stop-opacity=".06"/>
+    </linearGradient>
+    <filter id="glow" x="-.3" y="-.4" width="1.6" height="1.8" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <path id="a" d="M27 58 91 45Q102 42 100 53L93 100Q92 108 83 110L20 124Q10 126 12 115L19 70Q20 60 27 58Z"/>
+    <path id="b" d="M78 32 144 13Q154 10 152 21L143 71Q142 79 134 81L70 97Q59 100 61 89L70 44Q72 35 78 32Z"/>
+  </defs>
+  <style>
+    .plane{transform-box:fill-box;transform-origin:center}
+    #back .plane{animation:front-fold 1.9s ease-in-out infinite alternate}
+    #top .plane{animation:rear-fold 1.9s ease-in-out infinite alternate}
+    #recovering .left{animation:front-fold 1.65s ease-in-out infinite alternate}
+    #recovering .right{animation:rear-fold 1.65s ease-in-out infinite alternate}
+    #verified .left{animation:settle .75s cubic-bezier(.12,.63,.3,1) 1 both}
+    #verified .right{animation:settle .75s cubic-bezier(.12,.63,.3,1) 1 both reverse}
+    #ignition .left,#ignition .right{animation:converge .48s ease-out 1 both}
+    #ignition .right{animation-delay:.08s}
+    #forecast .right{animation:spread 1.8s ease-in-out infinite alternate}
+    #checking .right{animation:spread 1.4s ease-in-out infinite alternate}
+    svg>g{display:none} svg>g:target{display:inline} svg:not(:has(>g:target))>#idle{display:inline}
+    @keyframes front-fold{to{transform:skewX(-9deg) skewY(7deg) translate(-2px,2px)}}
+    @keyframes rear-fold{to{transform:skewX(10deg) skewY(-6deg) translate(3px,-2px)}}
+    @keyframes spread{to{transform:translate(9px,-7px) skewY(-6deg)}}
+    @keyframes settle{from{transform:translate(-6px,5px) skewX(9deg)}to{transform:none}}
+    @keyframes converge{from{opacity:.2;transform:translate(-9px,6px) skewX(14deg)}to{opacity:1;transform:none}}
+    @media (prefers-reduced-motion:reduce){svg *{animation:none!important}}
+  </style>
+  <defs>
+    <g id="blue" class="plane">
+      <use href="#a" fill="url(#glass)" stroke="#182875" stroke-width="12" transform="translate(1 2)" opacity=".65"/>
+      <use class="edge" href="#a" fill="none" stroke="url(#front)" stroke-width="9" filter="url(#glow)"/>
+      <use href="#a" fill="none" stroke="#d5f9ff" stroke-width="1.6" opacity=".62" transform="translate(0 .6)"/>
+    </g>
+    <g id="violet" class="plane">
+      <use href="#b" fill="url(#glass)" stroke="#342075" stroke-width="12" transform="translate(0 2)" opacity=".65"/>
+      <use class="edge" href="#b" fill="none" stroke="url(#rear)" stroke-width="9" filter="url(#glow)"/>
+      <use href="#b" fill="none" stroke="#ffe0ff" stroke-width="1.6" opacity=".7" transform="translate(0 -.7)"/>
+    </g>
+  </defs>
+  <g id="idle"><use href="#blue"/><use href="#violet"/></g>
+  <g id="ignition"><use class="left" href="#blue"/><use class="right" href="#violet"/></g>
+  <g id="living"><g id="back"><use class="plane" href="#blue"/></g><g id="top"><use class="plane" href="#violet"/></g></g>
+  <g id="checking"><use href="#blue"/><use class="plane right" href="#violet"/></g>
+  <g id="recovering"><g><use class="plane left" href="#blue"/></g><use class="plane right" href="#violet"/></g>
+  <g id="verified"><use class="plane left" href="#blue"/><use class="plane right" href="#violet"/></g>
+  <g id="forecast"><use href="#blue"/><use class="plane right" href="#violet"/></g>
+</svg>

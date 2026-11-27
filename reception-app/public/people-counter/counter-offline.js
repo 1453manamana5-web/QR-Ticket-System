@@ -1,8 +1,8 @@
-const version = 'counter-v16';
+const version = 'counter-v17';
 const assets = 'counter-model-assets-v1';
-const shell = ['./', 'index.html', 'style.css?v=16', 'app.js?v=16', 'ledger-ui.mjs?v=16',
-  'ledger.mjs', 'luxnora-core.mjs?v=16', 'station-command.mjs?v=16', 'connection.mjs?v=16', 'adaptive-ui.mjs?v=16', 'adaptive-environment.mjs?v=16', 'adaptive-calibration.mjs?v=16', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
-    .map(name => name + '.mjs?v=16')];
+const shell = ['./', 'index.html', 'style.css?v=17', 'app.js?v=17', 'ledger-ui.mjs?v=17',
+  'ledger.mjs', 'luxnora-mark.svg?v=17', 'luxnora-core.mjs?v=17', 'station-command.mjs?v=17', 'connection.mjs?v=17', 'adaptive-ui.mjs?v=17', 'adaptive-environment.mjs?v=17', 'adaptive-calibration.mjs?v=17', ...['tracker','detection','body-check','vision','records','health','torso','torso-decoder']
+    .map(name => name + '.mjs?v=17')];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(version).then(cache => cache.addAll(shell)).then(() => self.skipWaiting()));
 });

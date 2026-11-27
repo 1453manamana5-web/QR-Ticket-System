@@ -1,12 +1,12 @@
-import {appendActivity,recoveryDecision,signals} from "./luxnora-core.mjs?v=16";
-import { LineTracker } from "./tracker.mjs?v=16";
-import { PROFILES, peopleFromResult } from "./detection.mjs?v=16";
+import {appendActivity,recoveryBudget,recoveryDecision,signals} from "./luxnora-core.mjs?v=17";
+import { LineTracker } from "./tracker.mjs?v=17";
+import { PROFILES, peopleFromResult } from "./detection.mjs?v=17";
 
-import { verifyBodies } from "./body-check.mjs?v=16";
-import { createVisionPipeline } from "./vision.mjs?v=16";
+import { verifyBodies } from "./body-check.mjs?v=17";
+import { createVisionPipeline } from "./vision.mjs?v=17";
 
-import { openRecordStore, totalOf } from "./records.mjs?v=16";
-import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=16";
+import { openRecordStore, totalOf } from "./records.mjs?v=17";
+import { CameraHealth, MAX_INFERENCE_MS, withDeadline } from "./health.mjs?v=17";
 const SESSION_KEY = "koken-counter-session-v1";
 const OPTIONS_KEY = "koken-counter-options-v1";
 const adaptive = window.counterAdaptive;
@@ -46,8 +46,9 @@ let recentTimes = [];
 let eventQueue = Promise.resolve();
 let settings = { ...defaults };
 let diagnosticFrame, diagnosticCtx;
-let recoveryTimer, recoveryUsed = false, recoveryProbe = null, recoveryReason = null;
-let stationFps = null, stationInference = null;
+let recoveryTimer, recoveryProbe = null, recoveryReason = null;
+let recoveryAttempts=[], lastVerifiedRecovery=null, remoteRecoveryResult=null;
+let stationFps = null, stationInference = null, suppressLuxMotion=false;
 const activityKey="counter-luxnora-activity-v1";
 let stationActivity=[];
 try {
@@ -55,6 +56,7 @@ try {
   if (Array.isArray(saved)) stationActivity=saved.slice(-40).reduce((rows,item)=>
     item&&["camera","storage","inference"].includes(item.reason)&&["verified","recovering","failed"].includes(item.state)?appendActivity(rows,item):rows,[]);
 } catch {}
+let luxMotionTimer, luxMotionVersion=0;
 function luxState(state,reason) {
   if (state!=="checking") {
     stationActivity=appendActivity(stationActivity,{state,reason,at:Date.now()});
@@ -63,10 +65,19 @@ function luxState(state,reason) {
   const badge=$("luxStationState");
   if (!badge) return;
   const message={checking:"自己診断中",recovering:"自動復旧中",verified:"復旧を確認しました",failed:"現地で端末を確認してください"}[state];
+  const mark=$("luxStationMark");
+  const motion=++luxMotionVersion;
+  clearTimeout(luxMotionTimer);
   badge.dataset.state=state;
+  if(mark) mark.src="./luxnora-mark.svg?v=17#"+(state==="failed"||suppressLuxMotion?"idle":state);
   badge.textContent="Luxnora · "+signals[reason]+" · "+message;
   badge.hidden=false;
-  if(state==="verified") setTimeout(()=>{if(badge.dataset.state===state) {badge.dataset.state="idle";badge.textContent="Luxnora";}},2500);
+  if(state==="verified") luxMotionTimer=setTimeout(()=>{
+    if(luxMotionVersion!==motion) return;
+    badge.dataset.state="idle";
+    badge.textContent="Luxnora";
+    if(mark) mark.src="./luxnora-mark.svg?v=17#idle";
+  },1600);
   renderLuxHistory();
 }
 function renderLuxHistory() {
@@ -382,11 +393,15 @@ function discardDetector(model = detector, pending = inferencePending) {
   else close();
 }
 function stopCamera() {
+  if(remoteRecoveryResult) {
+    remoteRecoveryResult(false);
+    remoteRecoveryResult=null;
+  }
   if(recoveryProbe || recoveryTimer&&recoveryReason) {
     luxState("failed",recoveryProbe?.reason??recoveryReason);
     recoveryReason=null;
   }
-  clearTimeout(recoveryTimer);
+  clearTimeout(recoveryTimer); recoveryTimer=null;
   endTrial(true);
   startAttempt++;
   running = false;
@@ -417,7 +432,7 @@ function stopCamera() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 function scheduleRecovery(reason) {
-  recoveryUsed = true;
+  recoveryAttempts.push(performance.now());
   recoveryReason = reason;
   luxState("recovering",reason);
   const attempt = startAttempt;
@@ -425,6 +440,7 @@ function scheduleRecovery(reason) {
   recoveryTimer = setTimeout(async () => {
     if (startAttempt !== attempt) return;
     if (document.hidden || !adaptive?.mayRecover()) {
+      recoveryTimer=null;
       stopButton.disabled = true;
       luxState("failed",reason);
       recoveryReason = null;
@@ -439,8 +455,11 @@ function scheduleRecovery(reason) {
   },1000);
 }
 function cameraFailure(text, discard = false, retry = true, reason = "camera") {
+  const {recent,ready}=recoveryBudget(recoveryAttempts,performance.now(),lastVerifiedRecovery);
+  recoveryAttempts=recent;
   const recover = retry && recoveryDecision({verified:adaptive?.mayRecover()===true,visible:!document.hidden,
-    tracking:tracker.tracks.length,attempts:Number(recoveryUsed),enabled:!trial&&!adaptive?.isolated()});
+    tracking:tracker.tracks.length,attempts:Number(!ready),enabled:!trial&&!adaptive?.isolated()&&!remoteRecoveryResult});
+  suppressLuxMotion=suppressLuxMotion||stationInference>850||discard;
   luxState("checking",reason);
   if (discard) discardDetector();
   stopCamera(); status("計測停止", "bad"); message(text, true);
@@ -573,6 +592,9 @@ async function tick(now) {
       const reason=recoveryProbe.reason;
       recoveryProbe=null;
       recoveryReason=null;
+      lastVerifiedRecovery=performance.now();
+      suppressLuxMotion=stationInference>850;
+      if(remoteRecoveryResult){remoteRecoveryResult(true);remoteRecoveryResult=null;}
       luxState("verified",reason);
       adaptive?.observeFault("");
       message("映像と認識が連続して更新されたことを確認しました。停止中の通過を確認してください。");
@@ -614,9 +636,33 @@ window.counterStationCamera = () => ({
   alert: $("status").textContent.includes("保存") && !initialized ? "storage" :
     adaptive?.stationStatus?.().alert,
 });
+function showLuxDiagnosis() {
+  if (document.hidden) return;
+  if (recoveryProbe||recoveryTimer||remoteRecoveryResult||$("luxStationState")?.dataset.state==="recovering") return;
+  luxState("checking","camera");
+  const ticket=luxMotionVersion;
+  const before=video.currentTime;
+  luxMotionTimer=setTimeout(()=>{
+    if (ticket!==luxMotionVersion) return;
+    const status=$("luxStationState");
+    if(!status) return;
+    const snapshot=window.counterStationCamera();
+    status.dataset.state="idle";
+    status.textContent=snapshot.camera&&snapshot.ai
+      ? video.currentTime!==before?"Luxnora · カメラ映像の更新を確認":"Luxnora · サンプル時間内の映像更新は未確認"
+      : "Luxnora · カメラまたは認識は停止中";
+    const mark=$("luxStationMark");
+    if(mark) mark.src="./luxnora-mark.svg?v=17#idle";
+  },420);
+}
+$("luxStationCheck")?.addEventListener("click",()=>{
+  showLuxDiagnosis();
+  checkCameraHealth();
+});
 window.counterStationAction = async action => {
   if (document.hidden) return "local";
   if (action === "diagnose") {
+    showLuxDiagnosis();
     checkCameraHealth();
     return "ok"; // Current health is published by the normal heartbeat.
   }
@@ -638,8 +684,29 @@ window.counterStationAction = async action => {
   const started = performance.now();
   if (action === "engine") discardDetector();
   stopCamera();
-  await startCamera({automaticRetry:true});
-  if (!running) return "local";
+  recoveryReason=action==="engine"?"inference":"camera";
+  luxState("recovering",recoveryReason);
+  await startCamera({automaticRetry:true,verifyRecovery:true});
+  if (!running) {
+    luxState("failed",recoveryReason??"camera");
+    recoveryReason=null;
+    return "local";
+  }
+  let timer;
+  const verified=await new Promise(resolve=>{
+    remoteRecoveryResult=resolve;
+    timer=setTimeout(()=>resolve(false),7500);
+  });
+  clearTimeout(timer);
+  remoteRecoveryResult=null;
+  if(!verified) {
+    if(recoveryProbe) {
+      luxState("failed",recoveryProbe.reason);
+      recoveryProbe=null;
+      recoveryReason=null;
+    }
+    return "failed";
+  }
   const downtimeMs = Math.min(240000, Math.round(performance.now()-started));
   message("遠隔操作で再開しました。約 " + Math.max(1,Math.round(downtimeMs/1000)) + "秒の停止中に通過した人数を確認してください。");
   return {result:"ok",downtimeMs};
@@ -649,7 +716,7 @@ async function startCamera({automaticRetry = false,verifyRecovery=false} = {}) {
   if (running || startButton.disabled || checkRemoteCapture()) return;
   if (!await initialize() || checkRemoteCapture()) return;
   clearTimeout(recoveryTimer);
-  if (!automaticRetry) recoveryUsed = false;
+  if (!automaticRetry) {recoveryAttempts=[];lastVerifiedRecovery=null;suppressLuxMotion=false;}
   const attempt = ++startAttempt, owner = uuid(), capturedSession = session;
   startButton.disabled = true;
   status("カメラを準備中", "loading"); message("iPadのカメラを確認しています…");
