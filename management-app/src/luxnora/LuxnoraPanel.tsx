@@ -84,6 +84,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
   const detailed=last?.response.some(row=>row.target==="compare"||row.target==="graph"||row.text.length>150);
   const stage=detailed?3:(notes.length>1||monitor||offered)?2:1;
   return <aside className="lux-dock" data-open={open} data-mounted={mounted} data-stage={stage} data-motion={motion} data-has-answer={notes.length>0||working} aria-label="Luxnora">
+    {mounted&&<div className="lux-screen-aura" aria-hidden="true" data-closing={!open}><div className="lux-aura-blue"/><div className="lux-aura-violet"/></div>}
     {mounted&&<section id="lux-panel" className="lux-panel" data-closing={!open} inert={!open} aria-label="Luxnoraとの会話" onKeyDown={e=>{
       if(e.key==="Escape"){e.stopPropagation();changeOpen(false);}
     }}>
@@ -99,7 +100,12 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
       {offered&&<button onClick={()=>{monitorSnapshot.current="";setActivity([]);setMonitor({role:offered.role,until:Date.now()+15*60000});setOffered(null);}}>15分間の見守りを開始</button>}
       {monitor&&<button onClick={()=>{setMonitor(null);setActivity(rows=>[...rows.slice(-5),"見守りを終了しました。"]);}}>見守りを終了</button>}
       {!!activity.length&&<div className="lux-activity" aria-live="polite">{activity.map((text,i)=><p key={i}>{text}</p>)}</div>}
-      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}><span aria-hidden="true">{working?"…":"↑"}</span></button></form>
+      <form className="lux-composer" onSubmit={event=>void submit(event)}>
+        <input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="何をしましょうか？" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/>
+        <button type="submit" className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}>
+          {working?<span className="lux-send-progress" aria-hidden="true"/>:<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>}
+        </button>
+      </form>
     </section>}
     <button ref={trigger} className="lux-trigger" aria-label="Luxnora" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
       <picture>
