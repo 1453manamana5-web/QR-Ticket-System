@@ -20,7 +20,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     isOpen.current=next;
     setOpen(next);
     changeMotion(next?"ignition":"verified",next?"living":"idle",next?580:250);
-    if(next) {setMounted(true);requestAnimationFrame(()=>prompt.current?.focus());}
+    if(next) {setMounted(true);requestAnimationFrame(()=>prompt.current?.focus({preventScroll:true}));}
     else {
       trigger.current?.focus();
       if(window.matchMedia("(prefers-reduced-motion: reduce)").matches) setMounted(false);
@@ -81,16 +81,17 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
   const last=notes.at(-1);
   const detailed=last?.response.some(row=>row.target==="compare"||row.target==="graph"||row.text.length>150);
   const stage=detailed?3:(notes.length>1||monitor||offered)?2:1;
-  return <aside className="lux-dock" data-open={open} data-mounted={mounted} data-stage={stage} data-motion={motion} aria-label="Luxnora">
+  return <aside className="lux-dock" data-open={open} data-mounted={mounted} data-stage={stage} data-motion={motion} data-has-answer={notes.length>0||working} aria-label="Luxnora">
     {mounted&&<section id="lux-panel" className="lux-panel" data-closing={!open} inert={!open} aria-label="Luxnoraとの会話" onKeyDown={e=>{
       if(e.key==="Escape"){e.stopPropagation();changeOpen(false);}
     }}>
-      <header><strong>Luxnora</strong><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><span aria-hidden="true">×</span></button></header>
+      <header><span className="lux-panel-brand"><img alt="" width="30" height="26" src={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#idle"}/><strong>Luxnora</strong></span><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><span aria-hidden="true">×</span></button></header>
+      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}><span aria-hidden="true">{working?"…":"↑"}</span></button></form>
       <div ref={replies} className="lux-answers" role="log" aria-label="会話">
         {working&&<p className="lux-progress" role="status">依頼を確認しています…</p>}
         {notes.map((note,i)=><div className="lux-turn" key={i}><p className="lux-question">{note.prompt}</p>{note.response.map((item,index)=><p className="lux-response" key={index}>{item.text}{item.target&&note.response.length>1&&<button type="button" className="cm-text-action" onClick={()=>focus(item.target!,item.plan)}>該当箇所を表示</button>}</p>)}</div>)}
       </div>
-      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}><span aria-hidden="true">{working?"…":"↑"}</span></button></form>
+
       <details className="lux-support"><summary>支援設定</summary><label className="lux-setting">支援 <select value={setting} onChange={e=>{setSetting(e.target.value);try {localStorage.setItem("counter-lux-support",e.target.value);}catch{}}}><option value="onRequest">指示したときのみ</option><option value="smart">スマートサポート</option><option value="active">積極的なサポート</option></select></label></details>
       {setting!=="onRequest"&&evidence.config?.opened!=null&&!evidence.current&&<small>端末の通信状態または未同期記録を確認してください。</small>}
       {setting==="active"&&!!evidence.analysis?.issues.length&&<small>整合性の指摘 {evidence.analysis.issues.length}件を通過記録と照合できます。</small>}
