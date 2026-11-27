@@ -234,7 +234,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         const overlap=bounds.left<p.right&&bounds.right>p.left&&bounds.top<p.bottom&&bounds.bottom>p.top;
         if(overlap||bounds.top<0||bounds.bottom>innerHeight||innerWidth<=700){
           panel.removeAttribute("data-focus-return");
-          panel.setAttribute("data-focus-position",bounds.left+bounds.width/2>innerWidth/2?"left":"right");
+          panel.setAttribute("data-focus-position","right");
         }
       }
       const p=panel?.getBoundingClientRect();
