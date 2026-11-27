@@ -85,7 +85,10 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
       {!!activity.length&&<div className="lux-activity" aria-live="polite">{activity.map((text,i)=><p key={i}>{text}</p>)}</div>}
     </section>}
     <button ref={trigger} className="lux-trigger" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
-      <img className="lux-mark" alt="" width="31" height="28" src={import.meta.env.BASE_URL+"people-counter/luxnora-mark.svg?v=17#"+motion}/>
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"people-counter/luxnora-mark.svg?v=17#idle"}/>
+        <img className="lux-mark" alt="" width="31" height="28" src={import.meta.env.BASE_URL+"people-counter/luxnora-mark.svg?v=17#"+motion}/>
+      </picture>
       Luxnora
     </button>
   </aside>;
