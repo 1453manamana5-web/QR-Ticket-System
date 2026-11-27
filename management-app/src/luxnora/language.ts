@@ -10,6 +10,7 @@ export const knowledge = {
   routine: ["入口端末をしばらく見守って","問題が起きたら対応して","出口の通信を監視して"],
   readiness: ["もう開場できる", "準備できたか見て", "開場前のチェック", "始める準備はできた"],
   compare: ["去年より少なくない", "前年度と比べて", "去年との差を知りたい", "開催日ごとに比較"],
+  crowd: ["最大同時滞在の時間帯", "混雑ピーク"],
   graph: ["グラフにして", "グラフを表示して", "入退場の推移を見せて", "チャート開いて"],
   records: ["通過記録を開いて", "入退場履歴を見せて", "記録画面へ移動"],
   event: ["開催設定を開いて", "開場時間を変更して", "イベント編集画面", "閉場の設定を見せて"],
@@ -99,6 +100,7 @@ export function interpret(raw:string,previous?:Plan):Interpretation {
     if(question&&/帰った|退場|退出/.test(clause)&&!/入退場/.test(clause)) intent="exits";
     else if(question&&/来た|来場|入った|入場/.test(clause)&&!/入退場/.test(clause)) intent="entries";
     else if(/この後|これから/.test(clause)&&/増え|減り|混|予想/.test(clause)) intent="forecast";
+    else if(/混雑|混ん/.test(clause)&&/今日|状況|ピーク|一番/.test(clause)) intent="crowd";
     else if(/端末|受付/.test(clause)&&/調子|状態|動い|同期/.test(clause)) intent="stations";
     else if(/前年差|前年比|前年度|前年|昨年|去年/.test(clause)&&/差|違い|比|増|減|少|多/.test(clause)) intent="compare";
     else if(/整合性|矛盾|不一致|おかし|異常/.test(clause)&&/記録|数|集計/.test(clause)) intent="issues";
