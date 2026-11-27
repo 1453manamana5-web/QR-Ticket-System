@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent} from "react";
 import {answer,watchAlerts,type Answer,type Evidence,type Target} from "./assistant";
 import {interpret,type Plan} from "./language";
+import motionAsset from "./motion.svg?url";
 
 export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(target:Target,plan?:Plan)=>void;cancel:()=>void}) {
   const [open,setOpen]=useState(false),[input,setInput]=useState("");
@@ -19,12 +20,12 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     clearTimeout(closeTimer.current);
     isOpen.current=next;
     setOpen(next);
-    changeMotion(next?"ignition":"verified",next?"living":"idle",next?580:250);
-    if(next) {setMounted(true);requestAnimationFrame(()=>prompt.current?.focus({preventScroll:true}));}
+    changeMotion(next?"ignition":"convergence",next?"living":"idle",next?840:540);
+    if(next) {setMounted(true);if(!window.matchMedia("(pointer: coarse)").matches) requestAnimationFrame(()=>prompt.current?.focus({preventScroll:true}));}
     else {
       trigger.current?.focus();
       if(window.matchMedia("(prefers-reduced-motion: reduce)").matches) setMounted(false);
-      else closeTimer.current=window.setTimeout(()=>setMounted(false),230);
+      else closeTimer.current=window.setTimeout(()=>setMounted(false),540);
     }
   }
   const [notes,setNotes]=useState<{prompt:string;response:Answer[]}[]>([]);
@@ -59,7 +60,8 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     if(!plan.plans.length&&!plan.reset&&plan.message?.startsWith("依頼の対象")) {
       inFlight.current=true;
       setWorking(true);
-      setMotion("checking");
+      clearTimeout(motionTimer.current);
+      if(isOpen.current) setMotion("checking");
       const intent=await import("./semantic").then(module=>module.semanticRead(text)).catch(()=>null);
       if(!active.current) return;
       if(intent) plan={plans:[{intent,focus:false,readOnly:true,role:text.includes("入口")?"in":text.includes("出口")?"out":undefined}]};
@@ -85,8 +87,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     {mounted&&<section id="lux-panel" className="lux-panel" data-closing={!open} inert={!open} aria-label="Luxnoraとの会話" onKeyDown={e=>{
       if(e.key==="Escape"){e.stopPropagation();changeOpen(false);}
     }}>
-      <header><span className="lux-panel-brand"><img alt="" width="30" height="26" src={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#idle"}/><strong>Luxnora</strong></span><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><span aria-hidden="true">×</span></button></header>
-      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}><span aria-hidden="true">{working?"…":"↑"}</span></button></form>
+      <header><span className="lux-panel-brand"><picture className="lux-header-mark"><source media="(prefers-reduced-motion: reduce)" srcSet={motionAsset+"#idle"}/><img key={motion} alt="" width="42" height="36" src={motionAsset+"#"+motion}/></picture><strong>Luxnora</strong></span><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><span aria-hidden="true">×</span></button></header>
       <div ref={replies} className="lux-answers" role="log" aria-label="会話">
         {working&&<p className="lux-progress" role="status">依頼を確認しています…</p>}
         {notes.map((note,i)=><div className="lux-turn" key={i}><p className="lux-question">{note.prompt}</p>{note.response.map((item,index)=><p className="lux-response" key={index}>{item.text}{item.target&&note.response.length>1&&<button type="button" className="cm-text-action" onClick={()=>focus(item.target!,item.plan)}>該当箇所を表示</button>}</p>)}</div>)}
@@ -98,11 +99,12 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
       {offered&&<button onClick={()=>{monitorSnapshot.current="";setActivity([]);setMonitor({role:offered.role,until:Date.now()+15*60000});setOffered(null);}}>15分間の見守りを開始</button>}
       {monitor&&<button onClick={()=>{setMonitor(null);setActivity(rows=>[...rows.slice(-5),"見守りを終了しました。"]);}}>見守りを終了</button>}
       {!!activity.length&&<div className="lux-activity" aria-live="polite">{activity.map((text,i)=><p key={i}>{text}</p>)}</div>}
+      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="lux-send" aria-label={working?"解析中":"送信"} disabled={working||!input.trim()}><span aria-hidden="true">{working?"…":"↑"}</span></button></form>
     </section>}
     <button ref={trigger} className="lux-trigger" aria-label="Luxnora" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#idle"}/>
-        <img className="lux-mark" alt="" width="43" height="37" src={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#"+motion}/>
+        <source media="(prefers-reduced-motion: reduce)" srcSet={motionAsset+"#idle"}/>
+        <img className="lux-mark" alt="" width="43" height="37" src={motionAsset+"#"+(open?"idle":motion)}/>
       </picture>
     </button>
   </aside>;

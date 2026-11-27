@@ -213,36 +213,64 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
   useEffect(()=>{
     if(!focusRequest) return;
     const targetId=focusRequest.target==="graph"&&focusRequest.plan?.period!==undefined?"range":focusRequest.target;
-    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+targetId+'"]')??
-      ((targetId==="in"||targetId==="out")?document.querySelector<HTMLElement>('[data-lux-focus="stations"]'):null);
-    if(!target) return;
-    target.classList.add("lux-highlight");
-    if(focusRequest.target==="in"||focusRequest.target==="out") {
-      const diagnosis=target.querySelector<HTMLDetailsElement>(".cm-station-diagnosis");
-      if(diagnosis) diagnosis.open=true;
-    }
     const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const frame=document.querySelector(".lux-dock[data-open=true] .lux-panel");
-    const bottomSheet=frame&&frame.getBoundingClientRect().top>innerHeight/2;
-    if(bottomSheet) {
-      const bounds=target.getBoundingClientRect(),visible=Math.max(100,frame.getBoundingClientRect().top-16);
-      if(bounds.top<0||bounds.bottom>visible) window.scrollTo({top:Math.max(0,scrollY+bounds.top-20),behavior:reduced?"auto":"smooth"});
-    } else target.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"});
-    const trigger=document.querySelector(".lux-trigger");
-    const ray=!reduced&&trigger?document.createElement("span"):null;
-    if(ray&&trigger) {
-      const origin=trigger.getBoundingClientRect(), destination=target.getBoundingClientRect();
-      const x=origin.left+origin.width/2,y=origin.top+origin.height/2;
-      const dx=Math.min(innerWidth-8,Math.max(8,destination.right))-x;
-      const dy=Math.min(innerHeight-8,Math.max(8,destination.top+16))-y;
-      ray.className="lux-focus-ray";
-      ray.style.setProperty("--ray-angle",Math.atan2(dy,dx)+"rad");
-      Object.assign(ray.style,{left:x+"px",top:y+"px",width:Math.hypot(dx,dy)+"px"});
-      ray.setAttribute("aria-hidden","true");
-      document.body.append(ray);
+    let target:HTMLElement|null=null,ray:HTMLElement|null=null,panel:HTMLElement|null=null;
+    function restorePanel(){if(panel?.hasAttribute('data-focus-position')){panel.setAttribute('data-focus-return','true');panel.removeAttribute('data-focus-position');}}
+    let frameId=0,timer:number|undefined,stopped=false;
+    const started=performance.now();
+    function find(){
+      if(stopped) return;
+      target=document.querySelector<HTMLElement>('[data-lux-focus="'+targetId+'"]')??
+        ((targetId==="in"||targetId==="out")?document.querySelector<HTMLElement>('[data-lux-focus="stations"]'):null);
+      if(!target){if(performance.now()-started<1200)frameId=requestAnimationFrame(find);return;}
+      if(focusRequest?.target==="in"||focusRequest?.target==="out") {
+        const diagnosis=target.querySelector<HTMLDetailsElement>(".cm-station-diagnosis");
+        if(diagnosis) diagnosis.open=true;
+      }
+      panel=document.querySelector<HTMLElement>(".lux-dock[data-open=true] .lux-panel");
+      const bounds=target.getBoundingClientRect();
+      if(panel){
+        const p=panel.getBoundingClientRect();
+        const overlap=bounds.left<p.right&&bounds.right>p.left&&bounds.top<p.bottom&&bounds.bottom>p.top;
+        if(overlap||bounds.top<0||bounds.bottom>innerHeight||innerWidth<=700){
+          panel.removeAttribute("data-focus-return");
+          panel.setAttribute("data-focus-position",bounds.left+bounds.width/2>innerWidth/2?"left":"right");
+        }
+      }
+      const p=panel?.getBoundingClientRect();
+      const sheet=!!(p&&bounds.left<p.right&&bounds.right>p.left&&panel?.hasAttribute("data-focus-position"));
+      const visibleBottom=sheet&&p?Math.max(90,p.top-18):innerHeight-24;
+      const y=bounds.height>visibleBottom-50?60:Math.max(50,(visibleBottom-bounds.height)/2);
+      if(bounds.top<40||bounds.bottom>visibleBottom)window.scrollTo({top:Math.max(0,scrollY+bounds.top-y),behavior:reduced?"auto":"smooth"});
+      const movingSince=performance.now();
+      let lastTop=NaN,lastLeft=NaN,lastWidth=NaN,stable=0;
+      function settle(){
+        if(stopped||!target?.isConnected)return;
+        const box=target.getBoundingClientRect();
+        if(Math.abs(box.top-lastTop)<.6&&Math.abs(box.left-lastLeft)<.6&&Math.abs(box.width-lastWidth)<.6)stable++;else stable=0;
+        lastTop=box.top;lastLeft=box.left;lastWidth=box.width;
+        const elapsed=performance.now()-movingSince;
+        if(!reduced&&elapsed<900&&(elapsed<260||stable<5)){frameId=requestAnimationFrame(settle);return;}
+        const origin=document.querySelector(".lux-dock[data-open=true] .lux-header-mark")??document.querySelector(".lux-trigger");
+        if(!reduced&&origin&&box.bottom>0&&box.top<visibleBottom){
+          const o=origin.getBoundingClientRect(),x=o.left+o.width/2,y=o.top+o.height/2;
+          const dx=Math.min(innerWidth-8,Math.max(8,box.right))-x;
+          const dy=Math.min(visibleBottom-8,Math.max(8,box.top+Math.min(28,box.height/2)))-y;
+          ray=document.createElement("span");
+          ray.className="lux-focus-ray";
+          ray.style.setProperty("--ray-angle",Math.atan2(dy,dx)+"rad");
+          Object.assign(ray.style,{left:x+"px",top:y+"px",width:Math.hypot(dx,dy)+"px"});
+          ray.setAttribute("aria-hidden","true");document.body.append(ray);
+        }
+        target.classList.remove("lux-highlight");
+        void target.offsetWidth;
+        target.classList.add("lux-highlight");
+        timer=window.setTimeout(()=>{target?.classList.remove("lux-highlight");ray?.remove();restorePanel();},3600);
+      }
+      frameId=requestAnimationFrame(settle);
     }
-    const timer=setTimeout(()=>{target.classList.remove("lux-highlight");ray?.remove();},2400);
-    return ()=>{clearTimeout(timer);target.classList.remove("lux-highlight");ray?.remove();};
+    frameId=requestAnimationFrame(find);
+    return ()=>{stopped=true;cancelAnimationFrame(frameId);clearTimeout(timer);target?.classList.remove("lux-highlight");ray?.remove();restorePanel();};
   },[focusRequest,page]);
   const luxFocus=(target:Target,plan?:Plan)=>{
     if(!eventId||denied||create) return;

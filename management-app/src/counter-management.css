@@ -503,3 +503,69 @@ summary{cursor:pointer;padding:9px 0;min-height:38px;font-weight:640;font-size:1
   }
   @media(prefers-reduced-motion:reduce){.lux-dock[data-mounted="true"] .lux-panel,.lux-dock[data-mounted="true"] .lux-panel[data-closing="true"]{animation:none!important}}
 }
+
+/* Luxnora motion redesign: stationary workspace, origin-linked overlay and unobstructed targets. */
+@media screen {
+  .lux-dock[data-mounted="true"] .lux-panel{
+    inset:clamp(60px,12vh,115px) auto auto 50%;
+    transform:translateX(-50%);transform-origin:50% 0;
+    width:min(530px,calc(100vw - 32px));height:auto;
+    max-height:min(68dvh,calc(100dvh - 150px));overflow:hidden;
+    border:1px solid #d8e0ee;border-radius:18px;
+    background:rgba(255,255,255,.98);box-shadow:0 12px 42px #26365b1c;
+    animation:lux-frame-unfold .68s cubic-bezier(.2,.75,.25,1) both;
+  }
+  .lux-dock[data-mounted="true"][data-stage="2"] .lux-panel{width:min(600px,calc(100vw - 32px))}
+  .lux-dock[data-mounted="true"][data-stage="3"] .lux-panel{width:min(720px,calc(100vw - 32px))}
+  .lux-dock[data-mounted="true"] .lux-panel[data-closing="true"]{animation:lux-frame-fold .52s cubic-bezier(.55,.05,.7,.35) both}
+  .lux-dock[data-mounted="true"] .lux-panel::before{
+    inset:0;width:auto;height:auto;border:1px solid #9cb5e8;border-radius:inherit;
+    background:none;box-shadow:inset 0 0 16px #a3a5e930;
+    animation:lux-frame-edge .85s ease-out both;z-index:0
+  }
+  .lux-panel-brand{gap:8px;font-size:16px}
+  .lux-header-mark{display:grid;place-items:center;flex:none}
+  .lux-header-mark img{display:block;width:42px;height:36px}
+  .lux-panel header,.lux-panel form,.lux-support,.lux-panel>small,.lux-panel>button{flex:none;position:relative;z-index:1}
+  .lux-dock[data-mounted="true"] .lux-answers{flex:1 1 auto;min-height:0;max-height:46dvh}
+  .lux-answers .lux-question{margin:0 0 12px auto;padding:8px 12px;border:0;border-radius:14px 14px 4px 14px;background:#edf1f8;color:var(--ink);max-width:88%;width:fit-content;font-size:13px}
+  .lux-answers .lux-response{line-height:1.75;font-size:14px}
+  .lux-panel form{margin-top:auto;background:#f7f8fb;border-radius:14px}
+  .lux-panel form input{font-size:16px}
+  .lux-highlight{outline:1.5px solid #9ca9e8;outline-offset:4px;animation:lux-target-light 3.5s ease-out both;scroll-margin:24px}
+  .lux-focus-ray{z-index:21;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,#85d9ed 35%,#a79ae8 85%,#d4c8ff);box-shadow:0 0 9px #9aa3f2;animation:lux-trace .85s ease-out both}
+  /* Preserve the user's latest choice: no dashboard shrink or layout shift. */
+  .cm-shell:has(.lux-dock[data-open="true"]) .cm-main,
+  .cm-shell:has(.lux-dock[data-open="true"][data-stage="1"]) .cm-main,
+  .cm-shell:has(.lux-dock[data-open="true"][data-stage="2"]) .cm-main{margin-right:0;transition:none}
+  .cm-shell:has(.lux-dock[data-open="true"]) #cm-content{padding-bottom:90px}
+  .lux-dock[data-mounted="true"] .lux-panel[data-focus-position]{
+    inset:auto var(--lx-right) calc(var(--lx-bottom) + 58px) auto;
+    transform:none;transform-origin:right bottom;max-height:38dvh;
+    width:min(360px,calc(100vw - 28px));animation:lux-focus-tuck .25s ease-out both;
+  }
+  .lux-dock[data-mounted="true"] .lux-panel[data-focus-position="left"]{
+    left:var(--lx-right);right:auto;
+  }
+  .lux-dock[data-mounted="true"] .lux-panel[data-focus-position] .lux-answers{max-height:19dvh}
+  @media(max-width:700px){
+    .lux-dock[data-mounted="true"] .lux-panel[data-focus-position]{left:var(--lx-right);right:var(--lx-right);width:auto;max-height:32dvh}
+    .lux-dock[data-mounted="true"] .lux-panel[data-focus-position] .lux-support{display:none}
+  }
+  .lux-dock[data-mounted="true"] .lux-panel[data-focus-return="true"]:not([data-closing="true"]):not([data-focus-position]){animation:lux-focus-tuck .22s ease-out both}
+  .lux-dock[data-mounted="true"] .lux-panel[data-focus-position][data-closing="true"]{animation:lux-focus-hide .25s ease-out both}
+  @keyframes lux-focus-tuck{from{opacity:.7}to{opacity:1}}
+  @keyframes lux-focus-hide{to{opacity:0;transform:scale(.92)}}
+  @keyframes lux-frame-unfold{
+    0%{clip-path:inset(0 round 30px);opacity:0;transform:translate(calc(-50% + 50vw - var(--lx-right) - 27px),calc(100dvh - clamp(60px,12vh,115px) - var(--lx-bottom) - 27px)) scale(.08,.08)}
+    35%{opacity:1}
+    100%{clip-path:inset(0 round 18px);opacity:1;transform:translateX(-50%)}
+  }
+  @keyframes lux-frame-fold{
+    0%{opacity:1;transform:translateX(-50%)}
+    100%{opacity:0;transform:translate(calc(-50% + 50vw - var(--lx-right) - 27px),calc(100dvh - clamp(60px,12vh,115px) - var(--lx-bottom) - 27px)) scale(.08,.08)}
+  }
+  @keyframes lux-frame-edge{0%{opacity:0}35%{opacity:.95;box-shadow:inset 0 0 24px #a9a0f255}100%{opacity:.2}}
+  @keyframes lux-target-light{0%{outline-color:transparent;box-shadow:none}18%,44%{outline-color:#9ca9e8;box-shadow:0 0 18px #8d9eeb60,inset 0 0 10px #a4a8ed22}100%{outline-color:transparent;box-shadow:none}}
+  @media(prefers-reduced-motion:reduce){.lux-panel,.lux-panel[data-closing="true"],.lux-panel::before,.lux-focus-ray,.lux-highlight{animation:none!important}.cm-main{transition:none!important}}
+}
