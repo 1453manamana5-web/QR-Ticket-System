@@ -301,7 +301,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
     if(page==="home"&&next!=="home") {
       homeScroll.current=window.scrollY;
       const selected=document.activeElement;
-      transitionOrigin.current=selected instanceof HTMLElement&&selected.matches(".cm-row-link,.cm-metric-action,.cm-chart-link,.cm-status-action")
+      transitionOrigin.current=selected instanceof HTMLElement&&selected.matches(".cm-row-link,.cm-metric-action,.cm-chart-link,.cm-status-action,.cm-home-link")
         ?selected.getBoundingClientRect():undefined;
     }
     setDirection(next==="records"&&(detail==="in"||detail==="out")?detail:undefined);
@@ -390,7 +390,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         {eventsError && <p role="alert" className="cm-warning">{eventsError} <button onClick={fetchEvents}>再試行</button></p>}
         {notice && <p role="status" className="cm-notice">{notice}</p>}
         {!authReady && <p className="cm-warning" role="status">管理端末の権限を現在確認できません。表示済みの情報は古い可能性があります。 <button onClick={recheck}>再確認</button></p>}
-        <div ref={detailSurface} className="cm-detail-surface">{create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest??eventSuggestions}/>
+        <div ref={detailSurface} className={"cm-detail-surface"+(page==="home"&&!create?" cm-home-surface":"")}>{create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest??eventSuggestions}/>
         : page === "settings" ? <section className="cm-section"><h2>この管理端末</h2><dl className="cm-definition"><dt>名称</dt><dd>{manager.name}</dd><dt>権限</dt><dd>{admin ? "管理者" : "副管理者"}</dd><dt>承認先</dt><dd>QR受付の管理端末認証</dd></dl>
           <p>管理者・副管理者の登録と権限変更は、既存の管理端末設定で行います。</p><a href={base+"management-app/"}>QR受付管理を開く ↗</a></section>
         : !eventId ? <p className="cm-empty">{events?.length === 0 && catalog?.days.length === 0 ? "イベント名のメニューから新規作成できます。" : "イベントを読み込んでいます。"}</p>
@@ -461,7 +461,7 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,
   const activeStations=stations.filter(row=>row.status==="approved");
   const issue=activeStations.find(row=>["camera","storage","network","recalibrate"].includes(row.alert??"")&&row.lastSeen!=null&&now-row.lastSeen<=freshMs);
   const showDashboard=detailed||!preparation;
-  const devices=<section className="cm-section cm-devices-home"><h2>受付端末</h2><ul className="cm-device-rows">
+  const devices=<section className="cm-section cm-devices-home"><h2><button className="cm-chart-link" onClick={()=>navigate("stations")}>受付端末 <Arrow/></button></h2><ul className="cm-device-rows">
     {(["in","out"] as const).map(role=>{
       const matching=activeStations.filter(row=>row.role===role);
       const pending=matching.reduce((sum,row)=>sum+(row.pending??0),0);
@@ -480,10 +480,10 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,
     {waiting&&<p className="cm-empty" role="status">人数と端末の状況を読み込んでいます。</p>}
     {showDashboard&&!current&&!waiting&&<p className="cm-warning" role="status">一部の端末状態や同期を確認できていません。人数は取得済みの記録です。</p>}
     {issue&&<button className="cm-alert-link" onClick={()=>inspect(issue.role)}><strong>{roleTitle[issue.role]}端末に確認事項</strong><span>{alertTitle[issue.alert??""]} · 診断を見る</span><Arrow/></button>}
-    {!detailed&&preparation&&<section className="cm-section cm-phase"><h2>開催準備</h2><ul className="cm-device-rows">
+    {!detailed&&preparation&&<div className="cm-preparation-layout"><section className="cm-section cm-phase"><h2>開催準備</h2><p className="cm-caption">日程を設定し、端末の設置と試験通過を確認します。</p><ul className="cm-device-rows">
       <li><button className="cm-row-link" onClick={()=>navigate("event")}><strong>開催日程と開場時刻</strong><span>{day?day.start+" – "+day.end:"設定を確認"}</span><Arrow/></button></li>
       <li><button className="cm-row-link" onClick={()=>navigate("event")}><strong>試験運用・開場前確認</strong><span>{stage==="trial"?"試験実施中":"方向と通過を確認"}</span><Arrow/></button></li>
-    </ul></section>}
+    </ul></section>{devices}</div>}
     {!detailed&&stage==="closing"&&<section className="cm-section cm-phase"><h2>退場を確認</h2><p>{analysis?"取得済みの滞在 "+count(analysis.occupancy)+"人。":"滞在人数は未取得です。"} 退場を計測中です。</p><button onClick={()=>navigate("event")}>閉場の確認へ <Arrow/></button></section>}
     {!detailed&&stage==="finished"&&<section className="cm-section cm-phase"><div className="cm-section-top"><div><h2>開催結果</h2><p className="cm-caption">{config?.verified?"集計確定済み":"暫定集計"}</p></div><button onClick={()=>navigate("analysis")}>分析・データ出力 <Arrow/></button></div></section>}
     {showDashboard&&<>{!detailed&&<dl className="cm-metrics">
@@ -494,16 +494,15 @@ function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,
         detail={average==null?"算出不可":analysis?.sumAverage==null?"暫定値":"確定値"} drill={!detailed?()=>navigate("analysis"):undefined}/>
       <Metric title="最大同時滞在" value={peak?count(peak.occupancy):"—"} unit={peak?"人":""} detail={peak?stamp(peak.at):""} drill={peak?()=>navigate("analysis","peak"):undefined}/>
     </dl>}
-    <div className="cm-overview">
+    <div className={"cm-overview"+(!detailed?" cm-home-overview":"")}>
       <section className="cm-section cm-occupancy-chart" data-lux-focus="graph"><h2>{detailed?"滞在人数の推移":<button className="cm-chart-link" onClick={()=>navigate("analysis")}>滞在人数の推移 <Arrow/></button>}</h2>
-        {analysis?.timeline.length&&open!=null?<OccupancyChart rows={analysis.timeline} from={open} to={config?.closed??now} prediction={prediction}/>:<p className="cm-chart-empty">まだグラフに表示できる記録がありません。</p>}
-        {!detailed&&analysis?.timeline.length?<button className="cm-plot-action" aria-label="滞在人数グラフの詳細" onClick={()=>navigate("analysis")}/>:null}
+        {analysis?.timeline.length&&open!=null?<OccupancyChart rows={analysis.timeline} from={open} to={config?.closed??now} prediction={prediction} onOpen={detailed?undefined:()=>navigate("analysis")}/>:<p className="cm-chart-empty">まだグラフに表示できる記録がありません。</p>}
       </section>
-      <section className="cm-section"><h2>時間帯別の入退場</h2><p className="cm-caption"><span className="cm-legend in">入場</span><span className="cm-legend out">退場</span></p>
+      <div className="cm-home-side">{!detailed&&devices}<section className="cm-section cm-hourly-home"><h2>{detailed?"時間帯別の入退場":<button className="cm-chart-link" onClick={()=>navigate("analysis")}>時間帯別の入退場 <Arrow/></button>}</h2><p className="cm-caption"><span className="cm-legend in">入場</span><span className="cm-legend out">退場</span></p>
         {analysis?.hours.length?<HourlyChart rows={analysis.hours}/>:<p className="cm-chart-empty">まだ集計できる記録がありません。</p>}
-      </section>
+      </section></div>
     </div></>}
-    {!detailed&&devices}
+    {!detailed&&<div className="cm-home-links"><button className="cm-home-link" onClick={()=>navigate("records")}>通過記録 <Arrow/></button><button className="cm-home-link" onClick={()=>navigate("event")}>イベント設定 <Arrow/></button><button className="cm-home-link" onClick={()=>navigate("settings")}>システム設定 <Arrow/></button></div>}
     {analysis?.issues.length?<details className="cm-section"><summary>記録の確認事項 {analysis.issues.length}件</summary><ul>{[...new Set(analysis.issues.map(row=>row.code))].map(item=><li key={item}>{item}</li>)}</ul></details>:null}
   </>;
 }
@@ -513,7 +512,7 @@ function Metric({title,value,unit,detail,accent,drill,mark}: {title:string;value
     <dd>{value}<small>{unit}</small></dd>{detail&&<p>{detail}</p>}
     {drill&&<button className="cm-metric-action" onClick={drill} aria-label={title+"の詳細"}><Arrow/></button>}</div>;
 }
-function OccupancyChart({rows,from,to,prediction}: {rows:Analysis["timeline"];from:number;to:number;prediction:Forecast}) {
+function OccupancyChart({rows,from,to,prediction,onOpen}: {rows:Analysis["timeline"];from:number;to:number;prediction:Forecast;onOpen?:()=>void}) {
   const chunk = Math.ceil(rows.length/800);
   const points = rows.filter((_,i) => i % chunk === 0 || i === rows.length-1);
   const upper = rows.reduce((max,row) => Math.max(max,row.occupancy),Math.max(1,...prediction.map(row=>row.high)));
@@ -525,7 +524,7 @@ function OccupancyChart({rows,from,to,prediction}: {rows:Analysis["timeline"];fr
   const plot = points.map(row => "H"+px(row.at)+"V"+py(row.occupancy)).join("");
   const projected=[{at:to,occupancy:last,low:last,high:last},...prediction];
   const projection=(key:"occupancy"|"low"|"high",points:typeof projected)=>points.map(row=>px(row.at)+","+py(row[key])).join(" ");
-  return <figure className="cm-plot"><svg viewBox="0 0 572 190" role="img" aria-label={"滞在人数の時系列。現在 "+rows[rows.length-1].occupancy+"人。"}>
+  return <figure className="cm-plot"><svg className={onOpen?"cm-plot-interactive":undefined} onClick={onOpen} viewBox="0 0 572 190" role="img" aria-label={"滞在人数の時系列。現在 "+rows[rows.length-1].occupancy+"人。"}>
     {[upper,lower,...lower<0 ? [0] : []].map(value => <g key={value}><path d={"M36 "+py(value)+"H546"} className="cm-axis"/><text x="4" y={py(value)+4}>{value}</text></g>)}
     <path d={"M36 "+py(0)+plot+"H"+px(to)} className="cm-line"/>
     {!!prediction.length&&<g aria-label="推計の範囲">
