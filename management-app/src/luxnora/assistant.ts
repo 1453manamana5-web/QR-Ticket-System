@@ -8,7 +8,7 @@ export type Evidence={
   name:string;mode:"live"|"test"; now:number; current:boolean; config:CounterConfig|null;day?:Day|null;
   analysis:ReturnType<typeof import("../counterManagementData").analyze>|null; stations:CounterStation[]; prediction:Forecast;
 };
-export type Target="graph"|"compare"|"event"|"records"|"stations"|"in"|"out";
+export type Target="occupancy"|"graph"|"compare"|"event"|"records"|"stations"|"in"|"out";
 export type Answer={text:string;target?:Target;plan?:Plan};
 const roles={in:"入口",out:"出口"};
 const jst=(at:number)=>new Intl.DateTimeFormat("ja-JP",{timeZone:"Asia/Tokyo",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(at);
@@ -64,6 +64,18 @@ export function answer(plan:Plan,data:Evidence):Answer {
   if(plan.intent==="graph") return {target:"graph",plan,text:plan.period!==undefined?
     "指定した時間帯のグラフを表示します。":"選択中の開催日のグラフを表示します。"};
   if(!analysis||config?.opened==null) return {text:"集計できる開催日の記録をまだ取得できていません。イベントと試験・本番の区分を確認してください。"};
+  if(plan.intent==="crowd") {
+    const {from,to,untilExclusive}=luxRange(plan.period,config.opened,Math.min(now,config.closed??Infinity));
+    const points=analysis.timeline.filter(point=>point.at<=to&&!(untilExclusive&&point.at===to));
+    const prior=points.filter(point=>point.at<from).at(-1);
+    const peak=points.filter(point=>point.at>=from).reduce<{at:number;occupancy:number}|undefined>(
+      (best,point)=>!best||point.occupancy>best.occupancy?point:best,prior&&{at:from,occupancy:prior.occupancy});
+    if(!peak||from>=to) return {text:"指定した時間に混雑状況を示せる記録がありません。"};
+    const center=Math.floor((peak.at+32400000)%86400000/60000);
+    const period=plan.period??{from:Math.max(0,center-15),to:Math.min(1440,center+15)};
+    return {target:"graph",plan:{...plan,intent:"graph",period},text:"最大同時滞在は"+peak.occupancy+
+      "人（"+jst(peak.at)+"）。該当時間帯の推移を表示します。"+confidence};
+  }
   if(plan.intent==="issues") return {text:scopeName(data)+"の整合性の指摘 "+analysis.issues.length+"件。"+
     (analysis.issues.length?[...new Set(analysis.issues.map(row=>row.code))].join("、")+"。":" ") + confidence};
   const {from,to,untilExclusive,midnight,range}=luxRange(plan.period,config.opened,Math.min(now,config.closed??Infinity));
@@ -81,7 +93,8 @@ export function answer(plan:Plan,data:Evidence):Answer {
     entries:"入場 "+entries+"回（再入場を含む）。",exits:"退場 "+exits+"回。",
     dwell:average==null?"平均滞在時間は算出できません。":"平均滞在 "+(average/60000).toFixed(1)+"分（"+(analysis.sumAverage==null?"暫定":"確定")+"）。",
     briefing:"入場 "+entries+"回、退場 "+exits+"回、滞在 "+occupancy+"人。整合性の指摘 "+analysis.issues.length+"件。"};
-  return {text:scopeName(data)+(period?" "+period:"")+"。"+messages[plan.intent]+" "+confidence};
+  return {target:plan.intent==="occupancy"&&!period?"occupancy":period? "graph":undefined,
+    plan:period?{...plan,intent:"graph"}:undefined,text:scopeName(data)+(period?" "+period:"")+"。"+messages[plan.intent]+" "+confidence};
 }
 
 export function watchAlerts(data:Evidence,role?:Plan["role"]) {

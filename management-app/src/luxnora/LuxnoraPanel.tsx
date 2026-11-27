@@ -5,18 +5,25 @@ import {interpret,type Plan} from "./language";
 export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(target:Target,plan?:Plan)=>void;cancel:()=>void}) {
   const [open,setOpen]=useState(false),[input,setInput]=useState("");
   const [motion,setMotion]=useState("idle");
+  const [mounted,setMounted]=useState(false);
+  const closeTimer=useRef<number|undefined>(undefined);
   const motionTimer=useRef<number|undefined>(undefined);
-  useEffect(()=>()=>clearTimeout(motionTimer.current),[]);
+  useEffect(()=>()=>{clearTimeout(motionTimer.current);clearTimeout(closeTimer.current);},[]);
   function changeMotion(next:string,after:string,ms:number) {
     clearTimeout(motionTimer.current);
     setMotion(next);
     motionTimer.current=window.setTimeout(()=>setMotion(after),ms);
   }
   function changeOpen(next:boolean) {
+    clearTimeout(closeTimer.current);
     setOpen(next);
-    changeMotion(next?"ignition":"verified",next?"living":"idle",next?580:750);
-    if(next) requestAnimationFrame(()=>prompt.current?.focus());
-    else trigger.current?.focus();
+    changeMotion(next?"ignition":"verified",next?"living":"idle",next?580:250);
+    if(next) {setMounted(true);requestAnimationFrame(()=>prompt.current?.focus());}
+    else {
+      trigger.current?.focus();
+      if(window.matchMedia("(prefers-reduced-motion: reduce)").matches) setMounted(false);
+      else closeTimer.current=window.setTimeout(()=>setMounted(false),230);
+    }
   }
   const [notes,setNotes]=useState<{prompt:string;response:Answer[]}[]>([]);
   const [setting,setSetting]=useState(()=>{
@@ -67,29 +74,31 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     if(item?.target) focus(item.target,item.plan);
     if(open&&response.some(item=>item.target==="graph")&&evidence.prediction.length>0) changeMotion("forecast","living",1800);
   }
-  return <aside className="lux-dock" aria-label="Luxnora">
-    {open&&<section id="lux-panel" className="lux-panel" aria-label="Luxnoraとの会話" onKeyDown={e=>{
-      if(e.key==="Escape"){changeOpen(false);}
+  const last=notes.at(-1);
+  const detailed=last?.response.some(row=>row.target==="compare"||row.target==="graph"||row.text.length>150);
+  const stage=detailed?3:(notes.length>1||monitor||offered)?2:1;
+  return <aside className="lux-dock" data-open={open} data-stage={stage} aria-label="Luxnora">
+    {mounted&&<section id="lux-panel" className="lux-panel" data-closing={!open} inert={!open} aria-label="Luxnoraとの会話" onKeyDown={e=>{
+      if(e.key==="Escape"){e.stopPropagation();changeOpen(false);}
     }}>
-      <header><strong>Luxnora</strong><button onClick={()=>{changeOpen(false);}} aria-label="会話を閉じる">閉じる</button></header>
+      <header><strong>Luxnora</strong><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる">閉じる</button></header>
       <div ref={replies} className="lux-answers" role="log" aria-label="会話">
-        {!notes.length&&<p>「今何人おる？」「出口の状態を確認して」など、表示中のイベントについて入力できます。</p>}
+        {working&&<p className="lux-progress" role="status">依頼を確認しています…</p>}
         {notes.map((note,i)=><div key={i}><b>{note.prompt}</b>{note.response.map((item,index)=><p key={index}>{item.text}{item.target&&note.response.length>1&&<button type="button" className="cm-text-action" onClick={()=>focus(item.target!,item.plan)}>該当箇所を表示</button>}</p>)}</div>)}
       </div>
-      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="cm-primary" disabled={working}>{working?"解析中":"送信"}</button></form>
-      <label className="lux-setting">支援 <select value={setting} onChange={e=>{setSetting(e.target.value);try {localStorage.setItem("counter-lux-support",e.target.value);}catch{}}}><option value="onRequest">指示したときのみ</option><option value="smart">スマートサポート</option><option value="active">積極的なサポート</option></select></label>
+      <form onSubmit={event=>void submit(event)}><input ref={prompt} aria-label="Luxnoraへの依頼" placeholder="Luxnoraに聞く・頼む" value={input} onChange={e=>setInput(e.target.value)} maxLength={320} autoComplete="off" disabled={working}/><button className="cm-primary" disabled={working}>{working?"解析中":"送信"}</button></form>
+      <details className="lux-support"><summary>支援設定</summary><label className="lux-setting">支援 <select value={setting} onChange={e=>{setSetting(e.target.value);try {localStorage.setItem("counter-lux-support",e.target.value);}catch{}}}><option value="onRequest">指示したときのみ</option><option value="smart">スマートサポート</option><option value="active">積極的なサポート</option></select></label></details>
       {setting!=="onRequest"&&evidence.config?.opened!=null&&!evidence.current&&<small>端末の通信状態または未同期記録を確認してください。</small>}
       {setting==="active"&&!!evidence.analysis?.issues.length&&<small>整合性の指摘 {evidence.analysis.issues.length}件を通過記録と照合できます。</small>}
       {offered&&<button onClick={()=>{monitorSnapshot.current="";setActivity([]);setMonitor({role:offered.role,until:Date.now()+15*60000});setOffered(null);}}>15分間の見守りを開始</button>}
       {monitor&&<button onClick={()=>{setMonitor(null);setActivity(rows=>[...rows.slice(-5),"見守りを終了しました。"]);}}>見守りを終了</button>}
       {!!activity.length&&<div className="lux-activity" aria-live="polite">{activity.map((text,i)=><p key={i}>{text}</p>)}</div>}
     </section>}
-    <button ref={trigger} className="lux-trigger" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
+    <button ref={trigger} className="lux-trigger" aria-label="Luxnora" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"people-counter/luxnora-mark.svg?v=17#idle"}/>
-        <img className="lux-mark" alt="" width="31" height="28" src={import.meta.env.BASE_URL+"people-counter/luxnora-mark.svg?v=17#"+motion}/>
+        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"counter-management/luxnora-frame.svg#idle"}/>
+        <img className="lux-mark" alt="" width="31" height="28" src={import.meta.env.BASE_URL+"counter-management/luxnora-frame.svg#"+motion}/>
       </picture>
-      Luxnora
     </button>
   </aside>;
 }

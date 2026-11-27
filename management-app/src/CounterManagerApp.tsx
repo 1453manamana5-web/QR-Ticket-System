@@ -213,11 +213,21 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
   useEffect(()=>{
     if(!focusRequest) return;
     const targetId=focusRequest.target==="graph"&&focusRequest.plan?.period!==undefined?"range":focusRequest.target;
-    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+targetId+'"]');
+    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+targetId+'"]')??
+      ((targetId==="in"||targetId==="out")?document.querySelector<HTMLElement>('[data-lux-focus="stations"]'):null);
     if(!target) return;
     target.classList.add("lux-highlight");
-    target.scrollIntoView({block:"center",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
+    if(focusRequest.target==="in"||focusRequest.target==="out") {
+      const diagnosis=target.querySelector<HTMLDetailsElement>(".cm-station-diagnosis");
+      if(diagnosis) diagnosis.open=true;
+    }
     const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame=document.querySelector(".lux-dock[data-open=true] .lux-panel");
+    const bottomSheet=frame&&!(innerWidth>=980&&window.matchMedia("(orientation: landscape)").matches);
+    if(bottomSheet) {
+      const bounds=target.getBoundingClientRect(),visible=Math.max(100,frame.getBoundingClientRect().top-16);
+      if(bounds.top<0||bounds.bottom>visible) window.scrollTo({top:Math.max(0,scrollY+bounds.top-20),behavior:reduced?"auto":"smooth"});
+    } else target.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"});
     const trigger=document.querySelector(".lux-trigger");
     const ray=!reduced&&trigger?document.createElement("span"):null;
     if(ray&&trigger) {
@@ -236,12 +246,30 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
   },[focusRequest,page]);
   const luxFocus=(target:Target,plan?:Plan)=>{
     if(!eventId||denied||create) return;
+    if(page==="home") homeScroll.current=window.scrollY;
+    setDirection(undefined);
     if(target==="compare"||target==="graph") setPage("analysis");
     else if(target==="in"||target==="out"||target==="stations") setPage("stations");
-    else setPage(target);
+    else setPage(target==="occupancy"?"home":target);
     setFocusRequest({target,plan,stamp:Date.now()});
   };
   const lastUpdate = denied ? undefined : data?.operations.lastChangeAt;
+  useEffect(()=>{
+    function closeMenus(e:PointerEvent) {
+      if(!(e.target instanceof Node)) return;
+      for(const item of [eventMenu.current,menu.current]) if(item?.open&&!item.contains(e.target)) item.open=false;
+    }
+    function dismiss(e:KeyboardEvent) {
+      if(e.key!=="Escape") return;
+      for(const item of [eventMenu.current,menu.current]) if(item?.open) {
+        item.open=false;
+        item.querySelector("summary")?.focus();
+      }
+    }
+    document.addEventListener("pointerdown",closeMenus);
+    document.addEventListener("keydown",dismiss);
+    return ()=>{document.removeEventListener("pointerdown",closeMenus);document.removeEventListener("keydown",dismiss);};
+  },[]);
 
   async function perform(task: () => Promise<unknown>, success: string) {
     if (!ready || submitting.current) return;
@@ -263,7 +291,45 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
     setFocusRequest(null);setNotice("");setEventId(next);setMode(nextMode);
     if (eventMenu.current) eventMenu.current.open=false;
   };
-  const navigate = (next:Page) => {setFocusRequest(null);setPage(next);setNotice("");};
+  const homeScroll=useRef(0);
+  const [direction,setDirection]=useState<"in"|"out"|undefined>(undefined);
+  const menu=useRef<HTMLDetailsElement>(null);
+  const content=useRef<HTMLElement>(null);
+  const transitionOrigin=useRef<DOMRect|undefined>(undefined);
+  const detailSurface=useRef<HTMLDivElement>(null);
+  const navigate = (next:Page,detail?:"in"|"out"|"peak") => {
+    if(page==="home"&&next!=="home") {
+      homeScroll.current=window.scrollY;
+      const selected=document.activeElement;
+      transitionOrigin.current=selected instanceof HTMLElement&&selected.matches(".cm-row-link,.cm-metric-action,.cm-chart-link,.cm-status-action")
+        ?selected.getBoundingClientRect():undefined;
+    }
+    setDirection(next==="records"&&(detail==="in"||detail==="out")?detail:undefined);
+    if(next==="stations"&&(detail==="in"||detail==="out")) setFocusRequest({target:detail,stamp:Date.now()});
+    else if(next==="analysis"&&detail==="peak"&&peakPoint!=null) {
+      const center=Math.floor((peakPoint+32400000)%86400000/60000);
+      setFocusRequest({target:"graph",stamp:Date.now(),plan:{intent:"graph",focus:true,readOnly:true,period:{from:Math.max(0,center-15),to:Math.min(1440,center+15)}}});
+    } else setFocusRequest(null);
+    if(menu.current) menu.current.open=false;
+    setPage(next);setNotice("");
+  };
+  const peakPoint=analysis?.timeline.reduce<{at:number;occupancy:number}|null>((best,row)=>!best||row.occupancy>best.occupancy?row:best,null)?.at;
+  useEffect(()=>{
+    if(page==="home"&&!focusRequest) window.scrollTo(0,homeScroll.current);
+    else if(!focusRequest) {window.scrollTo(0,0);content.current?.focus({preventScroll:true});}
+    const origin=transitionOrigin.current;
+    transitionOrigin.current=undefined;
+    const surface=detailSurface.current;
+    if(!origin||!surface||window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const frame=surface.getBoundingClientRect();
+    const x=Math.max(0,Math.min(frame.width,origin.left+origin.width/2-frame.left));
+    const y=Math.max(0,Math.min(frame.height,origin.top+origin.height/2-frame.top));
+    const animation=surface.animate?.([
+      {clipPath:`inset(${y}px ${frame.width-x}px ${frame.height-y}px ${x}px round 14px)`,opacity:.6},
+      {clipPath:"inset(0 0 0 0 round 0)",opacity:1},
+    ],{duration:240,easing:"cubic-bezier(.2,.75,.25,1)"});
+    return ()=>animation?.cancel();
+  },[page]);
   async function saveNew(draft:EventDraft) {
     if (!authReady || creating.current) return false;
     creating.current=true;setCreateBusy(true);setNotice("");
@@ -285,9 +351,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
   return <div className="cm-shell">
     <a className="cm-skip" href="#cm-content">内容へ移動</a>
     <div className="cm-main">
-      <header className="cm-bar"><div className="cm-brand"><div className="cm-brand-mark" aria-hidden="true"><i/><i/><i/></div><b>人数カウント管理</b></div>
-        <div><span className={"cm-health"+(ready ? " is-ready":"")}>{status}</span><button onClick={lock}>ロック</button></div></header>
-      <main id="cm-content" tabIndex={-1}>
+      <main ref={content} id="cm-content" tabIndex={-1}>
         <div className="cm-title"><div>
           <details className="cm-picker" ref={eventMenu}><summary>{eventName}</summary>
             <div className="cm-picker-menu">
@@ -308,21 +372,25 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
             </div>
           </details>
           {series&&<p className="cm-venue">{series.venue} · {day?.date}</p>}
-          <h1>{pages[page]}</h1>
+
         </div>
           <div className="cm-selectors">
-            {eventId&&<label>表示する集計<select value={mode} onChange={e => choose(eventId,e.target.value as CounterMode)}><option value="live">本番</option><option value="test">試験</option></select></label>}
+            <span className={"cm-health"+(ready?" is-ready":"")} role="status">{status}</span>
+            {eventId&&<label className="cm-mode"><span className="cm-sr">表示する集計</span><select value={mode} onChange={e => choose(eventId,e.target.value as CounterMode)}><option value="live">本番</option><option value="test">試験</option></select></label>}
+            <details className="cm-work-menu" ref={menu}>
+              <summary aria-label="管理メニュー"><span aria-hidden="true">···</span></summary>
+              <nav aria-label="管理メニュー">{Object.entries(pages).filter(([id])=>id!==page).map(([id,title])=>
+                <button key={id} onClick={()=>{setCreate(false);navigate(id as Page);}}>{title}{id==="stations"&&pendingRequests>0? " · "+pendingRequests:""}</button>
+              )}<button onClick={lock}>管理画面をロック</button></nav>
+            </details>
           </div>
         </div>
-        <nav aria-label="管理メニュー" className="cm-nav">{Object.entries(pages).map(([id,title]) =>
-          <button key={id} className={page===id?"is-current":""} aria-current={page===id?"page":undefined} onClick={()=>navigate(id as Page)}>
-            {title}{id==="stations"&&pendingRequests>0&&<small>{pendingRequests}</small>}
-          </button>)}</nav>
+        {page==="home"&&!create?<h1 className="cm-sr">ホーム</h1>:!create&&<div className="cm-location"><button onClick={()=>navigate("home")}>‹ 概要</button><h1>{pages[page]}</h1></div>}
         {catalogError&&<p role="alert" className="cm-warning">{catalogError} <button onClick={fetchEvents}>再試行</button></p>}
         {eventsError && <p role="alert" className="cm-warning">{eventsError} <button onClick={fetchEvents}>再試行</button></p>}
         {notice && <p role="status" className="cm-notice">{notice}</p>}
         {!authReady && <p className="cm-warning" role="status">管理端末の権限を現在確認できません。表示済みの情報は古い可能性があります。 <button onClick={recheck}>再確認</button></p>}
-        {create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest??eventSuggestions}/>
+        <div ref={detailSurface} className="cm-detail-surface">{create ? <NewCounterEvent owner={manager.uid} busy={createBusy} onSave={saveNew} onClose={()=>setCreate(false)} provider={suggest??eventSuggestions}/>
         : page === "settings" ? <section className="cm-section"><h2>この管理端末</h2><dl className="cm-definition"><dt>名称</dt><dd>{manager.name}</dd><dt>権限</dt><dd>{admin ? "管理者" : "副管理者"}</dd><dt>承認先</dt><dd>QR受付の管理端末認証</dd></dl>
           <p>管理者・副管理者の登録と権限変更は、既存の管理端末設定で行います。</p><a href={base+"management-app/"}>QR受付管理を開く ↗</a></section>
         : !eventId ? <p className="cm-empty">{events?.length === 0 && catalog?.days.length === 0 ? "イベント名のメニューから新規作成できます。" : "イベントを読み込んでいます。"}</p>
@@ -333,7 +401,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
             <p className="cm-warning" role="status">イベントの一部を取得できませんでした。 <button onClick={fetchEvents}>再試行</button></p>}
           {invalidRows > 0 && <p className="cm-warning" role="status">読み取れないデータが {invalidRows}件あります。集計を確認してください。</p>}
           {(page === "home" || page === "analysis") && <Home day={day??undefined} navigate={navigate} detailed={page==="analysis"} analysis={analysis} config={config} stations={stations} mode={mode} now={now}
-            lastUpdate={lastUpdate} prediction={prediction} current={current} waiting={updating} />}
+            lastUpdate={lastUpdate} prediction={prediction} current={current||sealed} waiting={updating} inspect={luxFocus} />}
           {page==="analysis"&&analysis&&operations&&config?.opened!=null&&<CounterAnalysisTools key={scope}
             luxPeriod={focusRequest?.target==="graph"?focusRequest.plan?.period:undefined} luxStamp={focusRequest?.stamp}
             report={analysis} rows={operations} from={config.opened} to={config.closed??now} mode={mode} scope={eventId}
@@ -342,7 +410,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
           {page==="stations"&&nativeDay&&<CounterPairPanel key={eventId} day={eventId} enabled={ready&&!working}/>}
           {page === "stations" && <StationList stations={stations} mode={mode} now={now} admin={admin} dedicated={nativeDay} enabled={ready&&!working}
             loading={data?.stations.source === "pending" || !data} perform={perform} eventId={eventId} version={day?.version} />}
-          {page === "records" && <div data-lux-focus="records"><Records key={scope} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
+          {page === "records" && <div data-lux-focus="records"><Records key={scope+":"+(direction??"all")} initialDirection={direction} eventId={eventId} mode={mode} rows={operations ?? []} enabled={ready&&!working}
             loading={data?.operations.source==="pending" || !data} perform={perform} now={now} /></div>}
           {page==="records"&&admin&&config?.verified&&<section className="cm-section">
             <h2>確定済みの集計を再確認</h2>
@@ -371,7 +439,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
               "操作を保存しました。端末の通信状況を確認してください。");}}
           /> : <EventControls key={scope+"/"+data?.config.serverAt} eventId={eventId} mode={mode} config={config}
             enabled={ready&&!working&&!nativeDay} admin={admin} perform={perform} />}</div>}
-        </>}
+        </>}</div>
       </main>
     </div>
     {!denied&&<LuxnoraPanel key={scope} evidence={{name:eventName,mode,now,config,day,stations,analysis,prediction,current}} focus={luxFocus} cancel={()=>setFocusRequest(null)}/>}
@@ -380,44 +448,70 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
 type Analysis = ReturnType<typeof analyze>;
 type Mutation = (task:()=>Promise<unknown>,success:string)=>Promise<void>;
 
-function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,navigate,detailed,prediction}: {
-  analysis:Analysis|null; config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;day?:Day;navigate:(page:Page)=>void;detailed:boolean;prediction:Forecast;
+function Home({analysis,config,stations,mode,now,lastUpdate,current,waiting,day,navigate,detailed,prediction,inspect}: {
+  analysis:Analysis|null;config:CounterConfig|null;stations:CounterStation[];mode:CounterMode;now:number;lastUpdate?:number;current:boolean;waiting:boolean;day?:Day;
+  navigate:(page:Page,detail?:"in"|"out"|"peak")=>void;detailed:boolean;prediction:Forecast;inspect:(target:Target)=>void;
 }) {
-  const peak = analysis?.timeline.reduce<{at:number;occupancy:number} | null>((max,row) => row.occupancy > (max?.occupancy ?? 0) ? row : max,null);
-  const average = analysis?.sumAverage ?? (current ? analysis?.estimate : null);
-  const hasCount = !!analysis;
-  const open = config?.opened;
-  const lifecycle = day ? stageLabels[day.stage] : config?.closed != null ? "閉場" : open == null ? "開場時刻未設定" : open > now ? "開場前" : config?.paused ? "受付停止中" : "開場中";
+  const peak=analysis?.timeline.reduce<{at:number;occupancy:number}|null>((best,row)=>!best||row.occupancy>best.occupancy?row:best,null);
+  const average=analysis?.sumAverage??(current?analysis?.estimate:null);
+  const open=config?.opened;
+  const stage=day?.stage??(config?.closed!=null?"finished":open==null||open>now?"prepare":"open");
+  const label=day?stageLabels[day.stage]:stageLabels[stage];
+  const preparation=stage==="prepare"||stage==="trial"&&mode==="live";
+  const activeStations=stations.filter(row=>row.status==="approved");
+  const issue=activeStations.find(row=>["camera","storage","network","recalibrate"].includes(row.alert??"")&&row.lastSeen!=null&&now-row.lastSeen<=freshMs);
+  const showDashboard=detailed||!preparation;
+  const devices=<section className="cm-section cm-devices-home"><h2>受付端末</h2><ul className="cm-device-rows">
+    {(["in","out"] as const).map(role=>{
+      const matching=activeStations.filter(row=>row.role===role);
+      const pending=matching.reduce((sum,row)=>sum+(row.pending??0),0);
+      const reported=matching.length>0&&matching.every(row=>row.pending!==undefined&&row.lastSeen!=null&&now-row.lastSeen<=freshMs);
+      const fault=matching.some(row=>["camera","storage","network","recalibrate"].includes(row.alert??""));
+      const state=!matching.length?"未登録":!reported?"通信未確認":fault?"要確認":matching.every(row=>row.camera===true&&row.ai===true)?"計測中":"待機中";
+      return <li key={role}><button className="cm-row-link" onClick={()=>navigate("stations",role)}>
+        <StationBadge role={role}/><span><strong>{matching.length===1?matching[0].name:roleTitle[role]+"端末"}</strong>
+          <small>{reported?pending?"未同期 "+pending+"件":"未同期記録なし":"同期未確認"}</small></span><span className={fault&&reported?"cm-problem":"cm-row-state"}>{state}</span><Arrow/>
+      </button></li>;
+    })}
+  </ul></section>;
   return <>
-    <div className="cm-event-strip"><button className="cm-status-action" onClick={()=>navigate("event")}>{lifecycle} <span aria-hidden="true">⌄</span></button><span>{modeTitle[mode]}集計</span><span>記録の最終更新 {stamp(lastUpdate)}</span></div>
-    {!current && <p className="cm-warning" role="status">{waiting ? "人数と端末の状況を取得しています。" : "未同期または通信を確認できない端末があります。表示人数は最新とは限りません。"}</p>}
-    {open == null && !waiting && <p className="cm-empty">イベント管理で開場時刻を設定すると集計を表示します。</p>}
-    <dl className="cm-metrics">
-      <Metric title="累計入場" value={hasCount ? count(analysis.entries) : "—"} unit={hasCount ? "回" : ""} detail="再入場を含む"/>
-      <Metric title="累計退場" value={hasCount ? count(analysis.exits) : "—"} unit={hasCount ? "回" : ""}/>
-      <Metric title="現在の滞在" value={hasCount ? count(analysis.occupancy) : "—"} unit={hasCount ? "人" : ""} accent drill={!detailed?()=>navigate("analysis"):undefined}/>
-      <Metric title="平均滞在" value={average == null ? "—" : (average/60000).toFixed(1)} unit={average == null ? "" : "分"}
-        detail={average == null ? "算出不可" : analysis?.sumAverage == null ? "暫定値" : "確定値"}/>
-      <Metric title="最大同時滞在" value={peak ? count(peak.occupancy) : "—"} unit={peak ? "人" : ""} detail={peak ? stamp(peak.at) : ""}/>
-    </dl>
+    {!detailed&&<div className="cm-event-strip"><button className={"cm-status-action stage-"+stage} onClick={()=>navigate("event")}>{label} <Arrow/></button>
+      {day&&<span>{day.start} – {day.end}</span>}<span className="cm-updated">最終更新 {stamp(lastUpdate)}</span></div>}
+    {waiting&&<p className="cm-empty" role="status">人数と端末の状況を読み込んでいます。</p>}
+    {showDashboard&&!current&&!waiting&&<p className="cm-warning" role="status">一部の端末状態や同期を確認できていません。人数は取得済みの記録です。</p>}
+    {issue&&<button className="cm-alert-link" onClick={()=>inspect(issue.role)}><strong>{roleTitle[issue.role]}端末に確認事項</strong><span>{alertTitle[issue.alert??""]} · 診断を見る</span><Arrow/></button>}
+    {!detailed&&preparation&&<section className="cm-section cm-phase"><h2>開催準備</h2><ul className="cm-device-rows">
+      <li><button className="cm-row-link" onClick={()=>navigate("event")}><strong>開催日程と開場時刻</strong><span>{day?day.start+" – "+day.end:"設定を確認"}</span><Arrow/></button></li>
+      <li><button className="cm-row-link" onClick={()=>navigate("event")}><strong>試験運用・開場前確認</strong><span>{stage==="trial"?"試験実施中":"方向と通過を確認"}</span><Arrow/></button></li>
+    </ul></section>}
+    {!detailed&&stage==="closing"&&<section className="cm-section cm-phase"><h2>退場を確認</h2><p>{analysis?"取得済みの滞在 "+count(analysis.occupancy)+"人。":"滞在人数は未取得です。"} 退場を計測中です。</p><button onClick={()=>navigate("event")}>閉場の確認へ <Arrow/></button></section>}
+    {!detailed&&stage==="finished"&&<section className="cm-section cm-phase"><div className="cm-section-top"><div><h2>開催結果</h2><p className="cm-caption">{config?.verified?"集計確定済み":"暫定集計"}</p></div><button onClick={()=>navigate("analysis")}>分析・データ出力 <Arrow/></button></div></section>}
+    {showDashboard&&<>{!detailed&&<dl className="cm-metrics">
+      <Metric title={stage==="finished"?"閉場時の滞在":"現在の滞在"} value={analysis?count(analysis.occupancy):"—"} unit={analysis?"人":""} mark accent drill={!detailed?()=>navigate("analysis"):undefined}/>
+      <Metric title="累計入場" value={analysis?count(analysis.entries):"—"} unit={analysis?"回":""} detail="再入場を含む" drill={()=>navigate("records","in")}/>
+      <Metric title="累計退場" value={analysis?count(analysis.exits):"—"} unit={analysis?"回":""} drill={()=>navigate("records","out")}/>
+      <Metric title="平均滞在" value={average==null?"—":(average/60000).toFixed(1)} unit={average==null?"":"分"}
+        detail={average==null?"算出不可":analysis?.sumAverage==null?"暫定値":"確定値"} drill={!detailed?()=>navigate("analysis"):undefined}/>
+      <Metric title="最大同時滞在" value={peak?count(peak.occupancy):"—"} unit={peak?"人":""} detail={peak?stamp(peak.at):""} drill={peak?()=>navigate("analysis","peak"):undefined}/>
+    </dl>}
     <div className="cm-overview">
-      <section className="cm-section" data-lux-focus="graph"><h2>{detailed?"滞在人数の推移":<button className="cm-text-action" onClick={()=>navigate("analysis")}>滞在人数の推移 <span aria-hidden="true">›</span></button>}</h2><p className="cm-caption">通過時刻に基づく集計</p>
-        {analysis?.timeline.length && open != null ? <OccupancyChart rows={analysis.timeline} from={open} to={config?.closed ?? now} prediction={prediction}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
+      <section className="cm-section cm-occupancy-chart" data-lux-focus="graph"><h2>{detailed?"滞在人数の推移":<button className="cm-chart-link" onClick={()=>navigate("analysis")}>滞在人数の推移 <Arrow/></button>}</h2>
+        {analysis?.timeline.length&&open!=null?<OccupancyChart rows={analysis.timeline} from={open} to={config?.closed??now} prediction={prediction}/>:<p className="cm-chart-empty">まだグラフに表示できる記録がありません。</p>}
+        {!detailed&&analysis?.timeline.length?<button className="cm-plot-action" aria-label="滞在人数グラフの詳細" onClick={()=>navigate("analysis")}/>:null}
       </section>
       <section className="cm-section"><h2>時間帯別の入退場</h2><p className="cm-caption"><span className="cm-legend in">入場</span><span className="cm-legend out">退場</span></p>
-        {analysis?.hours.length ? <HourlyChart rows={analysis.hours}/> : <p className="cm-chart-empty">表示できる通過記録がありません。</p>}
+        {analysis?.hours.length?<HourlyChart rows={analysis.hours}/>:<p className="cm-chart-empty">まだ集計できる記録がありません。</p>}
       </section>
-    </div>
-    <section className="cm-section"><h2>計測端末の稼働状況</h2>
-      {!stations.length ? <p className="cm-empty">表示できる端末がありません。</p> : <ul className="cm-status-list">
-        {stations.filter(row => row.status === "approved").map(station => <li key={station.uid}><StationBadge role={station.role}/><button className="cm-text-action" onClick={()=>navigate("stations")}>{station.name}</button><DeviceSignal station={station} now={now}/><span>AI {station.ai == null ? "—" : station.ai ? "稼働" : "停止"} · 未同期 {station.pending ?? "—"}件</span><span>最終通信 {stamp(station.lastSeen)}</span></li>)}
-        {!stations.some(row => row.status==="approved") && <li>承認済み端末がありません。</li>}</ul>}
-      {analysis?.issues.length ? <details><summary>整合性の注意 {analysis.issues.length}件</summary><ul>{[...new Set(analysis.issues.map(row => row.code))].map(label => <li key={label}>{label}</li>)}</ul></details> : null}
-    </section>
+    </div></>}
+    {!detailed&&devices}
+    {analysis?.issues.length?<details className="cm-section"><summary>記録の確認事項 {analysis.issues.length}件</summary><ul>{[...new Set(analysis.issues.map(row=>row.code))].map(item=><li key={item}>{item}</li>)}</ul></details>:null}
   </>;
 }
-function Metric({title,value,unit,detail,accent,drill}: {title:string;value:string;unit:string;detail?:string;accent?:boolean;drill?:()=>void}) {
-  return <div className={accent ? "cm-metric cm-feature":"cm-metric"}><dt>{title}</dt><dd>{drill?<button className="cm-text-action" onClick={drill}>{value}<small>{unit}</small></button>:<>{value}<small>{unit}</small></>}</dd>{detail && <p>{detail}</p>}</div>;
+function Arrow(){return <span className="cm-chevron" aria-hidden="true">›</span>;}
+function Metric({title,value,unit,detail,accent,drill,mark}: {title:string;value:string;unit:string;detail?:string;accent?:boolean;drill?:()=>void;mark?:boolean}) {
+  return <div className={accent?"cm-metric cm-feature":"cm-metric"} data-lux-focus={mark?"occupancy":undefined}><dt>{title}</dt>
+    <dd>{value}<small>{unit}</small></dd>{detail&&<p>{detail}</p>}
+    {drill&&<button className="cm-metric-action" onClick={drill} aria-label={title+"の詳細"}><Arrow/></button>}</div>;
 }
 function OccupancyChart({rows,from,to,prediction}: {rows:Analysis["timeline"];from:number;to:number;prediction:Forecast}) {
   const chunk = Math.ceil(rows.length/800);
@@ -471,7 +565,7 @@ function StationList({stations,mode,now,admin,dedicated,enabled,loading,perform,
               ? "端末で確認済み · v"+version : "端末で未確認 · v"+version}</dd></>}</dl>
           {station.lastSeen && now-station.lastSeen>freshMs && <p className="cm-caption">表示は最後に取得した状態です。</p>}
           {alertTitle[station.alert ?? ""] && <p className="cm-caption">端末からの通知　{alertTitle[station.alert ?? ""]}</p>}
-          {station.status==="approved"&&<details><summary>Luxnoraの診断</summary><p>{diagnose(station,now)}</p>
+          {station.status==="approved"&&<details className="cm-station-diagnosis"><summary>Luxnoraの診断</summary><p>{diagnose(station,now)}</p>
             {Number(station.version)>=16&&station.lux&&<p>端末からの最終報告　{station.lux.fps??"—"} FPS · 推論 {station.lux.inferenceMs??"—"} ms</p>}
             {station.lux?.activity&&<p>直近の自己診断・復旧　{stamp(station.lux.activity.at)} ·
               {({camera:"カメラ",inference:"認識処理",storage:"端末内保存"})[station.lux.activity.reason as "camera"|"inference"|"storage"]??"状態未確認"} ·
@@ -530,26 +624,27 @@ function EventControls({eventId,mode,config,enabled,admin,perform}:{eventId:stri
   </section>;
 }
 
-function Records({eventId,mode,rows,enabled,loading,perform,now}:{
-  eventId:string;mode:CounterMode;rows:CounterOperation[];enabled:boolean;loading:boolean;perform:Mutation;now:number;
+function Records({eventId,mode,rows,enabled,loading,perform,now,initialDirection}:{
+  eventId:string;mode:CounterMode;rows:CounterOperation[];enabled:boolean;loading:boolean;perform:Mutation;now:number;initialDirection?:"in"|"out";
 }) {
   const operations = useMemo(() => analyze(rows,{eventId,mode,opened:0,closed:null,now}),[rows,eventId,mode,now]);
   const [target,setTarget] = useState("");
   const [page,setPage] = useState(0);
-  const sorted = useMemo(() => [...operations.effective].sort((a,b) => b.at-a.at),[operations.effective]);
+  const [filter,setFilter]=useState<"in"|"out"|"all">(initialDirection??"all");
+  const sorted = useMemo(() => operations.effective.filter(row=>filter==="all"||row.direction===filter).sort((a,b) => b.at-a.at),[operations.effective,filter]);
   const selected = sorted.find(row => row.originalId === target);
   const start = Math.min(page,Math.max(0,Math.ceil(sorted.length/25)-1))*25;
   const conflict = selected && operations.issues.some(row => row.target === selected.originalId && row.code === "修正競合");
   const revisions = selected ? rows.filter(row => row.kind==="revision" && row.target===selected.originalId) : [];
   const siblings = conflict && selected ? revisions.filter(row => row.kind === "revision" && row.parent === selected.id).map(row => row.id) : [];
   return <section className="cm-section">
-    <div className="cm-section-top"><div><h2>正方向の通過記録</h2><p className="cm-caption">時刻は日本時間 · {sorted.length}件</p></div><button disabled={!sorted.length} onClick={() => {
+    <div className="cm-section-top"><div><h2>正方向の通過記録</h2><p className="cm-caption">時刻は日本時間 · {sorted.length}件</p></div><div className="cm-record-tools"><label>方向 <select aria-label="通過方向" value={filter} onChange={e=>{setFilter(e.target.value as typeof filter);setPage(0);setTarget("");}}><option value="all">すべて</option><option value="in">入場</option><option value="out">退場</option></select></label><button disabled={!sorted.length} onClick={() => {
       const content = csv([["記録ID","日時（UTC）","方向","区分","無効"],...sorted.map(row =>
         [row.originalId,new Date(row.at).toISOString(),row.direction==="in"?"入場":"退場",row.person==="staff"?"部員":"来場者",row.invalid?"無効":""])]);
       const url = URL.createObjectURL(new Blob([content],{type:"text/csv;charset=utf-8"}));
       const anchor = document.createElement("a");anchor.href=url;anchor.download="counter-"+eventId+"-"+mode+".csv";document.body.append(anchor);anchor.click();anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url),1500);
-    }}>CSVを出力</button></div>
+    }}>CSVを出力</button></div></div>
     {loading ? <p className="cm-empty">記録を読み込んでいます。</p> : sorted.length === 0 ? <p className="cm-empty">保存済みの通過記録がありません。</p> :
       <div className="cm-table-wrap"><table><thead><tr><th>日時</th><th>方向</th><th>状態</th><th>操作</th></tr></thead><tbody>
         {sorted.slice(start,start+25).map(row => <tr key={row.originalId}><td>{stamp(row.at)}</td><td><StationBadge role={row.direction}/></td>
