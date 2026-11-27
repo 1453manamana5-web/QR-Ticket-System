@@ -214,7 +214,8 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
     if(!focusRequest) return;
     const targetId=focusRequest.target==="graph"&&focusRequest.plan?.period!==undefined?"range":focusRequest.target;
     const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let target:HTMLElement|null=null,ray:HTMLElement|null=null;
+    let target:HTMLElement|null=null,ray:HTMLElement|null=null,panel:HTMLElement|null=null;
+    function restorePanel(){if(panel?.hasAttribute('data-focus-position')){panel.setAttribute('data-focus-return','true');panel.removeAttribute('data-focus-position');}}
     let frameId=0,timer:number|undefined,stopped=false;
     const started=performance.now();
     function find(){
@@ -226,10 +227,19 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         const diagnosis=target.querySelector<HTMLDetailsElement>(".cm-station-diagnosis");
         if(diagnosis) diagnosis.open=true;
       }
-      const panel=document.querySelector(".lux-dock[data-open=true] .lux-panel");
+      panel=document.querySelector<HTMLElement>(".lux-dock[data-open=true] .lux-panel");
       const bounds=target.getBoundingClientRect();
-      const sheet=panel&&(innerWidth<980||innerHeight>innerWidth);
-      const visibleBottom=sheet?Math.max(90,panel.getBoundingClientRect().top-18):innerHeight-24;
+      if(panel){
+        const p=panel.getBoundingClientRect();
+        const overlap=bounds.left<p.right&&bounds.right>p.left&&bounds.top<p.bottom&&bounds.bottom>p.top;
+        if(overlap||bounds.top<0||bounds.bottom>innerHeight||innerWidth<=700){
+          panel.removeAttribute("data-focus-return");
+          panel.setAttribute("data-focus-position",bounds.left+bounds.width/2>innerWidth/2?"left":"right");
+        }
+      }
+      const p=panel?.getBoundingClientRect();
+      const sheet=!!(p&&bounds.left<p.right&&bounds.right>p.left&&panel?.hasAttribute("data-focus-position"));
+      const visibleBottom=sheet&&p?Math.max(90,p.top-18):innerHeight-24;
       const y=bounds.height>visibleBottom-50?60:Math.max(50,(visibleBottom-bounds.height)/2);
       if(bounds.top<40||bounds.bottom>visibleBottom)window.scrollTo({top:Math.max(0,scrollY+bounds.top-y),behavior:reduced?"auto":"smooth"});
       const movingSince=performance.now();
@@ -255,12 +265,12 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
         target.classList.remove("lux-highlight");
         void target.offsetWidth;
         target.classList.add("lux-highlight");
-        timer=window.setTimeout(()=>{target?.classList.remove("lux-highlight");ray?.remove();},3600);
+        timer=window.setTimeout(()=>{target?.classList.remove("lux-highlight");ray?.remove();restorePanel();},3600);
       }
       frameId=requestAnimationFrame(settle);
     }
     frameId=requestAnimationFrame(find);
-    return ()=>{stopped=true;cancelAnimationFrame(frameId);clearTimeout(timer);target?.classList.remove("lux-highlight");ray?.remove();};
+    return ()=>{stopped=true;cancelAnimationFrame(frameId);clearTimeout(timer);target?.classList.remove("lux-highlight");ray?.remove();restorePanel();};
   },[focusRequest,page]);
   const luxFocus=(target:Target,plan?:Plan)=>{
     if(!eventId||denied||create) return;
