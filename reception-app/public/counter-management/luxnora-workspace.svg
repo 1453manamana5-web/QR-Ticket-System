@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 136">
+<defs>
+  <linearGradient id="cyan" x1="8%" y1="96%" x2="86%" y2="0%">
+    <stop stop-color="#72e2fb"/><stop offset=".31" stop-color="#3bb7ec"/><stop offset=".69" stop-color="#7c9ee9"/><stop offset="1" stop-color="#a5b0f6"/>
+  </linearGradient>
+  <linearGradient id="violet" x1="4%" y1="95%" x2="93%" y2="3%">
+    <stop stop-color="#74c9f2"/><stop offset=".38" stop-color="#8d9ae8"/><stop offset=".76" stop-color="#b390e5"/><stop offset="1" stop-color="#d6b3f5"/>
+  </linearGradient>
+  <linearGradient id="face" x1="0%" y1="100%" x2="100%" y2="0%">
+    <stop stop-color="#5ac9f0" stop-opacity=".26"/><stop offset=".52" stop-color="#f6faff" stop-opacity=".16"/><stop offset="1" stop-color="#9b8ee9" stop-opacity=".12"/>
+  </linearGradient>
+  <linearGradient id="shine" x1="0%" y1="100%" x2="100%" y2="0%">
+    <stop stop-color="#fff" stop-opacity=".85"/><stop offset=".37" stop-color="#fff" stop-opacity=".13"/><stop offset=".67" stop-color="#fff" stop-opacity=".28"/><stop offset="1" stop-color="#fff" stop-opacity=".9"/>
+  </linearGradient>
+  <filter id="soft" x="-.25" y="-.25" width="1.5" height="1.5"><feGaussianBlur stdDeviation="2.2"/></filter>
+  <path id="frontPath" d="M27 56 87 41Q100 38 98 51L90 99Q89 108 79 111L20 125Q8 128 10 115L17 69Q19 59 27 56Z"/>
+  <path id="rearPath" d="M75 34 139 16Q151 13 149 26L140 74Q138 84 128 87L65 104Q54 107 56 94L65 47Q66 37 75 34Z"/>
+  <g id="front">
+    <use href="#frontPath" fill="none" stroke="#72c9f4" opacity=".23" stroke-width="15" filter="url(#soft)"/>
+    <use href="#frontPath" fill="url(#face)" stroke="#75a8da" stroke-opacity=".55" stroke-width="12" transform="translate(0 1.5)"/>
+    <use href="#frontPath" fill="url(#face)" stroke="url(#cyan)" stroke-width="11" stroke-linejoin="round"/>
+    <use href="#frontPath" fill="none" stroke="url(#shine)" stroke-width="2.5"/>
+  </g>
+  <g id="rear">
+    <use href="#rearPath" fill="none" stroke="#b7a0ed" opacity=".25" stroke-width="15" filter="url(#soft)"/>
+    <use href="#rearPath" fill="url(#face)" stroke="#8b8dcd" stroke-opacity=".48" stroke-width="12" transform="translate(0 1.5)"/>
+    <use href="#rearPath" fill="url(#face)" stroke="url(#violet)" stroke-width="11" stroke-linejoin="round"/>
+    <use href="#rearPath" fill="none" stroke="url(#shine)" stroke-width="2.5"/>
+  </g>
+</defs>
+<style>
+  svg>g{display:none}svg>g:target{display:inline}svg:not(:has(>g:target))>#idle{display:inline}
+  .plane{transform-box:fill-box;transform-origin:center}
+  #ignition .trace{stroke-dasharray:330;animation:edge .48s cubic-bezier(.22,.75,.23,1) both}
+  #ignition .trace.r{animation-delay:.065s}
+  #ignition .plane{animation:join .58s ease-out both}
+  #living .plane.f{animation:floatFront 3.2s ease-in-out infinite alternate}
+  #living .plane.r{animation:floatRear 3.2s ease-in-out infinite alternate}
+  #checking .plane.r,#forecast .plane.r{animation:expand 1.6s ease-in-out infinite alternate}
+  #verified .plane{animation:finish .25s ease-out both}
+  @keyframes edge{from{stroke-dashoffset:330;opacity:.25}to{stroke-dashoffset:0;opacity:1}}
+  @keyframes join{0%,42%{opacity:0;transform:translate(-6px,5px) skewX(7deg)}100%{opacity:1;transform:none}}
+  @keyframes floatFront{to{transform:translate(-2px,1px) skewX(-3deg)}}
+  @keyframes floatRear{to{transform:translate(2px,-1px) skewX(3deg)}}
+  @keyframes expand{to{transform:translate(7px,-4px) skewY(-5deg)}}
+  @keyframes finish{from{transform:translate(3px,-2px) skewX(4deg)}to{transform:none}}
+  @media(prefers-reduced-motion:reduce){svg *{animation:none!important}}
+</style>
+<g id="idle"><use href="#front"/><use href="#rear"/></g>
+<g id="ignition"><use class="trace f" href="#frontPath" fill="none" stroke="url(#cyan)" stroke-width="3" pathLength="330"/><use class="trace r" href="#rearPath" fill="none" stroke="url(#violet)" stroke-width="3" pathLength="330"/><g class="plane"><use href="#front"/><use href="#rear"/></g></g>
+<g id="living"><use class="plane f" href="#front"/><use class="plane r" href="#rear"/></g>
+<g id="checking"><use href="#front"/><use class="plane r" href="#rear"/></g>
+<g id="forecast"><use href="#front"/><use class="plane r" href="#rear"/></g>
+<g id="verified"><g class="plane"><use href="#front"/><use href="#rear"/></g></g>
+</svg>
