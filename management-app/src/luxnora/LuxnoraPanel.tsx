@@ -4,6 +4,7 @@ import {interpret,type Plan} from "./language";
 
 export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(target:Target,plan?:Plan)=>void;cancel:()=>void}) {
   const [open,setOpen]=useState(false),[input,setInput]=useState("");
+  const isOpen=useRef(false);
   const [motion,setMotion]=useState("idle");
   const [mounted,setMounted]=useState(false);
   const closeTimer=useRef<number|undefined>(undefined);
@@ -16,6 +17,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
   }
   function changeOpen(next:boolean) {
     clearTimeout(closeTimer.current);
+    isOpen.current=next;
     setOpen(next);
     changeMotion(next?"ignition":"verified",next?"living":"idle",next?580:250);
     if(next) {setMounted(true);requestAnimationFrame(()=>prompt.current?.focus());}
@@ -63,7 +65,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
       if(intent) plan={plans:[{intent,focus:false,readOnly:true,role:text.includes("入口")?"in":text.includes("出口")?"out":undefined}]};
       inFlight.current=false;
       setWorking(false);
-      setMotion(open?"living":"idle");
+      if(isOpen.current) setMotion("living");
     }
     const response=plan.plans.map(item=>answer(item,evidence));
     if(plan.reset) {previous.current=undefined;cancel();setOffered(null);setMonitor(null);}
@@ -74,7 +76,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     setInput("");
     const item=response.find(result=>result.target);
     if(item?.target) focus(item.target,item.plan);
-    if(open&&response.some(item=>item.target==="graph")&&evidence.prediction.length>0) changeMotion("forecast","living",1800);
+    if(isOpen.current&&response.some(item=>item.target==="graph")&&evidence.prediction.length>0) changeMotion("forecast","living",1800);
   }
   const last=notes.at(-1);
   const detailed=last?.response.some(row=>row.target==="compare"||row.target==="graph"||row.text.length>150);
@@ -98,8 +100,8 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     </section>}
     <button ref={trigger} className="lux-trigger" aria-label="Luxnora" aria-expanded={open} aria-controls="lux-panel" onClick={()=>changeOpen(!open)}>
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"counter-management/luxnora-frame.svg#idle"}/>
-        <img className="lux-mark" alt="" width="43" height="37" src={import.meta.env.BASE_URL+"counter-management/luxnora-frame.svg#"+motion}/>
+        <source media="(prefers-reduced-motion: reduce)" srcSet={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#idle"}/>
+        <img className="lux-mark" alt="" width="43" height="37" src={import.meta.env.BASE_URL+"counter-management/luxnora-workspace.svg#"+motion}/>
       </picture>
     </button>
   </aside>;
