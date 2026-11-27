@@ -8,7 +8,7 @@
     "shared"
   ],
   "scripts": {
-    "test:people-counter": "node --test people-counter.test.mjs people-counter-storage.test.mjs people-counter-app.test.mjs people-counter-ledger.test.mjs people-counter-overlap.test.mjs adaptive-environment.test.mjs adaptive-calibration.test.mjs adaptive-ui.test.mjs counter-management.test.mjs counter-lifecycle.test.mjs counter-station-command.test.mjs counter-restore.test.mjs counter-comparison.test.mjs luxnora.test.mjs",
+    "test:people-counter": "node --test people-counter.test.mjs people-counter-storage.test.mjs people-counter-app.test.mjs people-counter-ledger.test.mjs people-counter-overlap.test.mjs adaptive-environment.test.mjs adaptive-calibration.test.mjs adaptive-ui.test.mjs counter-management.test.mjs counter-lifecycle.test.mjs counter-station-command.test.mjs counter-restore.test.mjs counter-comparison.test.mjs luxnora.test.mjs luxnora-evaluation.test.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "build": "npm run build --workspace management-app && npm run build --workspace reception-app",
     "test:rules": "firebase emulators:exec --project qr-ticket-rules-test --only firestore \"node --test --test-concurrency=1 firestore.rules.test.mjs event-reception.flow.test.mjs stress-destruction.test.mjs security-rules.attack.test.mjs\"",

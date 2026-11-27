@@ -9,7 +9,7 @@ type StationStatus = "pending" | "approved" | "rejected" | "revoked";
 type Operation = {id: string; eventId: string; mode: string; synced?: boolean};
 type Station = {name: string; device: string; role: Role; status: StationStatus; updatedAt?: Timestamp; pairingIssuedAt?: Timestamp};
 type EventConfig = {opened: number | null; closed: number | null; paused: boolean; verified: boolean; version: number | null};
-type Heartbeat = {version: "14" | "15" | "16"; camera: boolean; ai: boolean; profile: "baseline" | "detail" | "lighting" | "unknown";
+type Heartbeat = {version: "14" | "15" | "16" | "17"; camera: boolean; ai: boolean; profile: "baseline" | "detail" | "lighting" | "unknown";
   pending: number; alert: "none" | "paused" | "setup" | "recalibrate" | "camera" | "storage" | "network"; mode: Mode};
 type Cursor = {seconds: number; nanoseconds: number; id: string};
 

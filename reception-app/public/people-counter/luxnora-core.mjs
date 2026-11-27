@@ -5,6 +5,12 @@ export const signals = Object.freeze({
 export function recoveryDecision({verified,visible,tracking,attempts,enabled}) {
   return Boolean(verified && visible && tracking===0 && attempts===0 && enabled);
 }
+export function recoveryBudget(attempts,now,verifiedAt) {
+  const recent=attempts.filter(at=>now-at>=0&&now-at<3600000);
+  const ready=recent.length===0||(recent.length<2&&verifiedAt!==null&&
+    verifiedAt>=recent.at(-1)&&now-verifiedAt>=600000);
+  return {recent,ready};
+}
 export function appendActivity(history,item) {
   if (!Object.hasOwnProperty.call(signals,item.reason) ||
       !["checking","recovering","verified","failed","continued"].includes(item.state) ||

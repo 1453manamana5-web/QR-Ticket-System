@@ -168,3 +168,7 @@ summary{cursor:pointer;padding:9px 0;min-height:38px;font-weight:640;font-size:1
 @media print{.lux-dock{display:none}}
 .lux-activity{max-height:5rem;overflow:auto;background:#f3f5fb;padding:4px 8px;font-size:.82rem}
 .lux-activity p{margin:.25rem 0}
+.lux-trigger{display:inline-flex;align-items:center;gap:7px;padding-inline:10px 13px}
+.lux-mark{display:block;flex:none;object-fit:contain}
+.lux-focus-ray{pointer-events:none;position:fixed;z-index:9;height:2px;transform-origin:left;transform:rotate(var(--ray-angle)) scaleX(0);background:linear-gradient(90deg,#7cdcf000,#7cdcf0,#7366de);box-shadow:0 0 7px #8e79ff8c;animation:lux-trace .8s ease-out both}
+@keyframes lux-trace{0%{opacity:0;transform:rotate(var(--ray-angle)) scaleX(0)}35%{opacity:1;transform:rotate(var(--ray-angle)) scaleX(1)}100%{opacity:0;transform:rotate(var(--ray-angle)) scaleX(1)}}

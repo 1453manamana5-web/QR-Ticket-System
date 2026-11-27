@@ -1,5 +1,5 @@
-import {EnvironmentMonitor} from './adaptive-environment.mjs?v=16';
-import {createCalibration, restoreProfileState, updateProfileState, chooseRuntimeProfile} from './adaptive-calibration.mjs?v=16';
+import {EnvironmentMonitor} from './adaptive-environment.mjs?v=17';
+import {createCalibration, restoreProfileState, updateProfileState, chooseRuntimeProfile} from './adaptive-calibration.mjs?v=17';
 
 const $ = id => document.getElementById(id);
 const monitor = new EnvironmentMonitor();

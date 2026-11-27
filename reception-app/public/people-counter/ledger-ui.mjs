@@ -1,7 +1,7 @@
 import {analyze, csv, estimateClock, uploadPending} from './ledger.mjs';
-import {initialConnection,observeConnection} from './connection.mjs?v=16';
-import {sameStationScope,stationResults} from './station-command.mjs?v=16';
-import {createVisionPipeline} from './vision.mjs?v=16';
+import {initialConnection,observeConnection} from './connection.mjs?v=17';
+import {sameStationScope,stationResults} from './station-command.mjs?v=17';
+import {createVisionPipeline} from './vision.mjs?v=17';
 
 const $ = id => document.getElementById(id);
 const setupKey = 'counter-ledger-settings-v1';
@@ -93,7 +93,7 @@ function renderStation() {
   $('counterRemoteControl').textContent = captureBlockReason() || (control ? '管理画面の集計期間を使用しています。' : '');
 }
 async function remoteApi() {
-  return remoteModule ??= await import('./counter-sync.js?v=16&try=' + remoteAttempts++);
+  return remoteModule ??= await import('./counter-sync.js?v=17&try=' + remoteAttempts++);
 }
 function storeControl(config, next) {
   if (settings !== config || (!next && (control?.paused || control?.closed != null))) return;
@@ -186,7 +186,7 @@ function checkStation(config, remote) {
       lastHeartbeat = now;
       const state = window.counterStationCamera?.() ?? {};
       const metrics = {
-        version:'16', camera:state.camera === true, ai:state.ai === true,
+        version:'17', camera:state.camera === true, ai:state.ai === true,
         profile:['baseline','detail','lighting'].includes(state.profile) ? state.profile : 'unknown',
         pending:Math.min(activePending,1000000), mode:config.mode, configVersion:control?.version ?? null,
         ...(state.activity||state.fps!=null||state.inferenceMs!=null ? {lux:{
@@ -601,7 +601,7 @@ async function offlineLabel() {
   if (navigator.serviceWorker?.controller?.scriptURL.endsWith('/counter-offline.js') && load(preparedKey)) {
     try {
       const requests = await (await caches.open('counter-model-assets-v1')).keys();
-      ready = (await caches.keys()).includes('counter-v16') &&
+      ready = (await caches.keys()).includes('counter-v17') &&
         requests.some(r => r.url.endsWith('/efficientdet_lite0.tflite')) &&
         requests.some(r => r.url.endsWith('/quant2/075/model-stride16.json'));
     } catch {}

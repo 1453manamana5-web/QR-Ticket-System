@@ -80,3 +80,6 @@ footer{font-size:11px;text-align:center;color:#8997a6;margin-top:29px}
 #luxStationState[data-state="failed"]{color:#a23c32}
 @keyframes lux-station-recovery{from{text-shadow:none}to{text-shadow:0 0 8px #7a90cf}}
 @media(prefers-reduced-motion:reduce){#luxStationState{animation:none!important}}
+.lux-station-heading{display:flex;align-items:center;gap:.55rem}
+.lux-station-heading p{margin:.35rem 0}
+.lux-station-heading img{display:block;flex:none}

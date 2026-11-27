@@ -1,3 +1,4 @@
+import {previousOperation} from "./luxnora/adapt";
 import type {Plan} from "./luxnora/language";
 import {LuxnoraPanel} from "./luxnora/LuxnoraPanel";
 import {diagnose,type Target} from "./luxnora/assistant";
@@ -211,12 +212,27 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
   const [focusRequest,setFocusRequest]=useState<{target:Target;stamp:number;plan?:Plan}|null>(null);
   useEffect(()=>{
     if(!focusRequest) return;
-    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+focusRequest.target+'"]');
+    const targetId=focusRequest.target==="graph"&&focusRequest.plan?.period!==undefined?"range":focusRequest.target;
+    const target=document.querySelector<HTMLElement>('[data-lux-focus="'+targetId+'"]');
     if(!target) return;
     target.classList.add("lux-highlight");
     target.scrollIntoView({block:"center",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
-    const timer=setTimeout(()=>target.classList.remove("lux-highlight"),2400);
-    return ()=>{clearTimeout(timer);target.classList.remove("lux-highlight");};
+    const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const trigger=document.querySelector(".lux-trigger");
+    const ray=!reduced&&trigger?document.createElement("span"):null;
+    if(ray&&trigger) {
+      const origin=trigger.getBoundingClientRect(), destination=target.getBoundingClientRect();
+      const x=origin.left+origin.width/2,y=origin.top+origin.height/2;
+      const dx=Math.min(innerWidth-8,Math.max(8,destination.right))-x;
+      const dy=Math.min(innerHeight-8,Math.max(8,destination.top+16))-y;
+      ray.className="lux-focus-ray";
+      ray.style.setProperty("--ray-angle",Math.atan2(dy,dx)+"rad");
+      Object.assign(ray.style,{left:x+"px",top:y+"px",width:Math.hypot(dx,dy)+"px"});
+      ray.setAttribute("aria-hidden","true");
+      document.body.append(ray);
+    }
+    const timer=setTimeout(()=>{target.classList.remove("lux-highlight");ray?.remove();},2400);
+    return ()=>{clearTimeout(timer);target.classList.remove("lux-highlight");ray?.remove();};
   },[focusRequest,page]);
   const luxFocus=(target:Target,plan?:Plan)=>{
     if(!eventId||denied||create) return;
@@ -261,13 +277,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
       return false;
     } finally {creating.current=false;setCreateBusy(false);}
   }
-  const eventSuggestions:LuxnoraEventProvider=async draft=>{
-    const last=day??catalog?.days.filter(item=>item.finalized!=null).sort((a,b)=>b.date.localeCompare(a.date))[0];
-    const previous=catalog?.series.find(item=>item.id===last?.eventId);
-    if(!last||!previous) return null;
-    return {...(!draft.name.trim()?{name:previous.name}:{}),...(!draft.venue.trim()?{venue:previous.venue}:{}),
-      ...(draft.days[0]?.start!==last.start?{start:last.start}:{}),...(draft.days[0]?.end!==last.end?{end:last.end}:{})};
-  };
+  const eventSuggestions:LuxnoraEventProvider=async draft=>previousOperation(catalog,draft);
   const pendingRequests = stations.filter(row => row.status === "pending").length;
   const updating = Object.values(data ?? initialData()).some(part => part.source === "pending");
   const status = denied ? "権限を再確認中" : ready ? "接続済み" : updating ? "同期を確認中" : "現在の同期を確認できません";
@@ -325,6 +335,7 @@ function Dashboard({manager,authReady,recheck,lock,suggest}: {manager:CounterMan
           {(page === "home" || page === "analysis") && <Home day={day??undefined} navigate={navigate} detailed={page==="analysis"} analysis={analysis} config={config} stations={stations} mode={mode} now={now}
             lastUpdate={lastUpdate} prediction={prediction} current={current} waiting={updating} />}
           {page==="analysis"&&analysis&&operations&&config?.opened!=null&&<CounterAnalysisTools key={scope}
+            luxPeriod={focusRequest?.target==="graph"?focusRequest.plan?.period:undefined} luxStamp={focusRequest?.stamp}
             report={analysis} rows={operations} from={config.opened} to={config.closed??now} mode={mode} scope={eventId}
             name={eventName} venue={series?.venue} current={ready&&!invalidRows&&stationsCurrent&&pending===0}/>}
           {page==="analysis"&&catalog&&<div data-lux-focus="compare"><CounterComparison key={day?.eventId??"catalog"} catalog={catalog} initialSeriesId={day?.eventId} initialView={focusRequest?.target==="compare"?"year":undefined}/></div>}
