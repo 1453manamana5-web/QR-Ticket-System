@@ -42,6 +42,15 @@ function GlassMark({motion,className}:{motion:string;className?:string}) {
 }
 
 
+const profiles=[
+  {id:"auto",name:"Luxnora Auto",description:"通常の理解処理と意味認識AIを自動で使い分ける"},
+  {id:"swift",name:"Luxnora Swift",description:"軽量な理解処理だけで素早く応答する"},
+] as const;
+type Profile=typeof profiles[number]["id"];
+function savedProfile():Profile {
+  try {return localStorage.getItem("counter-lux-profile")==="swift"?"swift":"auto";}catch{return "auto";}
+}
+
 export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(target:Target,plan?:Plan)=>void;cancel:()=>void}) {
   const [open,setOpen]=useState(false),[input,setInput]=useState("");
   const isOpen=useRef(false);
@@ -59,6 +68,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     clearTimeout(closeTimer.current);
     isOpen.current=next;
     setOpen(next);
+    setPicker(false);
     changeMotion(next?"ignition":"convergence",next?"living":"idle",next?740:540);
     if(next) {setMounted(true);if(!window.matchMedia("(pointer: coarse)").matches) requestAnimationFrame(()=>prompt.current?.focus({preventScroll:true}));}
     else {
@@ -68,9 +78,15 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     }
   }
   const [notes,setNotes]=useState<{prompt:string;response:Answer[]}[]>([]);
-  const [setting,setSetting]=useState(()=>{
-    try {return localStorage.getItem("counter-lux-support")??"smart";}catch{return "smart";}
-  }),[working,setWorking]=useState(false);
+  const [profile,setProfile]=useState<Profile>(savedProfile);
+  const [picker,setPicker]=useState(false),[working,setWorking]=useState(false);
+  const pickerButton=useRef<HTMLButtonElement>(null);
+  function selectProfile(value:Profile){
+    if(inFlight.current)return;
+    setProfile(value);setPicker(false);
+    try{localStorage.setItem("counter-lux-profile",value);}catch{}
+    pickerButton.current?.focus();
+  }
   const [monitor,setMonitor]=useState<{role?:Plan["role"];until:number}|null>(null);
   const [offered,setOffered]=useState<Plan|null>(null);
   const [activity,setActivity]=useState<string[]>([]);
@@ -95,8 +111,9 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
   async function run(value:string) {
     const text=value.trim();
     if(!text||inFlight.current) return;
+    setPicker(false);
     let plan=interpret(text,previous.current);
-    if(!plan.plans.length&&!plan.reset&&plan.message?.startsWith("依頼の対象")) {
+    if(profile==="auto"&&!plan.plans.length&&!plan.reset&&plan.message?.startsWith("依頼の対象")) {
       inFlight.current=true;
       setWorking(true);
       clearTimeout(motionTimer.current);
@@ -125,10 +142,18 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
   return <aside className="lux-dock" data-open={open} data-mounted={mounted} data-stage={stage} data-motion={motion} data-has-answer={notes.length>0||working} aria-label="Luxnora">
     {mounted&&<div className="lux-screen-aura" aria-hidden="true" data-closing={!open}><div className="lux-aura-blue"/><div className="lux-aura-violet"/></div>}
     {mounted&&<section id="lux-panel" className="lux-panel" data-closing={!open} inert={!open} aria-label="Luxnoraとの会話" onKeyDown={e=>{
-      if(e.key==="Escape"){e.stopPropagation();changeOpen(false);}
+      if(e.key==="Escape"){e.stopPropagation();if(picker){setPicker(false);pickerButton.current?.focus();}else changeOpen(false);}
     }}>
-      <header><span className="lux-panel-brand"><span className="lux-header-mark"><GlassMark motion={motion}/></span><strong>Luxnora</strong></span><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      {!notes.length&&!working&&<div className="lux-welcome">
+      <header><span className="lux-panel-brand"><span className="lux-header-mark"><GlassMark motion={motion}/></span><button ref={pickerButton} type="button" className="lux-profile-trigger" aria-label={"モデル選択："+profiles.find(item=>item.id===profile)?.name} aria-expanded={picker} aria-controls={picker?"lux-profile-menu":undefined} disabled={working} onClick={()=>setPicker(value=>!value)}><span>{profiles.find(item=>item.id===profile)?.name}</span><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></span><button className="lux-close" onClick={()=>changeOpen(false)} aria-label="会話を閉じる"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      {picker&&<div id="lux-profile-menu" className="lux-profile-menu" role="group" aria-label="モデル・動作モード">
+        <p>モデル・動作モード</p>
+        {profiles.map(item=><button key={item.id} type="button" aria-pressed={profile===item.id} onClick={()=>selectProfile(item.id)} disabled={working}>
+          <span><strong>{item.name}</strong><small>{item.description}</small></span>
+          {profile===item.id&&<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 4 4 10-10"/></svg>}
+        </button>)}
+        <small>現在は同じLuxnora基盤の処理モードです。</small>
+      </div>}
+      {!notes.length&&!working&&!picker&&<div className="lux-welcome">
         <small>{evidence.name||"イベント管理"}</small>
         <h2>何をしましょうか？</h2>
         <div className="lux-suggestions">
@@ -140,9 +165,8 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
         {notes.map((note,i)=><div className="lux-turn" key={i}><p className="lux-question">{note.prompt}</p>{note.response.map((item,index)=><p className="lux-response" key={index}>{item.text}{item.target&&note.response.length>1&&<button type="button" className="cm-text-action" onClick={()=>focus(item.target!,item.plan)}>該当箇所を表示</button>}</p>)}</div>)}
       </div>
 
-      <details className="lux-support"><summary>支援設定</summary><label className="lux-setting">支援 <select value={setting} onChange={e=>{setSetting(e.target.value);try {localStorage.setItem("counter-lux-support",e.target.value);}catch{}}}><option value="onRequest">指示したときのみ</option><option value="smart">スマートサポート</option><option value="active">積極的なサポート</option></select></label></details>
-      {setting!=="onRequest"&&evidence.config?.opened!=null&&!evidence.current&&<small>端末の通信状態または未同期記録を確認してください。</small>}
-      {setting==="active"&&!!evidence.analysis?.issues.length&&<small>整合性の指摘 {evidence.analysis.issues.length}件を通過記録と照合できます。</small>}
+      {evidence.config?.opened!=null&&!evidence.current&&<small>端末の通信状態または未同期記録を確認してください。</small>}
+      {!!evidence.analysis?.issues.length&&<small>整合性の指摘 {evidence.analysis.issues.length}件を通過記録と照合できます。</small>}
       {offered&&<button onClick={()=>{monitorSnapshot.current="";setActivity([]);setMonitor({role:offered.role,until:Date.now()+15*60000});setOffered(null);}}>15分間の見守りを開始</button>}
       {monitor&&<button onClick={()=>{setMonitor(null);setActivity(rows=>[...rows.slice(-5),"見守りを終了しました。"]);}}>見守りを終了</button>}
       {!!activity.length&&<div className="lux-activity" aria-live="polite">{activity.map((text,i)=><p key={i}>{text}</p>)}</div>}

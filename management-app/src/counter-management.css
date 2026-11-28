@@ -656,3 +656,36 @@ summary{cursor:pointer;padding:9px 0;min-height:38px;font-weight:640;font-size:1
   @media(max-width:700px){.lux-welcome h2{font-size:21px;margin-bottom:8px}.lux-panel .lux-suggestions button{min-height:40px}}
   @media(prefers-reduced-motion:reduce){.lux-mark-trace{animation:none!important;transition:none!important;opacity:0!important}}
 }
+
+/* Model picker: integrated in the smoked-glass header, no extra settings row. */
+@media screen {
+  .lux-panel-brand{min-width:0}
+  .lux-panel header .lux-profile-trigger{
+    display:flex;align-items:center;gap:8px;min-width:0;min-height:44px;
+    padding:0 7px 0 0;border:0;border-radius:9px;background:transparent;color:#f0f1f7;
+    font-size:16px;font-weight:500;letter-spacing:-.02em;box-shadow:none;text-align:left
+  }
+  .lux-panel header .lux-profile-trigger span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lux-panel header .lux-profile-trigger svg{flex:none;color:#a9afbd;transition:transform .22s ease}
+  .lux-panel header .lux-profile-trigger[aria-expanded="true"] svg{transform:rotate(180deg)}
+  .lux-panel header .lux-profile-trigger:hover:not(:disabled){background:transparent;color:#fff}
+  .lux-profile-menu{
+    position:relative;z-index:2;flex:0 1 auto;min-height:0;overflow:auto;
+    padding:6px;background:#ffffff09;border:1px solid #ffffff19;border-radius:14px;
+    box-shadow:inset 0 1px 0 #ffffff09
+  }
+  .lux-profile-menu>p{margin:8px 10px 6px;color:#aab1c0;font-size:11px}
+  .lux-panel .lux-profile-menu button{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
+    text-align:left;color:#eef0f5;background:transparent;border:0;border-radius:10px;
+    padding:10px;min-height:52px;box-shadow:none
+  }
+  .lux-panel .lux-profile-menu button[aria-pressed="true"],
+  .lux-panel .lux-profile-menu button:hover:not(:disabled){background:#ffffff0d}
+  .lux-profile-menu button span{display:grid;gap:4px;min-width:0}
+  .lux-profile-menu button strong{font-size:14px;font-weight:500;color:#f0f2f8}
+  .lux-profile-menu button small{font-size:11px;line-height:1.5;color:#b9bfcb}
+  .lux-profile-menu button svg{color:#b6c8ff;flex:none}
+  .lux-profile-menu>small{display:block;margin:8px 10px 6px;color:#aeb5c3;font-size:10px;line-height:1.5}
+  @media(prefers-reduced-motion:reduce){.lux-panel header .lux-profile-trigger svg{transition:none}}
+}
