@@ -11,7 +11,7 @@ function GlassMark({motion,className}:{motion:string;className?:string}) {
   useEffect(()=>{
     const media=window.matchMedia("(prefers-reduced-motion: reduce)");
     let frame=0,last=performance.now();
-    const goal=motion==="idle"||motion==="convergence"?0:motion==="checking"?1:motion==="forecast"?.75:motion==="ignition"?.62:.30;
+    const goal=motion==="idle"||motion==="convergence" ? 0 : motion==="checking" ? 1 : motion==="forecast" ? .75 : motion==="ignition" ? .62 : .30;
     function paint(now:number){
       const dt=Math.min(.05,Math.max(0,(now-last)/1000));last=now;
       if(media.matches||document.hidden){energy.current=0; a.current?.removeAttribute("transform");b.current?.removeAttribute("transform");return;}
@@ -85,7 +85,7 @@ export function LuxnoraPanel({evidence,focus,cancel}:{evidence:Evidence;focus:(t
     setActivity(rows=>[...rows.slice(-3),...(alarms.length?alarms:["取得済みの端末に新たな注意はありません。"])].slice(-6));
   },[evidence,monitor]);
   const replies=useRef<HTMLDivElement>(null);
-  useEffect(()=>{if(replies.current) replies.current.scrollTop=replies.current.scrollHeight;},[notes]);
+  useEffect(()=>{if(replies.current) replies.current.scrollTop=replies.current.scrollHeight;},[notes,mounted,working]);
   const inFlight=useRef(false),active=useRef(true);
   useEffect(()=>{active.current=true;return ()=>{active.current=false;};},[]);
   const previous=useRef<Plan|undefined>(undefined);
